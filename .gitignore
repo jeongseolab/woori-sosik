@@ -8,3 +8,7 @@ memo.db
 __pycache__/
 *.pyc
 .venv/
+
+# 에이전트 도구 찌꺼기
+.omc/
+.playwright-mcp/
