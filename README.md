@@ -12,8 +12,9 @@ GitHub Pages 는 파일을 그대로 내려주기만 하고 파이썬을 실행�
 
 ## 올리는 법 (Render, 무료)
 
-1. 이 폴더를 GitHub 저장소에 올린다.
-2. <https://render.com> 가입 → **New** → **Web Service** → 그 저장소 고르기.
+1. 저장소는 이미 올라가 있다 → <https://github.com/jeongseolab/woori-sosik>
+2. <https://render.com> 가입(**Sign in with GitHub** 를 쓰면 편하다) →
+   **New** → **Web Service** → `woori-sosik` 고르기.
 3. `render.yaml` 이 있으니 설정은 자동으로 잡힌다. 확인만 한다.
    - Build: `pip install -r requirements.txt`
    - Start: `uvicorn main:app --host 0.0.0.0 --port $PORT`
