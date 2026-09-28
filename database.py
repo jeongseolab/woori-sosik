@@ -43,8 +43,10 @@ def _to_pg_types(sql: str) -> str:
 class _Cursor:
     """SQLite 커서처럼 보이게 감싼 것. execute 가 자기 자신을 돌려준다."""
 
-    def __init__(self, cursor):
+    def __init__(self, cursor, last_id=None):
         self._c = cursor
+        # psycopg 커서에는 값을 붙일 수 없어서(__slots__) 여기에 들고 있는다
+        self._last_id = last_id
 
     def fetchone(self):
         return self._c.fetchone()
@@ -58,7 +60,7 @@ class _Cursor:
     @property
     def lastrowid(self):
         # Postgres 는 lastrowid 가 없어서 RETURNING id 로 받아 둔 값을 쓴다
-        return getattr(self._c, "_last_id", None)
+        return self._last_id
 
     @property
     def rowcount(self):
@@ -87,11 +89,14 @@ class _PgConn:
 
         cur.execute(sql, params)
 
+        last_id = None
         if wants_id:
             row = cur.fetchone()
-            cur._last_id = row["id"] if row else None
+            if row is not None:
+                # dict_row 라 이름으로 꺼내지만, 혹시 튜플이면 첫 칸을 쓴다
+                last_id = row["id"] if isinstance(row, dict) else row[0]
 
-        return _Cursor(cur)
+        return _Cursor(cur, last_id)
 
     def commit(self):
         self._conn.commit()

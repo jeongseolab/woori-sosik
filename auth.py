@@ -41,9 +41,14 @@ def create_user(username: str, password: str, is_admin: bool = False):
         )
         conn.commit()
         return cursor.lastrowid
-    except Exception:
-        # UNIQUE 걸림 = 이미 쓰는 이름
-        return None
+    except Exception as e:
+        # 이름이 겹친 것(UNIQUE)만 조용히 None 을 준다.
+        # 그 밖의 고장은 삼키면 "이미 쓰는 아이디" 로 잘못 보이므로 다시 던진다.
+        # (예전에 이걸 다 삼켜서, DB 가 고장 난 걸 아이디 중복으로 착각했다)
+        text = (str(e) + type(e).__name__).lower()
+        if "unique" in text or "duplicate" in text:
+            return None
+        raise
     finally:
         conn.close()
 
