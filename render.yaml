@@ -12,10 +12,8 @@ services:
       # 관리자 비밀번호. Render 대시보드에서 직접 넣는다(파일에 적지 않는다)
       - key: MEMO_ADMIN_KEY
         sync: false
-      # 안 지워지는 칸에 memo.db 를 둔다. 이게 없으면 재시작할 때마다 글이 날아간다
-      - key: MEMO_DB_PATH
-        value: /var/data/memo.db
-    disk:
-      name: memo-data
-      mountPath: /var/data
-      sizeGB: 1
+      # 글을 저장할 바깥 데이터베이스 주소(Neon 등).
+      # 무료 플랜은 디스크를 못 쓰고, 서버가 잠들었다 깨면 폴더가 초기화된다.
+      # 그래서 글은 서버 밖에 둔다. 이 값이 비어 있으면 그냥 memo.db 를 쓴다
+      - key: DATABASE_URL
+        sync: false
