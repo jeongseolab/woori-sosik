@@ -1,0 +1,1102 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>우리 소식</title>
+  <style>
+    * { box-sizing: border-box; }
+
+    body {
+      font-family: system-ui, sans-serif;
+      margin: 0;
+      padding: 32px 16px 64px;
+      color: #2b2b2b;
+
+      /* 벽돌 벽. 한 세트(64x64)를 반복시켜 반 칸씩 엇갈린 모양을 만든다 */
+      background-color: #a85842;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64'%3E%3Cg stroke='%23f2d8c4' stroke-width='2'%3E%3Cpath d='M0 1h64M0 33h64M0 63h64'/%3E%3Cpath d='M32 1v32M0 33v30M64 33v30'/%3E%3C/g%3E%3C/svg%3E");
+      background-size: 64px 64px;
+      background-attachment: fixed;
+    }
+
+    .wrap { max-width: 900px; margin: 0 auto; }
+
+    .head {
+      position: relative;
+      background: #fffffff0;
+      border-radius: 8px;
+      padding: 14px 18px;
+      margin-bottom: 20px;
+    }
+    h1 { font-size: 22px; margin: 0 0 4px; }
+    .sub { color: #777; font-size: 13px; margin: 0; }
+
+    /* 글쓰기 */
+    .writer {
+      background: #fff;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 24px;
+      box-shadow: 0 2px 8px rgba(0,0,0,.15);
+    }
+    .writer input, .writer textarea {
+      width: 100%;
+      border: none;
+      border-bottom: 1px solid #eee;
+      padding: 8px 0;
+      font: inherit;
+      outline: none;
+      background: none;
+    }
+    .writer textarea { resize: none; height: 56px; border-bottom: none; }
+    .writer input:focus { border-bottom-color: #888; }
+    .writer button {
+      border: none;
+      background: #2b2b2b;
+      color: #fff;
+      padding: 8px 20px;
+      border-radius: 5px;
+      font: inherit;
+      cursor: pointer;
+      float: right;
+    }
+    .writer button:active { background: #555; }
+    .writer::after { content: ""; display: block; clear: both; }
+
+    /* 급식 — 벽에 비스듬히 붙인 종이 포스터 */
+    .meal {
+      background: #fffdf6;
+      padding: 18px 22px 20px;
+      margin: 0 auto 34px;
+      max-width: 620px;
+      font-size: 15px;
+      line-height: 1.65;
+      color: #23201c;
+      transform: rotate(-1deg);
+      box-shadow: 0 6px 18px rgba(0,0,0,.3);
+      position: relative;
+    }
+    .meal::before, .meal::after {
+      content: "";
+      position: absolute;
+      top: -10px;
+      width: 68px;
+      height: 22px;
+      background: #ffffff5c;
+      border: 1px solid #ffffff6b;
+      box-shadow: 0 1px 3px rgba(0,0,0,.18);
+    }
+    .meal::before { left: 14px;  transform: rotate(-6deg); }
+    .meal::after  { right: 14px; transform: rotate(5deg); }
+
+    .meal h2 {
+      font-size: 13px;
+      letter-spacing: .18em;
+      color: #a8452f;
+      margin: 0 0 12px;
+      font-weight: 700;
+      text-align: center;
+      padding-bottom: 10px;
+      border-bottom: 2px solid #e8d9c2;
+    }
+    .meal-row { margin-bottom: 8px; }
+    .meal-row:last-child { margin-bottom: 0; }
+    .meal-type {
+      display: inline-block;
+      background: #a8452f;
+      color: #fff;
+      font-size: 12px;
+      font-weight: 700;
+      padding: 2px 9px;
+      border-radius: 3px;
+      margin-right: 8px;
+      vertical-align: 1px;
+    }
+    .meal-none { color: #8a8073; }
+
+    /* 담벼락. 포스트잇 높이가 제각각이라 JS(layoutWall)가 좌표를 직접 계산한다 */
+    .wall { position: relative; }
+
+    .note {
+      position: absolute;
+      width: 180px;
+      min-height: 150px;
+      transition: left .25s ease, top .25s ease, box-shadow .15s;
+      padding: 14px;
+      border-radius: 2px;
+      box-shadow: 0 3px 8px rgba(0,0,0,.28);
+      display: flex;
+      flex-direction: column;
+      animation: pop .25s ease-out;
+    }
+    .note:hover {
+      box-shadow: 0 6px 16px rgba(0,0,0,.35);
+      z-index: 2;
+    }
+    @keyframes pop {
+      from { opacity: 0; transform: scale(.9); }
+      to   { opacity: 1; }
+    }
+
+    .note.peel { animation: peel .3s ease-in forwards; }
+    @keyframes peel {
+      to { opacity: 0; transform: translateY(24px) rotate(8deg); }
+    }
+
+    /* 제목과 본문을 같은 22px 줄공책 위에 올린다 */
+    .note h3 {
+      margin: 0;
+      font-size: 15px;
+      line-height: 22px;
+      word-break: break-word;
+      background-image: linear-gradient(transparent 21px, var(--line) 21px, var(--line) 22px);
+      background-size: 100% 22px;
+    }
+    .note p {
+      margin: 0;
+      font-size: 13px;
+      line-height: 22px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      min-height: 66px;
+      background-image: linear-gradient(transparent 21px, var(--line) 21px, var(--line) 22px);
+      background-size: 100% 22px;
+    }
+    .note .foot {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: auto;
+      padding-top: 10px;
+      font-size: 12px;
+      color: #666;
+    }
+    .note .foot button {
+      border: none;
+      background: rgba(0,0,0,.06);
+      border-radius: 4px;
+      padding: 3px 8px;
+      font: inherit;
+      color: inherit;
+      cursor: pointer;
+    }
+    .note .foot button:active { background: rgba(0,0,0,.15); }
+    .note .foot button.liked { background: #e8455a; color: #fff; }
+    .note .date { margin-left: auto; opacity: .55; }
+    .note .by { font-weight: 700; opacity: .7; margin-right: 6px; }
+
+    /* 위쪽 내 상태 */
+    .who {
+      position: absolute;
+      top: 12px; right: 16px;
+      display: flex; align-items: center; gap: 8px;
+      color: #333; font-size: 13px;
+    }
+    .who .nick { font-weight: 700; }
+    .who .nick.guest { opacity: .75; font-weight: 400; }
+    .who button {
+      border: 0; border-radius: 6px; cursor: pointer;
+      padding: 5px 10px; font-size: 12px;
+      background: #2d6cdf; color: #fff;
+    }
+    .who button:hover { background: #2559b8; }
+
+    /* 좁은 화면에서는 로그인 표시를 제목 아래로 내린다 */
+    @media (max-width: 480px) {
+      .who { position: static; margin-bottom: 8px; justify-content: flex-end; }
+    }
+
+    /* 로그인 창 */
+    .modal {
+      display: none;
+      position: fixed; inset: 0; z-index: 50;
+      background: rgba(0,0,0,.5);
+      align-items: center; justify-content: center;
+      padding: 16px;
+    }
+    .modal.open { display: flex; }
+    .modal .card {
+      background: #fff; border-radius: 12px;
+      padding: 24px; width: 300px; max-width: 100%;
+      box-shadow: 0 12px 40px rgba(0,0,0,.3);
+    }
+    .modal h2 { margin: 0 0 4px; font-size: 18px; }
+    .modal .hint { margin: 0 0 14px; font-size: 12px; color: #777; }
+    .modal input {
+      width: 100%;
+      padding: 10px; margin-bottom: 8px;
+      border: 1px solid #ddd; border-radius: 6px; font-size: 14px;
+    }
+    .modal .err {
+      display: none;
+      background: #fdecea; color: #b3261e;
+      padding: 8px 10px; border-radius: 6px;
+      font-size: 12px; margin-bottom: 8px;
+    }
+    .modal .err.show { display: block; }
+    .modal .row { display: flex; gap: 6px; margin-top: 6px; }
+    .modal .row button {
+      flex: 1; padding: 10px; border: 0; border-radius: 6px;
+      cursor: pointer; font-size: 13px; font-weight: 600;
+    }
+    .modal .primary { background: #2d6cdf; color: #fff; }
+    .modal .ghost { background: #eee; color: #444; }
+    .modal .guest {
+      width: 100%; margin-top: 10px; padding: 9px;
+      border: 0; background: none; color: #777;
+      font-size: 12px; cursor: pointer; text-decoration: underline;
+    }
+
+    .empty {
+      color: #fff;
+      font-size: 14px;
+      background: #00000038;
+      padding: 12px 16px;
+      border-radius: 6px;
+    }
+  </style>
+</head>
+<body>
+<div id="solonote" style="
+  max-width: 760px; margin: 12px auto 0; padding: 10px 14px;
+  background: #fff4d6; border: 1px solid #e8c46a; border-radius: 8px;
+  color: #6b4e00; font-size: 13px; line-height: 1.5;">
+  <b>혼자 쓰는 연습용입니다.</b>
+  이 쪽은 글이 <b>내 브라우저에만</b> 저장돼서 다른 사람에게 보이지 않아요.
+  같이 쓰는 담벼락은 서버 주소로 들어가세요.
+</div>
+<div class="wrap">
+
+  <div class="head">
+    <div class="who" id="who"></div>
+    <h1>우리 소식</h1>
+    <p class="sub">쓰면 바로 갱신되니 아무거나 적으세요(진짜 아무거나)</p>
+  </div>
+
+  <div class="meal">
+    <h2>오늘 급식</h2>
+    <div id="meal">불러오는 중...</div>
+  </div>
+
+  <div class="writer">
+    <input id="title" placeholder="제목" maxlength="20">
+    <textarea id="content" placeholder="내용"></textarea>
+    <button onclick="createMemo()">붙이기</button>
+  </div>
+
+  <div class="wall" id="wall"></div>
+
+</div>
+
+<div class="modal" id="loginbox">
+  <div class="card">
+    <h2>로그인</h2>
+    <p class="hint">계정은 이 브라우저에 저장됩니다.</p>
+    <div class="err" id="loginerr"></div>
+    <input id="lid" placeholder="아이디" autocomplete="username">
+    <input id="lpw" type="password" placeholder="비밀번호" autocomplete="current-password">
+    <div class="row">
+      <button class="primary" onclick="doLogin()">로그인</button>
+      <button class="ghost" onclick="doSignup()">가입하기</button>
+    </div>
+    <button class="guest" onclick="closeLogin()">게스트로 계속</button>
+  </div>
+</div>
+
+
+<script>
+// ══════════════════════════════════════════════════════════
+//  서버 대신
+//  GitHub Pages 는 파이썬(FastAPI)을 못 돌린다.
+//  그래서 main.py / auth.py / censor.py 가 하던 일을 여기로 옮기고,
+//  memo.db 대신 브라우저 저장소(localStorage)에 넣는다.
+//  → 글은 이 브라우저에만 남는다. 다른 사람과 공유되지 않는다.
+// ══════════════════════════════════════════════════════════
+
+// ── 저장소 (database.py 대신) ────────────────────────────
+const DB_KEY = "board.db";
+
+function loadDb() {
+  try {
+    const db = JSON.parse(localStorage.getItem(DB_KEY));
+    if (db && Array.isArray(db.memos)) return db;
+  } catch (e) {}
+  return { memos: [], users: [], sessions: {}, nextMemoId: 1, nextUserId: 1 };
+}
+
+// 저장이 막힌 브라우저에서는 창을 닫기 전까지만 기억한다
+let memoryDb = null;
+
+function getDb() {
+  return memoryDb || loadDb();
+}
+
+function saveDb(db) {
+  try {
+    localStorage.setItem(DB_KEY, JSON.stringify(db));
+    memoryDb = null;
+  } catch (e) {
+    memoryDb = db;
+  }
+}
+
+// 서버가 돌려주던 에러를 흉내 낸다
+class ApiError extends Error {
+  constructor(status, detail) {
+    super(detail);
+    this.status = status;
+  }
+}
+
+// ── 검열 (censor.py 그대로 옮김) ──────────────────────────
+// 단어만 비교하면 tlqkf(영타로 친 시발) 같은 건 그냥 통과하므로
+// 글을 여러 방식으로 "펴서" 각각 확인한다.
+
+const BLOCKED = [
+  "시발", "씨발", "씨팔", "시팔", "씨빨", "시바루", "씹할", "씨발놈", "씨발년",
+  "개시발", "존시발", "시발새끼", "썅", "썅년", "썅놈",
+  "병신", "빙신", "병싄", "등신새끼", "장애인새끼",
+  "좆", "좇", "존나", "졸라", "좆같", "좆만", "개좆",
+  "개새끼", "개색기", "개색끼", "새끼", "쌔끼", "썌끼", "잡새끼", "개자식",
+  "지랄", "짓랄", "지럴", "미친놈", "미친년", "미친새끼",
+  "니미", "니애미", "니미럴", "애미", "애비", "엄창", "느금마", "느검마",
+  "니애비", "패드립", "호로새끼", "후레자식",
+  "보지", "자지", "섹스", "야동", "포르노", "강간", "성기", "자위",
+  "fuck", "fuk", "fck", "shit", "bitch", "asshole", "bastard",
+  "dick", "cunt", "pussy", "whore", "slut", "nigger", "nigga",
+  "motherfucker", "retard", "rape",
+];
+
+const MASKED = [
+  "바보", "멍청이", "찌질이", "루저", "돌대가리", "머저리", "등신",
+  "빡대가리", "골빈", "찐따", "핵noob", "노답", "찌질",
+  "damn", "idiot", "stupid", "moron", "loser", "noob", "trash",
+];
+
+const BLOCKED_JAMO = [
+  "ㅅㅂ", "ㅆㅂ", "ㅅㅃ", "ㅄ", "ㅂㅅ", "ㅈㄹ", "ㄱㅅㄲ", "ㅅㄲ",
+  "ㅁㅊ", "ㅆㄹㄱ", "ㄴㄱㅁ", "ㅈㄴ", "ㅆㄱ",
+];
+
+// ㅗ 는 영타 변환에서 h 가 ㅗ 로 바뀌어 오탐이 나므로 원문에서만 본다
+const GESTURES = ["ㅗ", "凸", "🖕", "🖕🏻", "🖕🏼", "🖕🏽", "🖕🏾", "🖕🏿"];
+
+// 글자가 아닌 것(공백/기호/숫자/_)을 지운다. 파이썬의 [\s\W\d_]+ 와 같다
+const FILLER = /[^\p{L}\p{M}]+/gu;
+
+const LEET = {
+  "0": "o", "1": "i", "3": "e", "4": "a", "5": "s",
+  "7": "t", "8": "b", "9": "g", "@": "a", "$": "s",
+  "!": "i", "|": "i", "+": "t", "(": "c",
+};
+
+// 두벌식 자판 배열
+const QWERTY_TO_JAMO = {
+  q: "ㅂ", w: "ㅈ", e: "ㄷ", r: "ㄱ", t: "ㅅ",
+  y: "ㅛ", u: "ㅕ", i: "ㅑ", o: "ㅐ", p: "ㅔ",
+  a: "ㅁ", s: "ㄴ", d: "ㅇ", f: "ㄹ", g: "ㅎ",
+  h: "ㅗ", j: "ㅓ", k: "ㅏ", l: "ㅣ",
+  z: "ㅋ", x: "ㅌ", c: "ㅊ", v: "ㅍ",
+  b: "ㅠ", n: "ㅜ", m: "ㅡ",
+  Q: "ㅃ", W: "ㅉ", E: "ㄸ", R: "ㄲ", T: "ㅆ",
+  O: "ㅒ", P: "ㅖ",
+};
+
+const CHO = [..."ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ"];
+const JUNG = [..."ㅏㅐㅑㅒㅓㅔㅕㅖㅗㅘㅙㅚㅛㅜㅝㅞㅟㅠㅡㅢㅣ"];
+const JONG = [..."_ㄱㄲㄳㄴㄵㄶㄷㄹㄺㄻㄼㄽㄾㄿㅀㅁㅂㅄㅅㅆㅇㅈㅊㅋㅌㅍㅎ"];
+
+const COMBO_JUNG = {
+  "ㅗㅏ": "ㅘ", "ㅗㅐ": "ㅙ", "ㅗㅣ": "ㅚ",
+  "ㅜㅓ": "ㅝ", "ㅜㅔ": "ㅞ", "ㅜㅣ": "ㅟ",
+  "ㅡㅣ": "ㅢ",
+};
+
+// 낱자를 모아 글자로 만든다. ㅅㅣㅂㅏㄹ -> 시발
+function composeHangul(text) {
+  const jamos = [...text];
+  const out = [];
+  const n = jamos.length;
+  let i = 0;
+
+  while (i < n) {
+    const ch = jamos[i];
+
+    if (CHO.includes(ch) && i + 1 < n && JUNG.includes(jamos[i + 1])) {
+      const cho = ch;
+      let jung = jamos[i + 1];
+      i += 2;
+
+      if (i < n && COMBO_JUNG[jung + jamos[i]]) {
+        jung = COMBO_JUNG[jung + jamos[i]];
+        i += 1;
+      }
+
+      // 받침이 붙나? 단, 다음 글자의 초성이면 넘긴다
+      let jong = "_";
+      if (i < n && JONG.includes(jamos[i])) {
+        const isNextCho = i + 1 < n && CHO.includes(jamos[i]) && JUNG.includes(jamos[i + 1]);
+        if (!isNextCho) {
+          jong = jamos[i];
+          i += 1;
+        }
+      }
+
+      const code = 0xAC00 + (CHO.indexOf(cho) * 21 + JUNG.indexOf(jung)) * 28 + JONG.indexOf(jong);
+      out.push(String.fromCharCode(code));
+    } else {
+      out.push(ch);
+      i += 1;
+    }
+  }
+  return out.join("");
+}
+
+function toHangul(text) {
+  return composeHangul([...text].map(c => QWERTY_TO_JAMO[c] || c).join(""));
+}
+
+// 시이이이발 -> 시이발 (2개까지 남김)
+function stripRepeats(text) {
+  return text.replace(/(.)\1{2,}/gu, "$1$1");
+}
+
+// 시이이이발 -> 시발
+function squashRepeats(text) {
+  return text.replace(/(.)\1+/gu, "$1");
+}
+
+const PADDING = /([ㅏ-ㅣ아야어여오요우유으이])\1{2,}/gu;
+
+function dropPadding(text) {
+  return text.replace(PADDING, "");
+}
+
+// 글자를 낱자로 푼다. 시발 -> ㅅㅣㅂㅏㄹ
+function decompose(text) {
+  const out = [];
+  for (const ch of text) {
+    const code = ch.charCodeAt(0) - 0xAC00;
+    if (ch.length === 1 && code >= 0 && code < 11172) {
+      out.push(CHO[Math.floor(code / 588)]);
+      out.push(JUNG[Math.floor((code % 588) / 28)]);
+      const jong = code % 28;
+      if (jong) out.push(JONG[jong]);
+    } else {
+      out.push(ch);
+    }
+  }
+  return out.join("");
+}
+
+// 시바아아알 -> ㅅㅣㅂㅏ(ㅇㅏ)(ㅇㅏ)(ㅇㅏ)ㄹ 에서 늘려 쓴 'ㅇ+모음' 을 지운다
+const VOWEL_PAD = /(?:ㅇ([ㅏ-ㅣ]))(?:ㅇ\1)+/gu;
+
+function dropVowelPad(jamo) {
+  return jamo.replace(VOWEL_PAD, "");
+}
+
+function flatten(text) {
+  return text.normalize("NFKC").replace(FILLER, "").toLowerCase();
+}
+
+function unleet(text) {
+  return [...text].map(c => LEET[c] || c).join("");
+}
+
+// 한 글을 여러 방식으로 펴서 전부 돌려준다. 하나라도 걸리면 욕으로 본다
+function variants(text) {
+  const seen = [];
+  const add = v => { if (v && !seen.includes(v)) seen.push(v); };
+
+  const base = stripRepeats(text);
+  add(flatten(base));
+
+  const lowered = stripRepeats(text.normalize("NFKC").toLowerCase());
+  add(flatten(unleet(lowered)));
+  add(flatten(toHangul(lowered)));
+  add(toHangul(lowered));
+
+  add(squashRepeats(flatten(text)));
+  add(dropPadding(flatten(text)));
+  add(flatten(toHangul(squashRepeats(text.normalize("NFKC").toLowerCase()))));
+
+  return seen;
+}
+
+function findBlocked(text) {
+  if (!text) return [];
+
+  const hits = [];
+  const forms = variants(text);
+
+  for (const sign of GESTURES) {
+    if (text.includes(sign)) hits.push(sign);
+  }
+
+  const jamoForm = dropVowelPad(squashRepeats(decompose(flatten(text))));
+  for (const word of BLOCKED) {
+    if (jamoForm.includes(squashRepeats(decompose(flatten(word)))) && !hits.includes(word)) {
+      hits.push(word);
+    }
+  }
+
+  for (const form of forms) {
+    for (const word of BLOCKED) {
+      if (form.includes(flatten(word)) && !hits.includes(word)) hits.push(word);
+    }
+    for (const jamo of BLOCKED_JAMO) {
+      if (form.includes(flatten(jamo)) && !hits.includes(jamo)) hits.push(jamo);
+    }
+  }
+  return hits;
+}
+
+// 가벼운 비속어를 ** 로 덮는다. 글자 수는 그대로 둔다
+function mask(text) {
+  if (!text) return text;
+  let result = text;
+  for (const word of MASKED) {
+    const re = new RegExp(word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+    result = result.replace(re, "*".repeat(word.length));
+  }
+  return result;
+}
+
+function censor(title, content) {
+  if (findBlocked(title).length || findBlocked(content).length) {
+    throw new ApiError(400, "그런 말은 붙일 수 없습니다");
+  }
+  return [mask(title), mask(content)];
+}
+
+// ── 계정 (auth.py 대신) ───────────────────────────────────
+// 비밀번호는 소금(salt)을 섞은 해시로만 저장한다
+const ROUNDS = 200000;
+
+function toHex(buf) {
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+function randomHex(bytes) {
+  const arr = new Uint8Array(bytes);
+  crypto.getRandomValues(arr);
+  return toHex(arr);
+}
+
+async function hashPw(password, salt) {
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey("raw", enc.encode(password), "PBKDF2", false, ["deriveBits"]);
+  const bits = await crypto.subtle.deriveBits(
+    { name: "PBKDF2", hash: "SHA-256", salt: enc.encode(salt), iterations: ROUNDS },
+    key, 256
+  );
+  return toHex(bits);
+}
+
+function whoIs(token) {
+  if (!token) return null;
+  const db = getDb();
+  const userId = db.sessions[token];
+  const user = db.users.find(u => u.id === userId);
+  if (!user) return null;
+  return { id: user.id, username: user.username, is_admin: !!user.is_admin };
+}
+
+function startSession(db, userId) {
+  const token = randomHex(32);
+  db.sessions[token] = userId;
+  return token;
+}
+
+// ── API (main.py 의 주소들 대신) ──────────────────────────
+function publicMemo(memo) {
+  const copy = Object.assign({}, memo);
+  delete copy.owner_token;
+  return copy;
+}
+
+// 이 메모를 고치거나 뗄 수 있는 사람인지 본다
+function mayTouch(memo, token, ownerToken) {
+  const user = whoIs(token);
+  if (user && user.is_admin) return true;
+  if (user && memo.author_id && memo.author_id === user.id) return true;
+  if (memo.author_id) return false;
+  return !!memo.owner_token && memo.owner_token === ownerToken;
+}
+
+const api = {
+  listMemos() {
+    return getDb().memos.slice().sort((a, b) => b.id - a.id).map(publicMemo);
+  },
+
+  createMemo({ title, content, token, owner_token }) {
+    [title, content] = censor(title, content);
+    const user = whoIs(token);
+    const db = getDb();
+    const memo = {
+      id: db.nextMemoId++,
+      title, content,
+      created_at: new Date().toISOString(),
+      likes: 0,
+      owner_token: owner_token || null,
+      author: user ? user.username : null,
+      author_id: user ? user.id : null,
+    };
+    db.memos.push(memo);
+    saveDb(db);
+    return publicMemo(memo);
+  },
+
+  changeLikes(id, amount) {
+    const db = getDb();
+    const memo = db.memos.find(m => m.id === id);
+    if (!memo) throw new ApiError(404, "그런 메모 없습니다");
+    memo.likes = Math.max(0, (memo.likes || 0) + amount);
+    saveDb(db);
+    return { id, likes: memo.likes };
+  },
+
+  deleteMemo(id, ownerToken, token) {
+    const db = getDb();
+    const memo = db.memos.find(m => m.id === id);
+    if (!memo) throw new ApiError(404, "그런 메모 없습니다");
+    if (!mayTouch(memo, token, ownerToken)) {
+      throw new ApiError(403, "내가 붙인 포스트잇만 뗄 수 있습니다");
+    }
+    db.memos = db.memos.filter(m => m.id !== id);
+    saveDb(db);
+    return { ok: true, deleted_id: id };
+  },
+
+  async signup(username, password) {
+    const name = (username || "").trim();
+    if (name.length < 2) throw new ApiError(400, "아이디는 2글자 이상이어야 합니다");
+    if ((password || "").length < 4) throw new ApiError(400, "비밀번호는 4글자 이상이어야 합니다");
+    if (findBlocked(name).length) throw new ApiError(400, "그런 아이디는 쓸 수 없습니다");
+
+    const salt = randomHex(16);
+    const pwHash = await hashPw(password, salt);
+
+    const db = getDb();
+    if (db.users.some(u => u.username === name)) throw new ApiError(409, "이미 쓰는 아이디입니다");
+
+    const user = {
+      id: db.nextUserId++, username: name,
+      pw_hash: pwHash, pw_salt: salt,
+      is_admin: false, created_at: new Date().toISOString(),
+    };
+    db.users.push(user);
+    const token = startSession(db, user.id);
+    saveDb(db);
+    return { token, username: name, is_admin: false };
+  },
+
+  async login(username, password) {
+    const name = (username || "").trim();
+    const found = getDb().users.find(u => u.username === name);
+    // 없는 이름이어도 똑같이 시간을 쓴다
+    const got = await hashPw(password || "", found ? found.pw_salt : "dummy");
+    if (!found || got !== found.pw_hash) {
+      throw new ApiError(401, "아이디나 비밀번호가 틀렸습니다");
+    }
+    const db = getDb();
+    const token = startSession(db, found.id);
+    saveDb(db);
+    return { token, username: found.username, is_admin: !!found.is_admin };
+  },
+
+  logout(token) {
+    if (!token) return;
+    const db = getDb();
+    delete db.sessions[token];
+    saveDb(db);
+  },
+};
+
+// ══════════════════════════════════════════════════════════
+//  화면
+// ══════════════════════════════════════════════════════════
+
+// 급식 (meal.py 대신 NEIS 를 바로 부른다. 인증키 없이도 하루치는 나온다)
+const NEIS_URL = "https://open.neis.go.kr/hub/mealServiceDietInfo";
+const OFFICE_CODE = "C10";        // 부산광역시교육청
+const SCHOOL_CODE = "7150532";    // 학교 코드
+
+// [포스트잇 배경색, 그 색을 진하게 만든 밑줄색]
+const COLORS = [
+  ["#fff9c4", "#e2cf6a"],
+  ["#ffe0e6", "#efa7b5"],
+  ["#d7f0ff", "#93c7e4"],
+  ["#e2f7dd", "#9ed095"],
+  ["#f0e4ff", "#bda3dd"],
+  ["#ffe9d6", "#e8b384"],
+];
+
+// 이 브라우저만의 번호. 게스트가 쓴 글의 주인 표시로 쓴다
+const TOKEN_KEY = "myToken";
+
+function getMyToken() {
+  try {
+    let token = localStorage.getItem(TOKEN_KEY);
+    if (!token) {
+      token = String(Date.now()) + "-" + Math.random().toString(36).slice(2, 10);
+      localStorage.setItem(TOKEN_KEY, token);
+    }
+    return token;
+  } catch (e) {
+    return "temp-" + Math.random().toString(36).slice(2, 10);
+  }
+}
+
+const MY_TOKEN = getMyToken();
+
+// ── 로그인 ────────────────────────────────────────────
+const SESSION_KEY = "sessionToken";
+let IS_ADMIN = false;
+let ME = null;          // 로그인한 아이디, 게스트면 null
+
+function getSession() {
+  try {
+    return localStorage.getItem(SESSION_KEY) || "";
+  } catch (e) {
+    return "";
+  }
+}
+
+function saveSession(token) {
+  try {
+    if (token) localStorage.setItem(SESSION_KEY, token);
+    else localStorage.removeItem(SESSION_KEY);
+  } catch (e) {}
+}
+
+function refreshMe() {
+  const user = whoIs(getSession());
+  ME = user ? user.username : null;
+  IS_ADMIN = !!(user && user.is_admin);
+  if (!user) saveSession("");
+  paintMe();
+}
+
+function paintMe() {
+  const box = document.getElementById("who");
+  if (ME) {
+    box.innerHTML =
+      '<span class="nick">' + escapeHtml(ME) + '</span>'
+      + '<button onclick="doLogout()">로그아웃</button>';
+  } else {
+    box.innerHTML =
+      '<span class="nick guest">게스트</span>'
+      + '<button onclick="openLogin()">로그인</button>';
+  }
+}
+
+function openLogin() {
+  document.getElementById("loginerr").classList.remove("show");
+  document.getElementById("loginbox").classList.add("open");
+  document.getElementById("lid").focus();
+}
+
+function closeLogin() {
+  document.getElementById("loginbox").classList.remove("open");
+  document.getElementById("lpw").value = "";
+}
+
+function showLoginError(message) {
+  const box = document.getElementById("loginerr");
+  box.textContent = message;
+  box.classList.add("show");
+}
+
+async function doAuth(action) {
+  const id = document.getElementById("lid").value;
+  const pw = document.getElementById("lpw").value;
+  try {
+    const data = await api[action](id, pw);
+    saveSession(data.token);
+    closeLogin();
+    refreshMe();
+    lastData = "";
+    loadMemos();
+  } catch (e) {
+    showLoginError(e instanceof ApiError ? e.message
+      : "이 브라우저에서는 로그인을 쓸 수 없어요 (https 주소로 열어 주세요)");
+  }
+}
+
+function doLogin()  { doAuth("login"); }
+function doSignup() { doAuth("signup"); }
+
+function doLogout() {
+  api.logout(getSession());
+  saveSession("");
+  refreshMe();
+  lastData = "";
+  loadMemos();
+}
+
+// 내가 붙인 메모 번호들. 떼기 버튼을 보여줄지 정할 때 쓴다
+const MINE_KEY = "myMemos";
+
+function getMine() {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(MINE_KEY)) || []);
+  } catch (e) {
+    return new Set();
+  }
+}
+
+function saveMine(set) {
+  try {
+    localStorage.setItem(MINE_KEY, JSON.stringify([...set]));
+  } catch (e) {}
+}
+
+// 내가 누른 좋아요. 같은 사람이 여러 번 못 누르게 막는다
+const LIKED_KEY = "likedMemos";
+
+function getLiked() {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(LIKED_KEY)) || []);
+  } catch (e) {
+    return new Set();
+  }
+}
+
+function saveLiked(set) {
+  try {
+    localStorage.setItem(LIKED_KEY, JSON.stringify([...set]));
+  } catch (e) {}
+}
+
+function styleFor(id) {
+  const pair = COLORS[id % COLORS.length];
+  const tilt = ((id * 7) % 5) - 2;   // -2 ~ 2도
+  return "background:" + pair[0] + "; --line:" + pair[1] + "; transform: rotate(" + tilt + "deg);";
+}
+
+function escapeHtml(text) {
+  const d = document.createElement("div");
+  d.textContent = text;
+  return d.innerHTML;
+}
+
+function shortDate(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d)) return "";
+  return (d.getMonth() + 1) + "/" + d.getDate();
+}
+
+function todayYmd() {
+  const d = new Date();
+  return d.getFullYear() + String(d.getMonth() + 1).padStart(2, "0") + String(d.getDate()).padStart(2, "0");
+}
+
+async function loadMeal() {
+  const box = document.getElementById("meal");
+  const params = new URLSearchParams({
+    Type: "json",
+    ATPT_OFCDC_SC_CODE: OFFICE_CODE,
+    SD_SCHUL_CODE: SCHOOL_CODE,
+    MLSV_YMD: todayYmd(),
+  });
+
+  try {
+    const res = await fetch(NEIS_URL + "?" + params);
+    const data = await res.json();
+    if (!data.mealServiceDietInfo) {
+      box.innerHTML = '<span class="meal-none">오늘은 급식 정보가 없습니다.</span>';
+      return;
+    }
+    const rows = data.mealServiceDietInfo[1].row;
+    box.innerHTML = rows.map(function (row) {
+      const menu = row.DDISH_NM.split("<br/>").map(m => m.trim()).filter(Boolean);
+      return '<div class="meal-row"><span class="meal-type">' + escapeHtml(row.MMEAL_SC_NM) + '</span>'
+           + menu.map(escapeHtml).join(", ") + '</div>';
+    }).join("");
+  } catch (e) {
+    box.innerHTML = '<span class="meal-none">급식을 불러오지 못했습니다.</span>';
+  }
+}
+
+// ── 담벼락 ───────────────────────────────────────────
+let lastData = "";
+
+function loadMemos() {
+  const memos = api.listMemos();
+
+  // 좋아요 많은 순, 같으면 최신 순
+  memos.sort(function (a, b) { return (b.likes - a.likes) || (b.id - a.id); });
+
+  const liked = getLiked();
+  const mine = getMine();
+  const json = JSON.stringify(memos) + "|" + [...liked].sort().join(",")
+             + "|" + [...mine].sort().join(",");
+  if (json === lastData) return;
+  lastData = json;
+
+  const wall = document.getElementById("wall");
+
+  if (memos.length === 0) {
+    wall.innerHTML = '<p class="empty">아직 아무것도 없어요. 첫 메모를 붙여보세요.</p>';
+    wall.style.height = "";
+    return;
+  }
+
+  const me = whoIs(getSession());
+
+  wall.innerHTML = memos.map(function (memo) {
+    const isLiked = liked.has(memo.id);
+    const canPeel = IS_ADMIN || (me && memo.author_id === me.id)
+                 || (!memo.author_id && mine.has(memo.id));
+    return ''
+      + '<div class="note" id="note-' + memo.id + '" style="' + styleFor(memo.id) + '">'
+      +   '<h3>' + escapeHtml(memo.title) + '</h3>'
+      +   '<p>' + escapeHtml(memo.content) + '</p>'
+      +   '<div class="foot">'
+      +     (memo.author ? '<span class="by">' + escapeHtml(memo.author) + '</span>' : '')
+      +     '<button class="' + (isLiked ? "liked" : "") + '"'
+      +             ' onclick="toggleLike(' + memo.id + ')"'
+      +             ' title="' + (isLiked ? "좋아요 취소" : "좋아요") + '">'
+      +       '♥ ' + (memo.likes || 0)
+      +     '</button>'
+      +     (canPeel ? '<button onclick="peelOff(' + memo.id + ')" title="떼기">떼기</button>' : '')
+      +     '<span class="date">' + shortDate(memo.created_at) + '</span>'
+      +   '</div>'
+      + '</div>';
+  }).join("");
+
+  layoutWall();
+}
+
+// 포스트잇을 "지금 제일 짧은 칸" 에 하나씩 넣어 빈틈 없이 쌓는다
+const NOTE_W = 180;   // 포스트잇 너비 (CSS 와 같아야 한다)
+const GAP = 36;       // 사이 간격 (기울어져 있어 넉넉하게)
+
+function layoutWall() {
+  const wall = document.getElementById("wall");
+  const notes = [...wall.querySelectorAll(".note")];
+  if (notes.length === 0) {
+    wall.style.height = "";
+    return;
+  }
+
+  const wallWidth = wall.clientWidth;
+  const cols = Math.max(1, Math.floor((wallWidth + GAP) / (NOTE_W + GAP)));
+  const used = cols * NOTE_W + (cols - 1) * GAP;
+  const offsetX = Math.max(0, (wallWidth - used) / 2);
+  const colHeight = new Array(cols).fill(0);
+
+  notes.forEach(function (note) {
+    let target = 0;
+    for (let i = 1; i < cols; i++) {
+      if (colHeight[i] < colHeight[target]) target = i;
+    }
+    note.style.left = (offsetX + target * (NOTE_W + GAP)) + "px";
+    note.style.top = colHeight[target] + "px";
+    colHeight[target] += note.getBoundingClientRect().height + GAP;
+  });
+
+  wall.style.height = (Math.max(...colHeight) - GAP) + "px";
+}
+
+window.addEventListener("resize", layoutWall);
+
+function createMemo() {
+  const titleEl = document.getElementById("title");
+  const contentEl = document.getElementById("content");
+
+  const title = titleEl.value.trim();
+  const content = contentEl.value.trim();
+
+  if (!title) {
+    alert("제목을 입력하세요");
+    titleEl.focus();
+    return;
+  }
+
+  let created;
+  try {
+    created = api.createMemo({ title, content, token: getSession(), owner_token: MY_TOKEN });
+  } catch (e) {
+    // 검열에 걸리면 붙지 않는다. 쓴 내용은 그대로 둔다
+    if (e instanceof ApiError && e.status === 400) {
+      alert("아무거나 적으라고 했지 그런 건 아니었어요");
+      titleEl.focus();
+      return;
+    }
+    throw e;
+  }
+
+  const mine = getMine();
+  mine.add(created.id);
+  saveMine(mine);
+
+  titleEl.value = "";
+  contentEl.value = "";
+  titleEl.focus();
+  loadMemos();
+}
+
+function toggleLike(id) {
+  const liked = getLiked();
+
+  if (liked.has(id)) {
+    api.changeLikes(id, -1);
+    liked.delete(id);
+  } else {
+    api.changeLikes(id, +1);
+    liked.add(id);
+  }
+
+  saveLiked(liked);
+  loadMemos();
+}
+
+function peelOff(id) {
+  if (!confirm("이 포스트잇을 뗄까요?")) return;
+
+  const el = document.getElementById("note-" + id);
+  if (el) el.classList.add("peel");
+
+  try {
+    api.deleteMemo(id, MY_TOKEN, getSession());
+  } catch (e) {
+    if (el) el.classList.remove("peel");
+    alert("내가 붙인 포스트잇만 뗄 수 있어요.");
+    return;
+  }
+
+  const liked = getLiked();
+  if (liked.delete(id)) saveLiked(liked);
+  const mine = getMine();
+  if (mine.delete(id)) saveMine(mine);
+
+  setTimeout(loadMemos, 300);
+}
+
+// 제목 칸에서 엔터 누르면 내용 칸으로
+document.getElementById("title").addEventListener("keydown", function (e) {
+  if (e.key === "Enter") document.getElementById("content").focus();
+});
+
+// 로그인 창에서 엔터 누르면 로그인
+document.getElementById("lpw").addEventListener("keydown", function (e) {
+  if (e.key === "Enter") doLogin();
+});
+
+// 다른 탭에서 붙이거나 떼면 여기도 바로 갱신
+window.addEventListener("storage", function () {
+  refreshMe();
+  loadMemos();
+});
+
+refreshMe();
+loadMeal();
+loadMemos();
+</script>
+</body>
+</html>

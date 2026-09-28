@@ -1,0 +1,21 @@
+# Render 에 올릴 때 쓰는 설정 파일.
+# 이 파일이 저장소에 있으면 Render 가 알아서 읽는다.
+services:
+  - type: web
+    name: woori-sosik
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    # $PORT 는 Render 가 정해서 알려주는 번호다. 고정하면 안 된다
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      # 관리자 비밀번호. Render 대시보드에서 직접 넣는다(파일에 적지 않는다)
+      - key: MEMO_ADMIN_KEY
+        sync: false
+      # 안 지워지는 칸에 memo.db 를 둔다. 이게 없으면 재시작할 때마다 글이 날아간다
+      - key: MEMO_DB_PATH
+        value: /var/data/memo.db
+    disk:
+      name: memo-data
+      mountPath: /var/data
+      sizeGB: 1
