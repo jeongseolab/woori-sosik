@@ -31,6 +31,18 @@ app = FastAPI(title="Tier.gg")
 init_db()
 
 
+@app.middleware("http")
+async def _always_fresh(request, call_next):
+    """화면 파일(html/css/js) 은 브라우저가 매번 새 버전인지 물어보게 한다.
+
+    이게 없으면 브라우저가 예전 app.js 를 저장해 두고 계속 써서,
+    새로 배포해도 폰에서는 옛 화면이 나왔다. 바뀌지 않았으면 304 로 짧게 끝난다.
+    """
+    response = await call_next(request)
+    response.headers.setdefault("Cache-Control", "no-cache")
+    return response
+
+
 @app.exception_handler(opgg.NotFound)
 async def _not_found(_, exc):
     return JSONResponse(status_code=404, content={"detail": str(exc)})
