@@ -128,25 +128,31 @@ h2 { font-size: 22px; margin: 0 0 14px; }
 .lead + .note { margin: -14px 0 22px; }
 
 /* ── 로그인 ─────────────────────────── */
+/* 스크롤 없이 한 화면에 들어오게: 화면 높이를 꽉 채우고 가운데에 놓는다.
+   main 의 위아래 여백(28 + 80) 만큼 빼 준다 */
 .gate {
   display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(320px, 1fr);
+  grid-template-columns: minmax(0, 1.2fr) minmax(320px, 1fr);
   grid-template-areas: "intro card" "sample card";
-  column-gap: 56px;
-  row-gap: 28px;
-  align-items: start;
-  padding-top: 5vh;
+  column-gap: 48px;
+  row-gap: 22px;
+  align-content: center;
+  min-height: calc(100vh - 52px);
 }
+/* 로그인 화면에서는 아래 여백을 줄여 한 화면에 들어오게 한다 */
+main:has(.gate) { padding-bottom: 24px; }
 .gate-intro { grid-area: intro; }
 .gate-card { grid-area: card; align-self: center; }
 .gate-sample { grid-area: sample; }
-.gate-logo { margin: 0 0 22px; font-size: 40px; gap: 12px; }
-.gate-logo .mark { width: 48px; height: 48px; }
-.gate h1 { font-size: clamp(30px, 4.2vw, 46px); margin-bottom: 14px; }
-.gate .lead { margin-bottom: 20px; }
-.gate-points { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; max-width: 56ch; }
-.gate-points li { padding-left: 14px; border-left: 3px solid var(--line); color: var(--muted); font-size: 14px; }
-.gate-points b { display: block; color: var(--text); font-size: 15px; }
+.gate-logo { margin: 0 0 16px; font-size: 60px; gap: 14px; }
+.gate-logo .mark { width: 64px; height: 64px; }
+/* 한 줄로 들어가게 글자를 줄이고 줄바꿈을 막는다 */
+.gate h1 { font-size: clamp(20px, 2.4vw, 30px); white-space: nowrap; margin-bottom: 8px; }
+.gate .lead { margin-bottom: 16px; font-size: 15px; }
+/* 기능 세 가지는 세로로 쌓지 않고 한 줄에 나란히 */
+.gate-points { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.gate-points li { padding-left: 10px; border-left: 3px solid var(--line); color: var(--muted); font-size: 13px; line-height: 1.5; }
+.gate-points b { display: block; color: var(--text); font-size: 14px; margin-bottom: 2px; }
 
 .gate-card {
   background: var(--panel);
@@ -179,27 +185,28 @@ h2 { font-size: 22px; margin: 0 0 14px; }
 .err:empty { display: none; }
 
 /* 예시 티어표 */
-.sample { margin: 0; display: grid; gap: 5px; max-width: 440px; }
+.sample { margin: 0; display: grid; gap: 4px; max-width: 420px; }
 .sample-op {
   display: flex;
   align-items: center;
   gap: 14px;
-  padding: 10px 14px;
+  padding: 6px 12px;
   border-radius: 10px;
   background: var(--gold-tint);
   border: 2px solid var(--gold);
 }
+.sample-op img { width: 46px; height: 46px; }
 .sample-op img { border-radius: 50%; border: 3px solid var(--gold); }
 .sample-op span { display: block; font: 18px/1 var(--display); color: var(--gold); }
-.sample-op b { display: block; font: 22px/1.3 var(--display); font-weight: 400; }
+.sample-op b { display: block; font: 19px/1.2 var(--display); font-weight: 400; }
 .sample-op small { color: var(--muted); font-size: 12px; }
-.sample-row { display: grid; grid-template-columns: 40px 1fr; min-height: 48px; border-radius: 8px; overflow: hidden; background: var(--panel); }
+.sample-row { display: grid; grid-template-columns: 34px 1fr; min-height: 38px; border-radius: 8px; overflow: hidden; background: var(--panel); }
 .sample-row > b { display: grid; place-items: center; font: 20px var(--display); font-weight: 400; color: #1a1203; }
 .sample-row[data-t="1"] > b { background: var(--t1); }
 .sample-row[data-t="2"] > b { background: var(--t2); }
 .sample-row[data-t="3"] > b { background: var(--t3); }
-.sample-row > span { display: flex; gap: 6px; align-items: center; padding: 6px 8px; }
-.sample-row img { border-radius: 6px; }
+.sample-row > span { display: flex; gap: 5px; align-items: center; padding: 4px 8px; }
+.sample-row img { width: 28px; height: 28px; border-radius: 5px; }
 .sample figcaption { font-size: 12px; color: var(--muted); margin-top: 2px; }
 
 /* ── 프로필 줄 ──────────────────────── */
@@ -576,9 +583,16 @@ td button, td a.btn { padding: 5px 10px; font-size: 13px; }
 .toast.show { opacity: 1; transform: translateX(-50%); }
 
 /* ── 좁은 화면 ──────────────────────── */
+@media (max-height: 620px) and (min-width: 861px) {
+  .gate-sample { display: none; }
+}
 @media (max-width: 860px) {
-  .gate { grid-template-columns: minmax(0, 1fr); grid-template-areas: "intro" "card" "sample"; row-gap: 22px; padding-top: 8px; }
+  .gate { grid-template-columns: minmax(0, 1fr); grid-template-areas: "intro" "card" "sample"; row-gap: 16px; min-height: 0; align-content: start; }
   .gate-points { display: none; }
+  .gate-logo { font-size: 44px; margin-bottom: 10px; }
+  .gate-logo .mark { width: 48px; height: 48px; }
+  .gate h1 { font-size: min(22px, 5vw); }
+  .gate .lead { font-size: 14px; margin-bottom: 0; }
   .board, .rooms { grid-template-columns: 1fr; }
   .stats { margin-left: 0; width: 100%; justify-content: space-between; }
   .stat { text-align: left; }
