@@ -240,9 +240,14 @@ async def room_detail(room_id: int, fresh: bool = False, authorization: str = He
             board = await tierlist.build(acc["game_name"], acc["tagline"], fresh)
         except opgg.OpggError as e:
             return {"account_id": acc["id"], "riot_id": acc["riot_id"], "error": str(e)}
-        top = [c for t in ("1", "2") for c in board["tiers"][t]][:3]
+        # 방 화면에는 그림과 이름만 있으면 된다(판 기록까지 보내면 무거워진다)
+        def slim(c):
+            return {"id": c["id"], "name": c["name"], "image": c["image"],
+                    "score": c["score"], "perf": (c.get("perf") or {}).get("overall")}
         return {**board["player"], "account_id": acc["id"],
-                "op": board["op"], "top": top, "bracket": board["bracket"]}
+                "op": slim(board["op"]) if board["op"] else None,
+                "tiers": {t: [slim(c) for c in cs] for t, cs in board["tiers"].items()},
+                "bracket": board["bracket"]}
 
     members = await asyncio.gather(*[one(a) for a in accounts])
     return {"id": room["id"], "name": room["name"], "code": room["code"],

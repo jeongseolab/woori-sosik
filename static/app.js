@@ -389,23 +389,6 @@ async function renderTier(riotId, fresh = false) {
 
 // ── 그룹방 ──────────────────────────────────────────────
 
-// 비교표의 칸. higher: 클수록 좋은가
-const COLUMNS = [
-  { key: "rank", label: "랭크", value: m => rankScore(m.rank), show: m => esc(m.rank ? m.rank.tier_ko + (["MASTER","GRANDMASTER","CHALLENGER"].includes(m.rank.tier) ? "" : " " + m.rank.division) + " " + m.rank.lp + "LP" : "없음") },
-  { key: "play", label: "플레이", value: m => m.play ? m.play.overall : null, show: m => m.play ? m.play.overall : "-" },
-  { key: "snowball", label: "스노우볼", value: m => m.play ? m.play.areas.snowball : null, show: m => m.play && m.play.areas.snowball != null ? m.play.areas.snowball : "-" },
-  { key: "win_rate", label: "승률", value: m => m.win_rate, show: m => pct(m.win_rate) },
-  { key: "kda", label: "KDA", value: m => m.kda, show: m => num(m.kda, 2) },
-  { key: "cs_per_min", label: "분당 CS", value: m => m.cs_per_min, show: m => num(m.cs_per_min) },
-  { key: "games", label: "최근 판수", value: m => m.games, show: m => m.games ?? "-" },
-];
-const TIER_ORDER = ["IRON","BRONZE","SILVER","GOLD","PLATINUM","EMERALD","DIAMOND","MASTER","GRANDMASTER","CHALLENGER"];
-
-function rankScore(rank) {
-  if (!rank) return null;
-  return TIER_ORDER.indexOf(rank.tier) * 10000 + (5 - (rank.division || 1)) * 1000 + (rank.lp || 0);
-}
-
 async function loadRooms() {
   lastRooms = (await api("/api/rooms")).rooms;
   return lastRooms;
@@ -462,6 +445,106 @@ async function renderRooms(roomId) {
   if (roomId) renderRoom(roomId);
 }
 
+// 방 사람마다 고정된 색. 들어온 순서로 정해서, 무엇을 보든 사람의 색은 그대로다.
+// 남색 바탕에서 색약 검사까지 통과한 6색. 7번째부터는 색 대신 이름으로만 구분한다
+const MEMBER_COLORS = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#9085e9"];
+function memberColor(i) { return MEMBER_COLORS[i] || "#6b7a99"; }
+
+// 지표 비교에 쓰는 막대. max: 막대 끝(없으면 사람들 중 최댓값보다 조금 크게), mid: 보통 선
+const PLAY_METRICS = AREAS.map(([k, label]) => ({
+  key: k, label, hint: AREA_HINT[k], value: m => m.play ? m.play.areas[k] : null,
+  show: v => String(v), max: 100, mid: 50,
+}));
+const BASIC_METRICS = [
+  { key: "win_rate", label: "승률", hint: "최근 판 승률", value: m => m.win_rate, show: v => pct(v), max: 1, mid: 0.5 },
+  { key: "kda", label: "KDA", hint: "(킬+어시스트)÷데스", value: m => m.kda, show: v => num(v, 2) },
+  { key: "cs_per_min", label: "분당 CS", hint: "라인 미니언과 정글 몬스터", value: m => m.cs_per_min, show: v => num(v) },
+  { key: "kp", label: "킬 관여율", hint: "우리 팀 킬 중 내가 관여한 비율", value: m => m.play ? m.play.kp : null, show: v => pct(v), max: 1 },
+  { key: "dmg", label: "분당 피해량", hint: "챔피언에게 준 피해", value: m => m.play ? m.play.dmg_per_min : null, show: v => String(v) },
+  { key: "games", label: "최근 판수", hint: "점수에 쓴 협곡 판", value: m => m.games, show: v => String(v), max: 20 },
+];
+
+function metricChart(metric, members) {
+  const vals = members.map(({ m }) => metric.value(m));
+  const known = vals.filter(v => v != null);
+  if (!known.length) return "";
+  const max = metric.max ?? Math.max(...known) * 1.1;
+  const top = Math.max(...known);
+  const rows = members.map(({ m, color }, i) => {
+    const v = vals[i];
+    const w = v == null ? 0 : Math.max(2, Math.min(100, v / max * 100));
+    const lead = known.length > 1 && v === top;
+    const mid = metric.mid != null ? `<span class="midline" style="left:${metric.mid / max * 100}%" aria-hidden="true"></span>` : "";
+    return `
+      <div class="mrow" title="${esc(m.game_name)} ${esc(metric.label)} ${v == null ? "기록 없음" : esc(metric.show(v))}">
+        <span class="mwho"><i style="background:${color}"></i><span>${esc(m.game_name)}</span></span>
+        <span class="track">${mid}<span class="fill" style="width:${w}%;background:${color}"></span></span>
+        <b>${v == null ? "-" : esc(metric.show(v))}${lead ? `<em>1등</em>` : ""}</b>
+      </div>`;
+  }).join("");
+  return `
+    <section class="metric">
+      <h3>${esc(metric.label)}</h3>
+      <p class="hint">${esc(metric.hint)}${metric.mid != null ? ". 점선이 보통" : ""}</p>
+      <div class="mrows">${rows}</div>
+    </section>`;
+}
+
+function rankShort(rank) {
+  if (!rank) return "랭크 없음";
+  const high = ["MASTER", "GRANDMASTER", "CHALLENGER"].includes(rank.tier);
+  return rank.tier_ko + (high ? "" : " " + rank.division);
+}
+
+function boardCard(m, color, isMe) {
+  const tierRow = t => `
+    <div class="mt" data-t="${t}"><b>${t}</b><span>${(m.tiers[t] || []).map(c =>
+      c.image ? `<img src="${esc(c.image)}" alt="${esc(c.name)}" title="${esc(c.name)}${c.perf != null ? ", 플레이 " + c.perf + "점" : ""}" width="30" height="30" loading="lazy">` : "").join("")
+      || `<small>-</small>`}</span></div>`;
+  return `
+    <article class="pcard ${isMe ? "me" : ""}" style="--mc:${color}">
+      <header>
+        ${m.icon ? `<img src="${esc(m.icon)}" alt="" width="40" height="40">` : ""}
+        <div><a href="${tierHref(m.riot_id)}" title="${esc(m.riot_id)}">${esc(m.game_name)}</a>
+          <small>${esc(rankShort(m.rank))}${m.main_lane_ko ? " · " + esc(m.main_lane_ko) : ""}</small></div>
+        <span class="pscore" title="최근 판 플레이 점수"><b style="color:${scoreColor(m.play && m.play.overall)}">${m.play ? m.play.overall : "-"}</b><small>플레이</small></span>
+      </header>
+      <div class="pop">
+        ${m.op && m.op.image ? `<img src="${esc(m.op.image)}" alt="" width="72" height="72">` : ""}
+        <div><span>OP</span><b>${m.op ? esc(m.op.name) : "기록 없음"}</b>
+          ${m.op && m.op.perf != null ? `<small>플레이 ${m.op.perf}점</small>` : ""}</div>
+      </div>
+      <div class="mtiers">${["1", "2", "3", "4", "5"].map(tierRow).join("")}</div>
+      <footer>
+        <a class="btn ghost" href="${tierHref(m.riot_id)}">티어표 크게 보기</a>
+        ${isMe ? "" : `<a class="btn ghost" href="${duoHref(m.riot_id)}">나와 궁합</a>`}
+      </footer>
+    </article>`;
+}
+
+function roomTable(room, members) {
+  return `
+    <details class="as-table">
+      <summary>숫자 표로 보기</summary>
+      <div class="table-wrap"><table>
+        <thead><tr><th scope="col">소환사</th><th scope="col">랭크</th><th scope="col">플레이</th>
+          ${AREAS.map(([, l]) => `<th scope="col">${l}</th>`).join("")}
+          ${BASIC_METRICS.map(x => `<th scope="col">${x.label}</th>`).join("")}</tr></thead>
+        <tbody>${members.map(({ m }) => `
+          <tr class="${m.account_id === room.me ? "me" : ""}">
+            <td>${esc(m.game_name)}</td>
+            <td>${esc(rankShort(m.rank))}</td>
+            <td>${m.play ? m.play.overall : "-"}</td>
+            ${AREAS.map(([k]) => `<td>${m.play && m.play.areas[k] != null ? m.play.areas[k] : "-"}</td>`).join("")}
+            ${BASIC_METRICS.map(x => { const v = x.value(m); return `<td>${v == null ? "-" : esc(x.show(v))}</td>`; }).join("")}
+          </tr>`).join("")}</tbody>
+      </table></div>
+    </details>`;
+}
+
+// 방을 옮겨 다녀도 보던 탭을 기억한다
+let roomTab = "board";
+
 async function renderRoom(roomId, fresh = false) {
   const body = document.getElementById("room-body");
   body.innerHTML = `<div class="loading"><div class="skeleton"><div></div><div></div></div>
@@ -473,57 +556,37 @@ async function renderRoom(roomId, fresh = false) {
     return;
   }
 
-  let sort = { key: "rank", dir: -1 };
-  const ok = room.members.filter(m => !m.error);
-
-  // 칸마다 가장 좋은 사람을 금색으로
-  const best = {};
-  for (const col of COLUMNS) {
-    const vals = ok.map(col.value).filter(v => v != null);
-    if (vals.length > 1) best[col.key] = Math.max(...vals);
-  }
+  // 색은 들어온 순서(서버가 주는 순서)로 고정
+  const members = room.members.map((m, i) => ({ m, color: memberColor(i) }));
+  const ok = members.filter(({ m }) => !m.error);
+  const broken = members.filter(({ m }) => m.error);
 
   function draw() {
-    const rows = [...room.members].sort((a, b) => {
-      if (a.error || b.error) return a.error ? 1 : -1;
-      const col = COLUMNS.find(c => c.key === sort.key);
-      return ((col.value(a) ?? -1) - (col.value(b) ?? -1)) * sort.dir;
-    });
     body.innerHTML = `
       <div class="room-head">
         <h1>${esc(room.name)}</h1>
         <span class="code">초대 코드 <b>${esc(room.code)}</b><button type="button" class="ghost" id="copy-code">복사</button></span>
       </div>
-      <div class="table-wrap"><table>
-        <thead><tr>
-          <th scope="col">소환사</th>
-          ${COLUMNS.map(c => `<th scope="col"><button type="button" data-sort="${c.key}"
-            ${sort.key === c.key ? `aria-sort="${sort.dir > 0 ? "ascending" : "descending"}"` : ""}>${c.label}</button></th>`).join("")}
-          <th scope="col">주 라인</th><th scope="col">OP</th><th scope="col">1~2티어</th><th scope="col"></th>
-        </tr></thead>
-        <tbody>${rows.map(m => m.error ? `
-          <tr><td>${esc(m.riot_id)}</td><td colspan="${COLUMNS.length + 4}" class="note">${esc(m.error)}</td></tr>` : `
-          <tr class="${m.account_id === room.me ? "me" : ""}">
-            <td><a class="mem" href="${tierHref(m.riot_id)}">
-              ${m.icon ? `<img src="${esc(m.icon)}" alt="" width="36" height="36">` : ""}
-              <span title="${esc(m.riot_id)}">${esc(m.game_name)}</span></a></td>
-            ${COLUMNS.map(c => `<td class="${best[c.key] != null && c.value(m) === best[c.key] ? "best" : ""}">${c.show(m)}</td>`).join("")}
-            <td>${esc(m.main_lane_ko || "-")}</td>
-            <td>${m.op ? `<span class="op-mini">${m.op.image ? `<img src="${esc(m.op.image)}" alt="">` : ""}${esc(m.op.name)}</span>` : "-"}</td>
-            <td><span class="mini">${(m.top || []).map(c => c.image ? `<img src="${esc(c.image)}" alt="${esc(c.name)}" title="${esc(c.name)}">` : "").join("")}</span></td>
-            <td>${m.account_id === room.me ? "" : `<a class="btn ghost" href="${duoHref(m.riot_id)}">궁합</a>`}</td>
-          </tr>`).join("")}</tbody>
-      </table></div>
+      <div class="seg" role="tablist" aria-label="방 화면">
+        <button type="button" role="tab" data-tab="board" aria-selected="${roomTab === "board"}">OP · 티어표</button>
+        <button type="button" role="tab" data-tab="stats" aria-selected="${roomTab === "stats"}">지표 비교</button>
+      </div>
+      ${roomTab === "board" ? `
+        <div class="pcards">${ok.map(({ m, color }) => boardCard(m, color, m.account_id === room.me)).join("")}</div>`
+      : `
+        <div class="legend">${ok.map(({ m, color }) => `<span><i style="background:${color}"></i>${esc(m.game_name)}</span>`).join("")}</div>
+        <h2 class="sub-h">플레이 점수 <small>50점이 그 라인과 그 판 티어의 보통</small></h2>
+        <div class="metrics">${PLAY_METRICS.map(x => metricChart(x, ok)).join("")}</div>
+        <h2 class="sub-h">기본 지표 <small>최근 20판</small></h2>
+        <div class="metrics">${BASIC_METRICS.map(x => metricChart(x, ok)).join("")}</div>
+        ${roomTable(room, ok)}`}
+      ${broken.length ? `<p class="note">전적을 못 불러온 사람: ${broken.map(({ m }) => esc(m.riot_id) + " (" + esc(m.error) + ")").join(", ")}</p>` : ""}
       <div class="toolbar">
         <button type="button" class="ghost" id="room-refresh">모두 최신 전적으로</button>
         <button type="button" class="ghost" id="leave">방 나가기</button>
-        <span class="note">금색은 그 항목 1등이에요. 이름을 누르면 그 사람의 티어표가 열려요.</span>
       </div>`;
 
-    body.querySelectorAll("th button").forEach(b => b.onclick = () => {
-      sort = { key: b.dataset.sort, dir: sort.key === b.dataset.sort ? -sort.dir : -1 };
-      draw();
-    });
+    body.querySelectorAll(".seg button").forEach(b => b.onclick = () => { roomTab = b.dataset.tab; draw(); });
     document.getElementById("copy-code").onclick = async () => {
       try { await navigator.clipboard.writeText(room.code); toast("코드를 복사했어요"); }
       catch { toast("코드: " + room.code); }
