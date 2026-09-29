@@ -1,16 +1,19 @@
 """나만의 티어표와 개인 지표.
 
 재료는 최근 20판(솔로랭크·자유랭크·일반) 이다.
-  1. 내 기록: 그 20판에서 챔피언별로 몇 판 해서 몇 판 이겼나, KDA 는 어떤가
-  2. 내 티어 구간의 메타: 실버라면 실버 판에서 OP.GG 가 그 챔피언을 몇 티어로 보나
 
-점수 = 보정 승률 + KDA 가산 + 판수 가산 + 메타 가산.
+20판으로는 승률이 팀운에 크게 흔들린다. 그래서 중심은 "판마다 얼마나 잘했나"
+(플레이 점수, perf.py: 전투·성장·스노우볼·딜·시야·OP.GG 평점을 라인 기준과 비교) 이고,
+승률은 작은 보정으로만 쓴다.
 
-보정 승률을 쓰는 이유:
-  1판 1승(100%) 챔피언이 6판 4승(67%) 챔피언보다 위에 서면 안 된다.
-  그래서 모든 챔피언에 "가상의 50% 판" 을 몇 판 섞어 둔다.
-  판수가 적을수록 50% 쪽으로 끌려가고, 많이 한 챔피언일수록 제 승률이 드러난다.
+점수(0~100 근처) = 보정 플레이 점수 + 승률 보정 + 판수 가산 + 메타 가산.
+
+보정 플레이 점수:
+  1판 잘한 챔피언이 5판 꾸준히 잘한 챔피언보다 위에 서지 않게,
+  모든 챔피언에 "보통(50점) 판" 을 몇 판 섞어 둔다.
+승률 보정: 50% 에서 10%p 벗어날 때마다 1점. 최대 ±5점
 판수 가산: 20판 안에서 자주 고른 챔피언은 그만큼 손에 익은 챔피언이다.
+메타 가산: 내 티어 구간에서 OP.GG 가 매긴 챔피언 티어. 3티어 기준 한 칸에 1.5점
 
 OP 는 점수 1등 딱 한 명. 나머지는 점수 순서대로 1~5티어에 고르게 나눈다.
 """
@@ -18,13 +21,14 @@ import asyncio
 from collections import Counter, defaultdict
 
 import opgg
+import perf
 
 # 통계에 쓰는 판 수
 RECENT_GAMES = 20
-# 가상으로 섞는 50% 판의 수. 클수록 판수가 적은 챔피언을 더 믿지 않는다
-PRIOR_GAMES = 4
+# 가상으로 섞는 보통(50점) 판의 수. 클수록 판수가 적은 챔피언을 더 믿지 않는다
+PRIOR_GAMES = 2
 # 한 판 더 할 때마다 붙는 점수와 그 한도(판)
-PLAY_BONUS, PLAY_BONUS_CAP = 0.01, 8
+PLAY_BONUS, PLAY_BONUS_CAP = 0.75, 8
 
 # 이미지 주소. key 는 OP.GG 챔피언 키(예: MonkeyKing)
 CHAMP_IMG = "https://opgg-static.akamaized.net/meta/images/lol/latest/champion/%s.png"
@@ -73,6 +77,8 @@ def _totals(rows):
 
 def summary(profile, rows):
     """그룹방에서 나란히 놓고 볼 개인 지표. rows 는 최근 20판."""
+    bracket = (rank_of(profile) or {}).get("tier")
+    play = perf.summarize([perf.game(r, bracket) for r in rows if perf.counts(r)])
     lanes = Counter(r["position"] for r in rows if r.get("position") in LANE_KO)
     main_lane = lanes.most_common(1)[0][0] if lanes else None
     queues = Counter(r["game_type"] for r in rows)
@@ -87,6 +93,7 @@ def summary(profile, rows):
         "queues": {opgg.QUEUE_KO[q]: queues[q] for q in opgg.RIFT_TYPES if queues[q]},
         "main_lane": main_lane,
         "main_lane_ko": LANE_KO.get(main_lane),
+        "play": play,
         "updated_at": profile.get("updated_at"),
     }
 
@@ -100,8 +107,15 @@ async def recent(game_name: str, tagline: str, fresh=False):
 
 
 def _reason(c, bracket_ko):
-    """왜 이 자리인지 한 줄로."""
-    bits = ["%d판 %d승" % (c["play"], c["win"]), "KDA %.1f" % c["kda"]]
+    """왜 이 자리인지 한 줄로. 가장 잘한 영역을 앞에 둔다."""
+    bits = []
+    if c.get("perf"):
+        bits.append("플레이 %d점" % c["perf"]["overall"])
+        areas = {n: v for n, v in c["perf"]["areas"].items() if v is not None}
+        if areas:
+            best = max(areas, key=areas.get)
+            bits.append("%s %d" % (perf.AREA_KO[best], areas[best]))
+    bits.append("%d판 %d승" % (c["play"], c["win"]))
     if c.get("meta_tier"):
         where = bracket_ko + " 구간" if bracket_ko else "전체 구간"
         bits.append("%s %d티어" % (where, c["meta_tier"]))
@@ -131,7 +145,11 @@ async def build(game_name: str, tagline: str, fresh=False):
         played = Counter(g["position"] for g in games if g.get("position") in LANE_KO)
         lane = played.most_common(1)[0][0] if played else lanes.get(name) or "mid"
         t = _totals(games)
+        scored = [perf.game(g, rank["tier"] if rank else None) for g in games if perf.counts(g)]
         champs.append({
+            "perf": perf.summarize(scored),
+            "_perf_sum": sum(s["overall"] for s in scored if s and s["overall"] is not None),
+            "_perf_n": sum(1 for s in scored if s and s["overall"] is not None),
             "id": int(champ_id) if champ_id else name, "key": info.get("key"), "name": name,
             "image": CHAMP_IMG % info["key"] if info.get("key") else None,
             "lane": lane, "lane_ko": LANE_KO.get(lane),
@@ -149,13 +167,13 @@ async def build(game_name: str, tagline: str, fresh=False):
         c["meta_rank"] = meta.get("rank")
         c["meta_win_rate"] = meta.get("win_rate")
 
-        adjusted = (c["win"] + PRIOR_GAMES * 0.5) / (c["play"] + PRIOR_GAMES)
-        # KDA 3 을 보통으로 보고, 1 차이마다 1.5%p. 너무 튀지 않게 0~6 에서 자른다
-        kda_bonus = (min(max(c["kda"], 0), 6) - 3) * 0.015
+        # 판마다의 플레이 점수 평균. 판이 적으면 보통(50) 쪽으로 당긴다
+        adjusted = (c.pop("_perf_sum") + PRIOR_GAMES * 50) / (c.pop("_perf_n") + PRIOR_GAMES)
+        # 20판 승률은 팀운이 커서 작게만 반영한다
+        win_adj = max(-5.0, min(5.0, (c["win_rate"] - 0.5) * 10)) if c["win_rate"] is not None else 0
         play_bonus = min(c["play"], PLAY_BONUS_CAP) * PLAY_BONUS
-        # 메타 3티어를 보통으로 보고, 1티어 차이마다 2%p
-        meta_bonus = (3 - c["meta_tier"]) * 0.02 if c["meta_tier"] else 0
-        c["score"] = round(adjusted + kda_bonus + play_bonus + meta_bonus, 4)
+        meta_bonus = (3 - c["meta_tier"]) * 1.5 if c["meta_tier"] else 0
+        c["score"] = round(adjusted + win_adj + play_bonus + meta_bonus, 1)
         c["reason"] = _reason(c, bracket_ko)
 
     champs.sort(key=lambda c: (c["score"], c["play"]), reverse=True)

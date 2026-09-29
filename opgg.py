@@ -21,7 +21,8 @@ import time
 
 import httpx
 
-from database import get_conn
+import perf
+from database import MATCH_EXTRA_COLUMNS, get_conn
 
 MCP_URL = "https://mcp-api.op.gg/mcp"
 REGION = "kr"
@@ -268,11 +269,33 @@ async def profile(game_name: str, tagline: str, fresh=False):
 
 _MATCH_FIELDS = [
     "data.game_history[].{id,created_at,game_type,game_length_second}",
+    "data.game_history[].average_tier_info.{tier}",
+    "data.game_history[].teams[].key",
+    "data.game_history[].teams[].game_stat.{champion_kill,gold_earned}",
     "data.game_history[].participants[].{champion_id,champion_name,position,team_key}",
     "data.game_history[].participants[].summoner.{puuid}",
     "data.game_history[].participants[].stats."
-    "{result,kill,death,assist,op_score,minion_kill,neutral_minion_kill}",
+    "{result,kill,death,assist,op_score,op_score_rank,minion_kill,neutral_minion_kill,"
+    "gold_earned,total_damage_dealt_to_champions,ward_place,vision_wards_bought_in_game,"
+    "largest_killing_spree}",
+    "data.game_history[].participants[].stats.op_score_timeline[].{score,second}",
 ]
+
+
+def _early_score(timeline):
+    """분 단위 OP.GG 평점에서 초반(14분 무렵) 값을 고른다. 없으면 None."""
+    points = [p for p in timeline or [] if isinstance(p, dict)
+              and isinstance(p.get("score"), (int, float)) and isinstance(p.get("second"), (int, float))]
+    if not points:
+        return None
+    # 14분이 안 돼서 끝난 판이면 가장 늦은 값을 쓴다
+    before = [p for p in points if p["second"] <= perf.EARLY_SEC]
+    pick = max(before, key=lambda p: p["second"]) if before else min(points, key=lambda p: p["second"])
+    return float(pick["score"])
+
+
+def _num(x):
+    return x if isinstance(x, (int, float)) and not isinstance(x, bool) else None
 
 
 async def matches(game_name: str, tagline: str, fresh=False):
@@ -283,9 +306,15 @@ async def matches(game_name: str, tagline: str, fresh=False):
             "lang": LANG, "limit": 20, "desired_output_fields": _MATCH_FIELDS})
         rows = []
         for g in _dig(got, "data", "game_history") or []:
+            teams = {t.get("key"): (t.get("game_stat") or {}) for t in g.get("teams") or []
+                     if isinstance(t, dict)}
             # 이 도구는 본인 한 명의 기록만 준다
             for p in g.get("participants") or []:
                 stats = p.get("stats") or {}
+                team = teams.get(p.get("team_key")) or {}
+                wards = _num(stats.get("ward_place"))
+                if wards is not None:
+                    wards += _num(stats.get("vision_wards_bought_in_game")) or 0
                 rows.append({
                     "puuid": _dig(p, "summoner", "puuid"),
                     "game_id": g.get("id"),
@@ -294,6 +323,15 @@ async def matches(game_name: str, tagline: str, fresh=False):
                     "champion": p.get("champion_name"),
                     "champion_id": p.get("champion_id"),
                     "cs": (stats.get("minion_kill") or 0) + (stats.get("neutral_minion_kill") or 0),
+                    "gold": _num(stats.get("gold_earned")),
+                    "damage": _num(stats.get("total_damage_dealt_to_champions")),
+                    "wards": wards,
+                    "spree": _num(stats.get("largest_killing_spree")),
+                    "op_rank": _num(stats.get("op_score_rank")),
+                    "early_score": _early_score(stats.get("op_score_timeline")),
+                    "team_kills": _num(team.get("champion_kill")),
+                    "team_gold": _num(team.get("gold_earned")),
+                    "avg_tier": _dig(g, "average_tier_info", "tier"),
                     "position": (p.get("position") or "").lower() or None,
                     "team_key": p.get("team_key"),
                     "result": stats.get("result"),
@@ -310,23 +348,23 @@ async def matches(game_name: str, tagline: str, fresh=False):
     return await _cached(key, PROFILE_TTL, fetch, fresh)
 
 
+_BASE_COLUMNS = ("puuid", "game_id", "created_at", "game_type", "champion", "position",
+                 "team_key", "result", "kills", "deaths", "assists", "op_score", "length_sec")
+
+
 def _store_matches(rows):
+    extra = tuple(MATCH_EXTRA_COLUMNS)
+    columns = _BASE_COLUMNS + extra
+    sql = ("INSERT INTO match_rows (%s) VALUES (%s)"
+           # 예전에 칸이 적을 때 저장한 판이면 새 칸을 채워 넣는다
+           " ON CONFLICT (puuid, game_id) DO UPDATE SET %s"
+           % (", ".join(columns), ", ".join("?" * len(columns)),
+              ", ".join("%s = excluded.%s" % (c, c) for c in extra + ("op_score",))))
     conn = get_conn()
     for r in rows:
         if not r["puuid"] or not r["game_id"]:
             continue
-        conn.execute(
-            "INSERT INTO match_rows (puuid, game_id, created_at, game_type, champion,"
-            " position, team_key, result, kills, deaths, assists, op_score, length_sec,"
-            " champion_id, cs)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-            # 예전에 CS 없이 저장한 판이면 채워 넣는다
-            " ON CONFLICT (puuid, game_id) DO UPDATE SET"
-            " champion_id = excluded.champion_id, cs = excluded.cs",
-            (r["puuid"], r["game_id"], r["created_at"], r["game_type"], r["champion"],
-             r["position"], r["team_key"], r["result"], r["kills"], r["deaths"],
-             r["assists"], r["op_score"], r["length_sec"], r["champion_id"], r["cs"]),
-        )
+        conn.execute(sql, tuple(r.get(c) for c in columns))
     conn.commit()
     conn.close()
 

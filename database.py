@@ -22,6 +22,21 @@ IS_POSTGRES = DATABASE_URL.startswith(("postgres://", "postgresql://"))
 # 예전 게시판의 memo.db 와 섞이지 않게 새 파일을 쓴다
 DB_NAME = os.environ.get("MYTIER_DB_PATH") or "mytier.db"
 
+# match_rows 에 나중에 붙인 칸. 플레이 점수(perf.py) 에 쓴다
+MATCH_EXTRA_COLUMNS = {
+    "champion_id": "INTEGER",
+    "cs": "INTEGER",
+    "gold": "INTEGER",         # 내가 번 골드
+    "damage": "INTEGER",       # 챔피언에게 준 피해
+    "wards": "INTEGER",        # 와드 설치 + 제어 와드 구매
+    "spree": "INTEGER",        # 최다 연속 킬
+    "op_rank": "INTEGER",      # 그 판 10명 중 OP.GG 평점 순위
+    "early_score": "REAL",     # 14분 무렵 OP.GG 평점(0~10)
+    "team_kills": "INTEGER",   # 우리 팀 킬 합(킬 관여율)
+    "team_gold": "INTEGER",    # 우리 팀 골드 합(골드 몫)
+    "avg_tier": "TEXT",        # 그 판의 평균 티어
+}
+
 # INSERT 뒤에 새 번호(id) 를 돌려받아야 하는 표.
 # 번호 칸이 없는 표에 RETURNING id 를 붙이면 오류가 나서 따로 적어 둔다
 _TABLES_WITH_ID = ("ACCOUNTS", "ROOMS")
@@ -224,10 +239,9 @@ def init_db():
     """)
     # 예전에 만든 표에는 없는 칸을 채워 넣는다
     columns = _columns(conn, "match_rows")
-    if "champion_id" not in columns:
-        conn.execute("ALTER TABLE match_rows ADD COLUMN champion_id INTEGER")
-    if "cs" not in columns:
-        conn.execute("ALTER TABLE match_rows ADD COLUMN cs INTEGER")
+    for name, kind in MATCH_EXTRA_COLUMNS.items():
+        if name not in columns:
+            conn.execute("ALTER TABLE match_rows ADD COLUMN %s %s" % (name, kind))
 
     conn.commit()
     conn.close()
