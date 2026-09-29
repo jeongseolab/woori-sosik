@@ -73,6 +73,16 @@ def _riot_id_or_400(text):
     return parts
 
 
+@app.get("/api/health")
+def health():
+    """깨우기 신호용. DB 와 OP.GG 는 건드리지 않는다.
+
+    GitHub Actions 가 10분마다 불러서 Render 무료 서버가 잠들지 않게 한다.
+    DB 까지 깨우면 Neon 무료 사용 시간이 줄어서 일부러 아무것도 안 한다.
+    """
+    return {"ok": True}
+
+
 # ── 로그인 ───────────────────────────────────────────────
 
 class SignupIn(BaseModel):
