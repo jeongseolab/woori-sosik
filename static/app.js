@@ -127,50 +127,108 @@ window.addEventListener("hashchange", route);
 
 // ── 로그인 ──────────────────────────────────────────────
 
+// 로그인 화면 왼쪽에 보여 줄 예시 티어표. 실제 챔피언 그림으로 "이런 걸 받는다" 를 보여 준다
+const GATE_SAMPLE = {
+  op: { key: "Ahri", name: "아리", note: "플레이 78점" },
+  rows: [["1", ["Yone", "LeeSin"]], ["2", ["Orianna", "Thresh", "Jax"]], ["3", ["Zed", "Garen"]]],
+};
+const LAST_ID_KEY = "tiergg-last-id";
+
+function champImg(key) {
+  return "https://opgg-static.akamaized.net/meta/images/lol/latest/champion/" + key + ".png";
+}
+
+function gateSample() {
+  const s = GATE_SAMPLE;
+  return `
+    <figure class="sample" aria-label="티어표 예시">
+      <div class="sample-op">
+        <img src="${champImg(s.op.key)}" alt="" width="64" height="64">
+        <div><span>OP</span><b>${s.op.name}</b><small>${s.op.note}</small></div>
+      </div>
+      ${s.rows.map(([t, keys]) => `
+        <div class="sample-row" data-t="${t}"><b>${t}</b>
+          <span>${keys.map(k => `<img src="${champImg(k)}" alt="" width="36" height="36" loading="lazy">`).join("")}</span></div>`).join("")}
+      <figcaption>예시 화면</figcaption>
+    </figure>`;
+}
+
 function renderGate(mode = "login") {
   const signup = mode === "signup";
+  let last = {};
+  try { last = JSON.parse(localStorage.getItem(LAST_ID_KEY) || "{}"); } catch {}
+
   view.innerHTML = `
     <section class="gate">
-      <div>
+      <div class="gate-intro">
+        <p class="gate-logo">Tier.gg</p>
         <h1>내가 한 챔피언만으로 만드는 티어표</h1>
-        <p class="lead">남들 티어표 말고, 내 전적과 내 티어 구간의 통계로 줄 세운 나만의 OP 챔피언을 확인하세요. 친구들과 방을 만들어 서로 비교하고 듀오 궁합도 볼 수 있어요.</p>
-        <div class="gate-demo" aria-hidden="true">
-          <div><b style="background:var(--gold)">OP</b><span></span></div>
-          <div><b style="background:var(--t1)">1</b><span></span></div>
-          <div><b style="background:var(--t2)">2</b><span></span></div>
-          <div><b style="background:var(--t3)">3</b><span></span></div>
-        </div>
+        <p class="lead">최근 20판에서 판마다 얼마나 잘했는지를 라인과 티어 기준으로 매겨, 나만의 OP와 1~5티어를 정해 줘요.</p>
+        <ul class="gate-points">
+          <li><b>나만의 티어표</b>승률보다 전투, 성장, 스노우볼 같은 플레이 점수로 줄 세워요.</li>
+          <li><b>그룹방</b>초대 코드로 친구들과 모여 지표를 그래프로 비교해요.</li>
+          <li><b>듀오 궁합</b>같이 한 판을 찾아 둘이 할 때 더 이기는지 보여 줘요.</li>
+        </ul>
       </div>
+
       <div class="gate-card">
-        <h2>${signup ? "LOL 계정으로 가입" : "LOL 계정으로 로그인"}</h2>
+        <div class="seg gate-tabs" role="tablist" aria-label="로그인 또는 가입">
+          <button type="button" role="tab" data-mode="login" aria-selected="${!signup}">로그인</button>
+          <button type="button" role="tab" data-mode="signup" aria-selected="${signup}">가입하기</button>
+        </div>
         <p class="note">${signup
-          ? "가입할 때 OP.GG 에서 계정이 있는지 확인해요. 한국 서버 계정만 됩니다."
+          ? "LOL 계정이 있는지 OP.GG 에서 확인한 뒤 만들어요. 한국 서버 계정만 됩니다."
           : "가입할 때 쓴 LOL ID 와 비밀번호를 넣어 주세요."}</p>
         <form id="gate-form" novalidate>
           <label for="lol-name">LOL ID</label>
           <div class="id-pair">
-            <input id="lol-name" name="lol_name" placeholder="닉네임" autocomplete="username" required>
+            <input id="lol-name" name="lol_name" placeholder="닉네임" autocomplete="username"
+                   value="${esc(signup ? "" : last.name || "")}" required>
             <span aria-hidden="true">#</span>
-            <input id="lol-tag" name="lol_tag" placeholder="KR1" aria-label="태그 (# 뒤)" maxlength="5" required>
+            <input id="lol-tag" name="lol_tag" placeholder="KR1" aria-label="태그 (# 뒤)" maxlength="5"
+                   value="${esc(signup ? "" : last.tag || "")}" required>
           </div>
           <label for="pw">${signup ? "이 사이트에서 쓸 비밀번호" : "비밀번호"}</label>
-          <input id="pw" name="password" type="password" autocomplete="${signup ? "new-password" : "current-password"}"
-                 placeholder="${signup ? "6글자 이상" : ""}" required>
+          <div class="pw-field">
+            <input id="pw" name="password" type="password" autocomplete="${signup ? "new-password" : "current-password"}"
+                   placeholder="${signup ? "6글자 이상" : ""}" required>
+            <button type="button" class="pw-toggle" aria-controls="pw" aria-pressed="false">보기</button>
+          </div>
           ${signup ? `
           <label for="pw2">비밀번호 확인</label>
-          <input id="pw2" name="password2" type="password" autocomplete="new-password"
-                 placeholder="한 번 더 입력" required>` : ""}
+          <input id="pw2" name="password2" type="password" autocomplete="new-password" placeholder="한 번 더 입력" required>
+          <p class="note">LOL 계정 비밀번호가 아니라 이 사이트에서만 쓰는 비밀번호예요.</p>` : ""}
+          <p class="caps" id="caps" hidden>Caps Lock 이 켜져 있어요</p>
           <p class="err" id="gate-err" aria-live="polite"></p>
           <button type="submit">${signup ? "가입하기" : "로그인"}</button>
         </form>
-        <p class="switch">${signup ? "이미 가입했나요?" : "처음인가요?"}
-          <button type="button" id="gate-switch">${signup ? "로그인" : "가입하기"}</button></p>
-        ${signup ? `<p class="note">LOL 계정 비밀번호가 아니라 이 사이트 전용 비밀번호예요. LOL 계정 비밀번호는 절대 넣지 마세요.</p>` : ""}
       </div>
+
+      <div class="gate-sample">${gateSample()}</div>
     </section>`;
 
-  document.getElementById("gate-switch").onclick = () => renderGate(signup ? "login" : "signup");
+  view.querySelectorAll(".gate-tabs button").forEach(b => b.onclick = () => {
+    if (b.dataset.mode !== mode) renderGate(b.dataset.mode);
+  });
+
   const form = document.getElementById("gate-form");
+
+  // 비밀번호 보기/숨기기 (두 칸 모두)
+  const toggle = form.querySelector(".pw-toggle");
+  toggle.onclick = () => {
+    const show = form.password.type === "password";
+    form.password.type = show ? "text" : "password";
+    if (form.password2) form.password2.type = form.password.type;
+    toggle.textContent = show ? "숨기기" : "보기";
+    toggle.setAttribute("aria-pressed", String(show));
+  };
+
+  // Caps Lock 이 켜져 있으면 알려 준다(비밀번호 틀리는 흔한 이유)
+  const caps = document.getElementById("caps");
+  form.addEventListener("keyup", e => {
+    if (e.getModifierState) caps.hidden = !e.getModifierState("CapsLock");
+  });
+
   form.onsubmit = async (e) => {
     e.preventDefault();
     const err = document.getElementById("gate-err");
@@ -180,6 +238,7 @@ function renderGate(mode = "login") {
     const password = form.password.value;
     if (!name) { err.textContent = "닉네임을 적어 주세요"; form.lol_name.focus(); return; }
     if (!tag) { err.textContent = "# 뒤의 태그를 적어 주세요 (예: KR1)"; form.lol_tag.focus(); return; }
+    if (!password) { err.textContent = "비밀번호를 적어 주세요"; form.password.focus(); return; }
     if (signup && password.length < 6) { err.textContent = "비밀번호는 6글자 이상이어야 합니다"; form.password.focus(); return; }
     if (signup && password !== form.password2.value) {
       err.textContent = "비밀번호 확인이 달라요. 두 칸에 똑같이 적어 주세요";
@@ -196,6 +255,7 @@ function renderGate(mode = "login") {
         { method: "POST", body: JSON.stringify({ riot_id, password }) });
       setToken(data.token);
       me = data.user;
+      try { localStorage.setItem(LAST_ID_KEY, JSON.stringify({ name: me.game_name, tag: me.tagline })); } catch {}
       location.hash = "#/tier";
       route();
     } catch (ex) {
@@ -204,6 +264,7 @@ function renderGate(mode = "login") {
       button.textContent = signup ? "가입하기" : "로그인";
     }
   };
+
   // 닉네임에 "이름#태그" 를 통째로 붙여 넣으면 알아서 두 칸으로 나눈다
   form.lol_name.addEventListener("input", () => {
     const v = form.lol_name.value;
@@ -214,7 +275,8 @@ function renderGate(mode = "login") {
       form.lol_tag.focus();
     }
   });
-  form.lol_name.focus();
+  // 저장된 아이디가 있으면 바로 비밀번호부터
+  (!signup && last.name ? form.password : form.lol_name).focus();
 }
 
 // ── 티어표 ──────────────────────────────────────────────
@@ -612,17 +674,28 @@ async function renderDuo(partner, fresh = false) {
     <h1>듀오 궁합</h1>
     <p class="lead">둘이 같은 팀으로 한 판을 찾아서, 같이 할 때 승률이 평소보다 오르는지 봐요.</p>
     <form class="duo-form" id="duo-form">
-      <input name="partner" placeholder="친구 Riot ID (이름#태그)" aria-label="친구 Riot ID" value="${esc(partner)}" required>
+      <div class="id-pair">
+        <input name="p_name" placeholder="친구 닉네임" aria-label="친구 닉네임" value="${esc(partner.split("#")[0] || "")}" required>
+        <span aria-hidden="true">#</span>
+        <input name="p_tag" placeholder="KR1" aria-label="친구 태그 (# 뒤)" maxlength="5" value="${esc(partner.split("#")[1] || "")}" required>
+      </div>
       <button>궁합 보기</button>
     </form>
     <div class="picks" id="picks"></div>
     <div id="duo-body"></div>`;
 
-  document.getElementById("duo-form").onsubmit = (e) => {
+  const form = document.getElementById("duo-form");
+  // 닉네임 칸에 "이름#태그" 를 붙여 넣으면 두 칸으로 나눈다
+  form.p_name.addEventListener("input", () => {
+    const v = form.p_name.value, at = v.lastIndexOf("#");
+    if (at > 0) { form.p_name.value = v.slice(0, at).trim(); form.p_tag.value = v.slice(at + 1).trim(); form.p_tag.focus(); }
+  });
+  form.onsubmit = (e) => {
     e.preventDefault();
-    const v = e.target.partner.value.trim();
-    if (!v.includes("#")) { toast("Riot ID 는 이름#태그 모양으로 적어 주세요"); return; }
-    location.hash = duoHref(v);
+    const name = form.p_name.value.trim();
+    const tag = form.p_tag.value.trim().replace(/^#+/, "");
+    if (!name || !tag) { toast("친구의 닉네임과 # 뒤 태그를 모두 적어 주세요"); return; }
+    location.hash = duoHref(name + "#" + tag);
   };
 
   fillPicks();
@@ -680,7 +753,14 @@ async function drawDuo(partner, fresh) {
   body.innerHTML = `
     <div class="versus">
       ${side(d.a, false)}
-      <div class="dial" style="--p:${d.score}" role="img" aria-label="궁합 ${d.score}점"><b>${d.score}</b><span>궁합 점수</span></div>
+      <div class="dial" role="img" aria-label="궁합 ${d.score}점">
+        <svg viewBox="0 0 120 120" aria-hidden="true">
+          <circle cx="60" cy="60" r="52" class="dial-track"></circle>
+          <circle cx="60" cy="60" r="52" class="dial-fill" pathLength="100"
+                  style="stroke-dasharray:${d.score} 100"></circle>
+        </svg>
+        <div><b>${d.score}</b><span>궁합 점수</span></div>
+      </div>
       ${side(d.b, true)}
     </div>
     <p class="verdict">${esc(d.verdict)}</p>
