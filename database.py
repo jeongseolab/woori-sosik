@@ -14,6 +14,7 @@ DATABASE_URL 이 있으면 Postgres, 없으면 예전처럼 파일이다.
 import os
 import re
 import sqlite3
+import threading
 
 DATABASE_URL = (os.environ.get("DATABASE_URL") or "").strip()
 IS_POSTGRES = DATABASE_URL.startswith(("postgres://", "postgresql://"))
@@ -90,10 +91,14 @@ class _Cursor:
 
 
 class _PgConn:
-    """psycopg 연결을 sqlite3 연결처럼 쓰게 감싼다."""
+    """psycopg 연결을 sqlite3 연결처럼 쓰게 감싼다.
 
-    def __init__(self, conn):
+    연결은 풀(_pool) 에서 빌려 온 것이다. close() 는 끊는 게 아니라 풀에 돌려준다.
+    """
+
+    def __init__(self, conn, pool=None):
         self._conn = conn
+        self._pool = pool
 
     def execute(self, sql, params=()):
         sql = _to_pg(_to_pg_types(sql))
@@ -122,14 +127,65 @@ class _PgConn:
         self._conn.commit()
 
     def close(self):
-        self._conn.close()
+        conn, self._conn = self._conn, None
+        if conn is None:
+            return                      # 이미 돌려줬다
+        if self._pool is None:
+            conn.close()
+            return
+        # 끝내지 않은 일(오류로 중간에 멈춘 것) 이 있으면 되돌린 뒤 돌려준다.
+        # 그대로 돌려주면 다음 사람이 망가진 연결을 받는다
+        from psycopg.pq import TransactionStatus
+        try:
+            if conn.info.transaction_status != TransactionStatus.IDLE:
+                conn.rollback()
+        except Exception:
+            pass
+        self._pool.putconn(conn)
+
+    def __del__(self):
+        # 오류가 나서 close() 를 못 부르고 빠져나간 경우에도 연결을 돌려준다.
+        # 안 돌려주면 풀이 비어서 사이트 전체가 멈춘다
+        try:
+            self.close()
+        except Exception:
+            pass
+
+
+# ── 연결 풀 ──────────────────────────────────────────────
+# 예전에는 DB 에 한 번 물어볼 때마다 Neon 까지 새로 연결했다(한 번에 0.1~0.3초).
+# 티어표 하나에 이런 일이 수십 번이라 화면을 옮길 때마다 느렸다.
+# 이제 연결을 몇 개 열어 두고 돌려 쓴다.
+#   - 최대 5개. 무료 Neon 의 동시 연결 한도보다 한참 적다
+#   - 4분 넘게 안 쓴 연결은 닫는다(min_size=0). 연결을 계속 붙잡고 있으면
+#     Neon 이 잠들지 못해 무료 사용 시간을 다 쓴다
+#   - 빌려주기 전에 살아 있는지 확인한다. Neon 이 잠들며 끊은 연결을 주지 않게
+POOL_MAX = 5
+POOL_MAX_IDLE_SEC = 240
+_pool = None
+_pool_lock = threading.Lock()
+
+
+def _get_pool():
+    global _pool
+    if _pool is None:
+        with _pool_lock:
+            if _pool is None:
+                from psycopg.rows import dict_row
+                from psycopg_pool import ConnectionPool
+                _pool = ConnectionPool(
+                    DATABASE_URL, min_size=0, max_size=POOL_MAX,
+                    max_idle=POOL_MAX_IDLE_SEC, timeout=20,
+                    kwargs={"row_factory": dict_row},
+                    check=ConnectionPool.check_connection,
+                    open=True, name="tiergg")
+    return _pool
 
 
 def get_conn():
     if IS_POSTGRES:
-        import psycopg
-        from psycopg.rows import dict_row
-        return _PgConn(psycopg.connect(DATABASE_URL, row_factory=dict_row))
+        pool = _get_pool()
+        return _PgConn(pool.getconn(), pool)
 
     _ensure_folder()
     conn = sqlite3.connect(DB_NAME)
