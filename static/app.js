@@ -237,13 +237,60 @@ function playerStrip(p, extra = "") {
     </section>`;
 }
 
+const AREAS = [["combat", "전투"], ["growth", "성장"], ["snowball", "스노우볼"],
+               ["damage", "딜"], ["vision", "시야"], ["opgg", "OP.GG 평점"]];
+const AREA_HINT = {
+  combat: "KDA와 킬 관여율",
+  growth: "분당 CS와 팀 골드 중 내 몫",
+  snowball: "14분 무렵 OP.GG 평점과 최다 연속 킬",
+  damage: "분당 챔피언 피해량",
+  vision: "분당 와드 설치와 제어 와드",
+  opgg: "OP.GG가 매긴 그 판 평점",
+};
+
+// 점수에 따라 색을 바꾼다. 50이 그 라인·티어의 보통
+function scoreColor(v) {
+  if (v == null) return "var(--muted)";
+  if (v >= 60) return "var(--gold)";
+  if (v < 40) return "var(--lose)";
+  return "var(--text)";
+}
+
+function areaBars(play) {
+  return AREAS.map(([k, label]) => {
+    const v = play.areas[k];
+    return `
+      <div class="area" title="${esc(AREA_HINT[k])}">
+        <span>${label}</span>
+        <i style="--w:${v == null ? 0 : v}%;--c:${scoreColor(v)}"></i>
+        <b style="color:${scoreColor(v)}">${v == null ? "-" : v}</b>
+      </div>`;
+  }).join("");
+}
+
+function diagnosis(p) {
+  if (!p.play) return "";
+  const x = p.play;
+  return `
+    <section class="diag">
+      <div class="diag-score">
+        <b style="color:${scoreColor(x.overall)}">${x.overall}</b>
+        <span>플레이 점수</span>
+        <small>최근 ${x.games}판 평균</small>
+      </div>
+      <div class="areas">${areaBars(x)}</div>
+      <p class="note diag-note">50점이 그 라인과 그 판 티어의 보통이에요. 20판 승률은 팀운이 커서 거의 반영하지 않아요.
+        킬 관여율 ${pct(x.kp)}, 팀 골드 중 내 몫 ${pct(x.gold_share)}, 분당 피해량 ${x.dmg_per_min ?? "-"}</p>
+    </section>`;
+}
+
 function champButton(c) {
   return `
     <button type="button" class="champ" data-id="${c.id}" aria-expanded="false"
             aria-label="${esc(c.name)} 자세히">
       ${c.image ? `<img src="${esc(c.image)}" alt="" width="60" height="60" loading="lazy">` : ""}
       <span>${esc(c.name)}</span>
-      <small>${pct(c.win_rate)} · ${c.play}판</small>
+      <small>${c.perf ? "플레이 " + c.perf.overall : pct(c.win_rate)} · ${c.play}판</small>
     </button>`;
 }
 
@@ -252,7 +299,9 @@ function champDetail(c, bracket) {
   return `
     <div class="detail">
       <h3>${esc(c.name)} ${c.tier ? c.tier + "티어" : "OP"}</h3>
+      ${c.perf ? `<div class="areas areas-inline">${areaBars(c.perf)}</div>` : ""}
       <dl>
+        <div><dt>플레이 점수</dt><dd style="color:${scoreColor(c.perf && c.perf.overall)}">${c.perf ? c.perf.overall + "점" : "-"}</dd></div>
         <div><dt>판수</dt><dd>${c.play}판 (${c.win}승)</dd></div>
         <div><dt>내 승률</dt><dd>${pct(c.win_rate)}</dd></div>
         <div><dt>KDA</dt><dd>${num(c.kda, 2)}</dd></div>
@@ -294,9 +343,10 @@ async function renderTier(riotId, fresh = false) {
 
   view.innerHTML = `
     <h1>${title}</h1>
-    <p class="lead">최근 ${data.games}판(${esc(queues)})에서 고른 챔피언 ${data.champion_count}개를 내 승률, KDA, 판수로 줄 세웠어요. ${esc(basis)}</p>
+    <p class="lead">최근 ${data.games}판(${esc(queues)})에서 고른 챔피언 ${data.champion_count}개를 판마다의 플레이 점수로 줄 세웠어요. ${esc(basis)}</p>
     ${short}
     ${playerStrip(p)}
+    ${diagnosis(p)}
     <section class="board">
       <article class="op reveal">
         <p class="op-mark">OP</p>
@@ -342,6 +392,8 @@ async function renderTier(riotId, fresh = false) {
 // 비교표의 칸. higher: 클수록 좋은가
 const COLUMNS = [
   { key: "rank", label: "랭크", value: m => rankScore(m.rank), show: m => esc(m.rank ? m.rank.tier_ko + (["MASTER","GRANDMASTER","CHALLENGER"].includes(m.rank.tier) ? "" : " " + m.rank.division) + " " + m.rank.lp + "LP" : "없음") },
+  { key: "play", label: "플레이", value: m => m.play ? m.play.overall : null, show: m => m.play ? m.play.overall : "-" },
+  { key: "snowball", label: "스노우볼", value: m => m.play ? m.play.areas.snowball : null, show: m => m.play && m.play.areas.snowball != null ? m.play.areas.snowball : "-" },
   { key: "win_rate", label: "승률", value: m => m.win_rate, show: m => pct(m.win_rate) },
   { key: "kda", label: "KDA", value: m => m.kda, show: m => num(m.kda, 2) },
   { key: "cs_per_min", label: "분당 CS", value: m => m.cs_per_min, show: m => num(m.cs_per_min) },
@@ -586,6 +638,8 @@ async function drawDuo(partner, fresh) {
           ${cmpRow("최근 승률", d.a.win_rate, d.b.win_rate, pct)}
           ${cmpRow("최근 KDA", d.a.kda, d.b.kda, v => num(v, 2))}
           ${cmpRow("분당 CS", d.a.cs_per_min, d.b.cs_per_min, v => num(v))}
+          ${cmpRow("플레이 점수", d.a.play && d.a.play.overall, d.b.play && d.b.play.overall, v => v ?? "-")}
+          ${cmpRow("스노우볼", d.a.play && d.a.play.areas.snowball, d.b.play && d.b.play.areas.snowball, v => v ?? "-")}
           ${t.games ? cmpRow("같이 할 때 KDA", t.kda_a, t.kda_b, v => num(v, 2)) : ""}
           <tr><td>${esc(d.a.main_lane_ko || "-")}</td><td>주 라인</td><td>${esc(d.b.main_lane_ko || "-")}</td></tr>
         </table>

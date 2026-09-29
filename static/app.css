@@ -270,6 +270,32 @@ h2 { font-size: 22px; margin: 0 0 14px; }
 .detail dt { font-size: 12px; color: var(--muted); }
 .detail dd { margin: 0; font-weight: 700; }
 
+/* ── 플레이 진단 ──────────────────── */
+.diag {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 8px 24px;
+  align-items: center;
+  margin: -6px 0 22px;
+  padding: 16px 20px;
+  border-radius: 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+}
+.diag-score { text-align: center; }
+.diag-score b { display: block; font: 52px/1 var(--display); }
+.diag-score span { display: block; font-size: 13px; font-weight: 700; margin-top: 4px; }
+.diag-score small { color: var(--muted); font-size: 12px; }
+.diag-note { grid-column: 1 / -1; margin: 4px 0 0; }
+.areas { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 24px; }
+.area { display: grid; grid-template-columns: 76px 1fr 30px; align-items: center; gap: 10px; font-size: 13px; }
+.area span { color: var(--muted); white-space: nowrap; }
+.area b { text-align: right; }
+.area i { height: 8px; border-radius: 4px; background: var(--panel-2); overflow: hidden; }
+.area i::before { content: ""; display: block; height: 100%; width: var(--w); background: var(--c); }
+.areas-inline { margin-bottom: 12px; }
+.detail .area i { background: var(--panel); }
+
 .toolbar { display: flex; gap: 10px; align-items: center; margin: 18px 0 0; flex-wrap: wrap; }
 
 /* ── 기다리는 동안 ──────────────────── */
@@ -431,6 +457,8 @@ td button, td a.btn { padding: 5px 10px; font-size: 13px; }
   .champ { width: 64px; }
   .champ img { width: 52px; height: 52px; }
   .versus { grid-template-columns: minmax(0, 1fr); justify-items: center; }
+  .diag { grid-template-columns: 1fr; }
+  .areas { grid-template-columns: minmax(0, 1fr); }
   .side-card { max-width: 100%; }
   .side-card, .side-card.right { flex-direction: row; text-align: left; }
   .duo-form { flex-direction: column; }
