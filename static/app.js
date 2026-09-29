@@ -262,8 +262,11 @@ async function route() {
   showTop(true, page);
 
   const target = arg ? decodeURIComponent(arg) : "";
+  // 다른 화면으로 가면 돌던 게임은 멈춘다
+  stopDodge();
   if (page === "rooms") return renderRooms(target);
   if (page === "duo") return renderDuo(target);
+  if (page === "dodge") return renderDodge(target);
   return renderTier(target);
 }
 
@@ -671,10 +674,15 @@ async function loadRooms() {
   return lastRooms;
 }
 
-async function renderRooms(roomId) {
+// #/rooms/3/dodge 처럼 방 번호 뒤에 탭을 붙이면 그 탭을 바로 연다
+const ROOM_TABS = ["board", "stats", "weekly", "dodge"];
+
+async function renderRooms(target) {
+  let [roomId = "", tab] = (target || "").split("/");
+  if (ROOM_TABS.includes(tab)) roomTab = tab;
   let rooms;
   try { rooms = await loadRooms(); }
-  catch (ex) { return failed(ex.message, () => renderRooms(roomId)); }
+  catch (ex) { return failed(ex.message, () => renderRooms(target)); }
 
   if (!roomId && rooms.length) roomId = String(rooms[0].id);
 
@@ -732,12 +740,18 @@ const PLAY_METRICS = AREAS.map(([k, label]) => ({
   key: k, label, hint: AREA_HINT[k], value: m => m.play ? m.play.areas[k] : null,
   show: v => String(v), max: 100, mid: 50,
 }));
+// low: 적을수록 좋은 지표(데스). 1등 표시를 가장 작은 값에 붙인다
 const BASIC_METRICS = [
   { key: "win_rate", label: "승률", hint: "최근 판 승률", value: m => m.win_rate, show: v => pct(v), max: 1, mid: 0.5 },
   { key: "kda", label: "KDA", hint: "(킬+어시스트)÷데스", value: m => m.kda, show: v => num(v, 2) },
+  { key: "kills", label: "평균 킬", hint: "한 판에 평균 몇 번 잡았나", value: m => m.kills_avg, show: v => num(v) },
+  { key: "deaths", label: "평균 데스", hint: "한 판에 평균 몇 번 죽었나. 적을수록 1등", value: m => m.deaths_avg, show: v => num(v), low: true },
+  { key: "assists", label: "평균 어시스트", hint: "한 판에 평균 몇 번 도왔나", value: m => m.assists_avg, show: v => num(v) },
   { key: "cs_per_min", label: "분당 CS", hint: "라인 미니언과 정글 몬스터", value: m => m.cs_per_min, show: v => num(v) },
   { key: "kp", label: "킬 관여율", hint: "우리 팀 킬 중 내가 관여한 비율", value: m => m.play ? m.play.kp : null, show: v => pct(v), max: 1 },
+  { key: "gold_share", label: "골드 몫", hint: "우리 팀 골드 중 내가 번 비율", value: m => m.play ? m.play.gold_share : null, show: v => pct(v) },
   { key: "dmg", label: "분당 피해량", hint: "챔피언에게 준 피해", value: m => m.play ? m.play.dmg_per_min : null, show: v => String(v) },
+  { key: "wards", label: "분당 와드", hint: "와드 설치와 제어 와드 구매", value: m => m.wards_per_min, show: v => num(v, 2) },
   { key: "games", label: "최근 판수", hint: "점수에 쓴 협곡 판", value: m => m.games, show: v => String(v), max: 20 },
 ];
 
@@ -746,7 +760,7 @@ function metricChart(metric, members) {
   const known = vals.filter(v => v != null);
   if (!known.length) return "";
   const max = metric.max ?? Math.max(...known) * 1.1;
-  const top = Math.max(...known);
+  const top = metric.low ? Math.min(...known) : Math.max(...known);
   const rows = members.map(({ m, color }, i) => {
     const v = vals[i];
     const w = v == null ? 0 : Math.max(2, Math.min(100, v / max * 100));
@@ -847,7 +861,45 @@ async function renderRoom(roomId, fresh = false) {
 
   // 색은 들어온 순서(서버가 주는 순서)로 고정
   const members = room.members.map((m, i) => ({ m: { ...m, pending: true }, color: memberColor(i) }));
+  const colorOf = id => (members.find(s => s.m.account_id === id) || {}).color || memberColor(99);
   let arrived = 0;
+
+  // 주간 랭킹·스킬샷 순위는 DB 만 읽어서 빠르다. 그 탭을 처음 열 때 받는다.
+  // 주간 랭킹은 카드가 다 오면(= 모두의 새 판이 쌓이면) 한 번 더 받는다
+  const extra = { weekly: null, dodge: null };
+  const loadingExtra = {};
+  function loadExtra(kind) {
+    if (loadingExtra[kind]) return;
+    loadingExtra[kind] = true;
+    api("/api/rooms/" + roomId + "/" + kind)
+      .then(d => { extra[kind] = d; }, ex => { extra[kind] = { error: ex.message }; })
+      .finally(() => {
+        loadingExtra[kind] = false;
+        if (seq === roomLoadSeq && body.isConnected) draw();
+      });
+  }
+
+  function tabBody(ok, waiting) {
+    if (roomTab === "board") {
+      return `<div class="pcards">${members.filter(({ m }) => !m.error).map(({ m, color }) =>
+        m.pending ? pendingCard(m, color) : boardCard(m, color, m.account_id === room.me)).join("")}</div>`;
+    }
+    if (roomTab === "weekly" || roomTab === "dodge") {
+      const d = extra[roomTab];
+      if (!d) { loadExtra(roomTab); return funLoader(roomTab === "weekly" ? "이번 주 기록을 모으는 중이에요." : "", true); }
+      if (d.error) return `<div class="empty-state"><strong>${esc(d.error)}</strong></div>`;
+      return roomTab === "weekly" ? weeklyView(d, colorOf, waiting.length) : dodgeBoard(d, colorOf, roomId);
+    }
+    if (!ok.length) return funLoader("그래프를 그릴 전적을 모으는 중이에요.");
+    return `
+      ${waiting.length ? `<p class="note">아직 ${waiting.length}명을 불러오는 중이에요. 오는 대로 그래프에 더해져요.</p>` : ""}
+      <div class="legend">${ok.map(({ m, color }) => `<span><i style="background:${color}"></i>${esc(m.game_name)}</span>`).join("")}</div>
+      <h2 class="sub-h">플레이 점수 <small>50점이 그 라인과 그 판 티어의 보통</small></h2>
+      <div class="metrics">${PLAY_METRICS.map(x => metricChart(x, ok)).join("")}</div>
+      <h2 class="sub-h">기본 지표 <small>최근 20판</small></h2>
+      <div class="metrics">${BASIC_METRICS.map(x => metricChart(x, ok)).join("")}</div>
+      ${roomTable(room, ok)}`;
+  }
 
   function draw() {
     const ok = members.filter(({ m }) => !m.pending && !m.error);
@@ -864,29 +916,25 @@ async function renderRoom(roomId, fresh = false) {
           <span class="bar"><i style="width:${Math.round(arrived / total * 100)}%"></i></span>
           <span>${total}명 중 ${arrived}명 불러옴</span>
         </div>` : ""}
-      <div class="seg" role="tablist" aria-label="방 화면">
+      <div class="seg room-tabs" role="tablist" aria-label="방 화면">
         <button type="button" role="tab" data-tab="board" aria-selected="${roomTab === "board"}">OP · 티어표</button>
         <button type="button" role="tab" data-tab="stats" aria-selected="${roomTab === "stats"}">지표 비교</button>
+        <button type="button" role="tab" data-tab="weekly" aria-selected="${roomTab === "weekly"}">주간 랭킹</button>
+        <button type="button" role="tab" data-tab="dodge" aria-selected="${roomTab === "dodge"}">스킬샷 순위</button>
       </div>
-      ${roomTab === "board" ? `
-        <div class="pcards">${members.filter(({ m }) => !m.error).map(({ m, color }) =>
-          m.pending ? pendingCard(m, color) : boardCard(m, color, m.account_id === room.me)).join("")}</div>`
-      : ok.length ? `
-        ${waiting.length ? `<p class="note">아직 ${waiting.length}명을 불러오는 중이에요. 오는 대로 그래프에 더해져요.</p>` : ""}
-        <div class="legend">${ok.map(({ m, color }) => `<span><i style="background:${color}"></i>${esc(m.game_name)}</span>`).join("")}</div>
-        <h2 class="sub-h">플레이 점수 <small>50점이 그 라인과 그 판 티어의 보통</small></h2>
-        <div class="metrics">${PLAY_METRICS.map(x => metricChart(x, ok)).join("")}</div>
-        <h2 class="sub-h">기본 지표 <small>최근 20판</small></h2>
-        <div class="metrics">${BASIC_METRICS.map(x => metricChart(x, ok)).join("")}</div>
-        ${roomTable(room, ok)}`
-      : funLoader("그래프를 그릴 전적을 모으는 중이에요.")}
+      ${tabBody(ok, waiting)}
       ${broken.length ? `<p class="note">전적을 못 불러온 사람: ${broken.map(({ m }) => esc(m.riot_id) + " (" + esc(m.error) + ")").join(", ")}</p>` : ""}
       <div class="toolbar">
         <button type="button" class="ghost" id="room-refresh">모두 최신 전적으로</button>
         <button type="button" class="ghost" id="leave">방 나가기</button>
       </div>`;
 
-    body.querySelectorAll(".seg button").forEach(b => b.onclick = () => { roomTab = b.dataset.tab; draw(); });
+    body.querySelectorAll(".seg button").forEach(b => b.onclick = () => {
+      roomTab = b.dataset.tab;
+      // 새로고침해도 같은 탭이 열리게 주소만 바꾼다(화면을 다시 부르지는 않는다)
+      history.replaceState(null, "", "#/rooms/" + roomId + "/" + roomTab);
+      draw();
+    });
     // 티어표 링크는 팝업으로. Ctrl/가운데 클릭(새 탭) 은 그대로 둔다
     body.querySelectorAll("a[data-player]").forEach(a => a.onclick = e => {
       if (e.ctrlKey || e.metaKey || e.shiftKey || e.button !== 0) return;
@@ -917,9 +965,165 @@ async function renderRoom(roomId, fresh = false) {
             ex => { slot.m = { ...slot.m, pending: false, error: ex.message }; })
       .finally(() => {
         arrived += 1;
+        // 모두 왔으면 새로 쌓인 판으로 주간 랭킹을 다시 받는다
+        if (arrived === members.length && extra.weekly) { extra.weekly = null; if (roomTab === "weekly") loadExtra("weekly"); }
         if (seq === roomLoadSeq && body.isConnected) draw();
       });
   });
+}
+
+// ── 주간 랭킹 ───────────────────────────────────────────
+
+// need: 이번 주 판수가 min_games 이상이어야 순위에 든다. low: 적을수록 1등
+const WEEK_AWARDS = [
+  { key: "play", label: "플레이 점수", icon: "👑", show: v => v + "점", need: true },
+  { key: "win_rate", label: "승률", icon: "🏆", show: v => pct(v), need: true },
+  { key: "kda", label: "KDA", icon: "⚔️", show: v => num(v, 2), need: true },
+  { key: "deaths_avg", label: "적게 죽기", icon: "🛡️", show: v => num(v) + "데스", need: true, low: true },
+  { key: "games", label: "많이 한 사람", icon: "🔥", show: v => v + "판" },
+  { key: "dodge_best", label: "스킬샷 피하기", icon: "💨", show: v => DodgeGame.fmt(v / 1000) },
+];
+
+function shortDate(iso) {
+  const d = new Date(iso);
+  return (d.getMonth() + 1) + "/" + d.getDate();
+}
+
+function weeklyView(data, colorOf, waiting) {
+  const ranked = WEEK_AWARDS.map(a => {
+    const rows = data.members
+      // 판수·스킬샷은 0 이면 안 한 것이라 뺀다. 데스 0 은 진짜 기록이다
+      .filter(m => m[a.key] != null && (a.need || a.low || m[a.key] > 0))
+      .filter(m => !a.need || m.games >= data.min_games)
+      .sort((x, y) => a.low ? x[a.key] - y[a.key] : y[a.key] - x[a.key]);
+    // 같은 값이면 같은 순위(1, 1, 3)
+    const ranks = rows.map(m => rows.findIndex(o => o[a.key] === m[a.key]) + 1);
+    return { a, rows, ranks };
+  });
+
+  // 1등(공동 포함)을 가장 많이 한 사람이 이번 주 MVP
+  const firsts = {};
+  ranked.forEach(({ rows, ranks }) => rows.forEach((m, i) => {
+    if (ranks[i] === 1) firsts[m.account_id] = (firsts[m.account_id] || 0) + 1;
+  }));
+  const most = Math.max(0, ...Object.values(firsts));
+  const mvps = data.members.filter(m => most && firsts[m.account_id] === most);
+  const end = new Date(new Date(data.until).getTime() - 1);
+
+  const card = ({ a, rows, ranks }) => `
+    <section class="award">
+      <h3><span aria-hidden="true">${a.icon}</span> ${esc(a.label)}</h3>
+      ${rows.length ? `<ol>${rows.map((m, i) => `
+        <li class="${m.account_id === data.me ? "me" : ""} ${ranks[i] === 1 ? "first" : ""}">
+          <span class="rk">${ranks[i]}</span>
+          <span class="mwho"><i style="background:${colorOf(m.account_id)}"></i><span>${esc(m.game_name)}</span></span>
+          <b>${esc(a.show(m[a.key]))}</b>
+        </li>`).join("")}</ol>`
+        : `<p class="note">${a.need ? "이번 주 " + data.min_games + "판 이상 한 사람이 없어요" : "아직 기록이 없어요"}</p>`}
+    </section>`;
+
+  return `
+    <div class="week-head">
+      <h2 class="sub-h">이번 주 <small>${shortDate(data.since)}(월) ~ ${shortDate(end)}(일) · 한국 시각</small></h2>
+      ${mvps.length ? `<p class="mvp"><span aria-hidden="true">⭐</span> 이번 주 ${mvps.length > 1 ? "공동 " : ""}MVP
+        ${mvps.map(m => `<b style="color:${colorOf(m.account_id)}">${esc(m.game_name)}</b>`).join(", ")} <small>1등 ${most}개</small></p>` : ""}
+    </div>
+    ${waiting ? `<p class="note">아직 ${waiting}명의 전적을 불러오는 중이에요. 다 오면 순위를 다시 매겨요.</p>` : ""}
+    <div class="awards">${ranked.map(card).join("")}</div>
+    <p class="note">협곡 판(솔로·자유·일반)만, Tier.gg 에서 한 번이라도 불러온 판만 세요. 방을 열 때마다 모두의 새 판이 쌓여요.
+      점수·승률·KDA·데스는 이번 주 ${data.min_games}판 이상 한 사람만 순위에 들어요.</p>`;
+}
+
+// ── 스킬샷 순위 (그룹방) ────────────────────────────────
+
+function dodgeBoard(data, colorOf, roomId, challenge = true) {
+  const fmt = ms => ms == null ? "-" : DodgeGame.fmt(ms / 1000);
+  const played = data.members.filter(m => m.best != null);
+  return `
+    <div class="dodge-board-head">
+      <h2 class="sub-h">스킬샷 피하기 순위 <small>최고 기록 순</small></h2>
+      ${challenge ? `<a class="btn" href="#/dodge/${roomId}">도전하기</a>` : ""}
+    </div>
+    ${played.length ? "" : `<p class="note">아직 아무도 기록이 없어요. 첫 기록을 세워 보세요.</p>`}
+    <div class="table-wrap"><table class="dodge-table">
+      <thead><tr><th scope="col">순위</th><th scope="col">소환사</th><th scope="col">최고 기록</th><th scope="col">이번 주</th><th scope="col">판수</th></tr></thead>
+      <tbody>${data.members.map((m, i) => `
+        <tr class="${m.account_id === data.me ? "me" : ""}">
+          <td>${m.best == null ? "-" : i + 1}</td>
+          <td><span class="mwho"><i style="background:${colorOf(m.account_id)}"></i><span>${esc(m.game_name)}</span></span></td>
+          <td><b>${fmt(m.best)}</b></td>
+          <td>${fmt(m.week_best)}</td>
+          <td>${m.runs || 0}</td>
+        </tr>`).join("")}</tbody>
+    </table></div>`;
+}
+
+// ── 연습장: 스킬샷 피하기 ───────────────────────────────
+// 게임은 dodge.js 가 돌린다. 여기서는 판 시작·끝을 서버에 알리고 순위를 보여 준다.
+// 서버를 기다리지 않고 게임부터 띄운다. 기록과 순위는 뒤에서 채운다
+
+let dodgeGame = null;
+function stopDodge() {
+  if (dodgeGame) { dodgeGame.destroy(); dodgeGame = null; }
+}
+
+function renderDodge(roomArg) {
+  const roomId = /^\d+$/.test(roomArg || "") ? roomArg : "";
+  const boardHref = roomId ? "#/rooms/" + roomId + "/dodge" : "#/rooms";
+  view.innerHTML = `
+    <section class="dodge">
+      <div class="dodge-head">
+        <h1>스킬샷 피하기</h1>
+        <a class="btn ghost" href="${boardHref}">${roomId ? "방 순위표" : "그룹방 순위표"}</a>
+      </div>
+      <div id="dodge-root"></div>
+      ${roomId ? `<div id="dodge-mini" class="dodge-mini"></div>` : ""}
+    </section>`;
+
+  const fmt = ms => ms == null ? "-" : DodgeGame.fmt(ms / 1000);
+  const showBest = r => dodgeGame && dodgeGame.setBest(
+    r.best == null ? "" : `최고 <b>${fmt(r.best)}</b> · 이번 주 <b>${fmt(r.week_best)}</b>`);
+
+  let runPromise = null;
+  dodgeGame = DodgeGame.mount(document.getElementById("dodge-root"), {
+    links: `<a class="btn ghost" href="${boardHref}">순위표 보기</a>`,
+    onStart() {
+      runPromise = api("/api/dodge/start", { method: "POST" }).then(r => r.run);
+      runPromise.catch(() => {});
+    },
+    async onEnd({ ms, dodged }) {
+      let r;
+      try {
+        const run = await runPromise;
+        r = await api("/api/dodge/finish", { method: "POST", body: JSON.stringify({ run, ms, dodged }) });
+      } catch (ex) {
+        return `<p class="note">기록을 저장하지 못했어요 (${esc(ex.message)})</p>`;
+      }
+      showBest(r);
+      if (roomId) drawMini();
+      if (!r.saved) return `<p class="note">1초 넘게 버틴 판부터 기록해요</p>`;
+      if (r.new_best) return `<p class="dodge-new">🎉 최고 기록!</p>`;
+      if (r.new_week_best) return `<p class="dodge-new">이번 주 최고 기록!</p>`;
+      return `<p class="note">최고 기록 ${fmt(r.best)}</p>`;
+    },
+  });
+
+  api("/api/dodge/me").then(showBest, () => {});
+
+  // 방에서 왔으면 그 방 순위를 게임 아래에 작게
+  async function drawMini() {
+    const box = document.getElementById("dodge-mini");
+    if (!box) return;
+    try {
+      const d = await api("/api/rooms/" + roomId + "/dodge");
+      // 색은 방 화면과 같게, 들어온 순서(slot)로
+      const colorOf = id => memberColor(d.members.find(m => m.account_id === id).slot);
+      box.innerHTML = dodgeBoard(d, colorOf, roomId, false);
+    } catch (ex) {
+      box.innerHTML = `<p class="note">${esc(ex.message)}</p>`;
+    }
+  }
+  if (roomId) drawMini();
 }
 
 // ── 듀오 궁합 ───────────────────────────────────────────

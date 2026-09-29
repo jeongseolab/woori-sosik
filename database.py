@@ -293,6 +293,18 @@ def init_db():
             PRIMARY KEY (puuid, game_id)
         )
     """)
+    # ── 스킬샷 피하기 기록 ─────────────────────────────
+    # 판마다 한 줄. 최고 기록과 이번 주 최고 기록을 여기서 뽑는다.
+    # played_at 은 초 단위 시각(time.time())
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS dodge_runs (
+            account_id INTEGER NOT NULL,
+            ms         INTEGER NOT NULL,
+            dodged     INTEGER,
+            played_at  REAL NOT NULL
+        )
+    """)
+
     # 예전에 만든 표에는 없는 칸을 채워 넣는다
     columns = _columns(conn, "match_rows")
     for name, kind in MATCH_EXTRA_COLUMNS.items():

@@ -83,17 +83,22 @@ def _totals(rows):
     """판들을 합친 승률·KDA·분당 CS."""
     n = len(rows)
     if not n:
-        return {"games": 0, "wins": 0, "win_rate": None, "kda": None, "cs_per_min": None}
+        return {"games": 0, "wins": 0, "win_rate": None, "kda": None, "cs_per_min": None,
+                "kills_avg": None, "deaths_avg": None, "assists_avg": None, "wards_per_min": None}
     wins = sum(r["result"] == "WIN" for r in rows)
     k = sum(r["kills"] or 0 for r in rows)
     d = sum(r["deaths"] or 0 for r in rows)
     a = sum(r["assists"] or 0 for r in rows)
-    # CS 를 모르는 판(예전에 저장한 판)은 분당 CS 계산에서 뺀다
+    # CS 를 모르는 판(예전에 저장한 판)은 분당 CS 계산에서 뺀다. 와드도 같다
     with_cs = [r for r in rows if r.get("cs") is not None and r.get("length_sec")]
     minutes = sum(r["length_sec"] for r in with_cs) / 60
+    with_wards = [r for r in rows if r.get("wards") is not None and r.get("length_sec")]
+    ward_min = sum(r["length_sec"] for r in with_wards) / 60
     return {"games": n, "wins": wins, "win_rate": round(wins / n, 3),
             "kda": _kda(k, d, a),
-            "cs_per_min": round(sum(r["cs"] for r in with_cs) / minutes, 1) if minutes else None}
+            "cs_per_min": round(sum(r["cs"] for r in with_cs) / minutes, 1) if minutes else None,
+            "kills_avg": round(k / n, 1), "deaths_avg": round(d / n, 1), "assists_avg": round(a / n, 1),
+            "wards_per_min": round(sum(r["wards"] for r in with_wards) / ward_min, 2) if ward_min else None}
 
 
 def summary(profile, rows):

@@ -4,6 +4,7 @@
   - 나만의 티어표: 내가 한 챔피언만으로 OP 1명 + 1~5티어
   - 그룹방: 초대 코드로 모인 친구들끼리 지표를 나란히 본다
   - 듀오 궁합: 같이 한 판을 찾아 승률·지표를 정리한다
+  - 연습장: 스킬샷 피하기 기록과 그룹방 순위, 주간 랭킹
 
 로그인 표(token) 는 Authorization: Bearer <token> 머리글로 받는다.
 """
@@ -19,6 +20,7 @@ from pydantic import BaseModel
 
 import duo
 import opgg
+import ranking
 import tierlist
 from auth import (check_by_puuid, check_login, create_account, end_session,
                   find_account, puuid_of, rename_account, riot_key, split_riot_id,
@@ -377,6 +379,28 @@ def room_members(room_id: int, authorization: str = Header(None)):
     return {"members": [a["riot_id"] for a in (find_account(i) for i in ids) if a]}
 
 
+def _room_accounts(room_id, user):
+    """방 사람들의 계정. 내가 그 방에 없으면 404."""
+    ids = _member_ids(room_id)
+    if user["id"] not in ids:
+        raise HTTPException(status_code=404, detail="방을 찾지 못했습니다")
+    return [a for a in (find_account(i) for i in ids) if a]
+
+
+@app.get("/api/rooms/{room_id}/dodge")
+def room_dodge(room_id: int, authorization: str = Header(None)):
+    """방 사람들의 스킬샷 피하기 순위. DB 만 읽어서 바로 나온다."""
+    user = _need_login(authorization)
+    return {**ranking.dodge_board(_room_accounts(room_id, user)), "me": user["id"]}
+
+
+@app.get("/api/rooms/{room_id}/weekly")
+def room_weekly(room_id: int, authorization: str = Header(None)):
+    """이번 주 방 사람들의 성적. 쌓아 둔 경기만 읽는다(OP.GG 는 안 부른다)."""
+    user = _need_login(authorization)
+    return {**ranking.weekly(_room_accounts(room_id, user)), "me": user["id"]}
+
+
 @app.delete("/api/rooms/{room_id}/me")
 def leave_room(room_id: int, authorization: str = Header(None)):
     """방에서 나간다. 마지막 사람이 나가면 방도 없앤다."""
@@ -409,6 +433,35 @@ async def duo_check(partner: str, me_id: str = None, fresh: bool = False,
         raise HTTPException(status_code=400, detail="다른 사람의 Riot ID 를 넣어 주세요")
     return await duo.compare(a_name, a_tag, b_name, b_tag, fresh,
                              _puuid_for(a_name, a_tag, user), _puuid_for(b_name, b_tag, user))
+
+
+# ── 연습장: 스킬샷 피하기 ────────────────────────────────
+
+class DodgeEnd(BaseModel):
+    run: str
+    ms: int
+    dodged: int = 0
+
+
+@app.post("/api/dodge/start")
+def dodge_start(authorization: str = Header(None)):
+    """판을 시작할 때 표를 끊는다. 끝났을 때 이 표로 기록이 말이 되는지 본다."""
+    user = _need_login(authorization)
+    return {"run": ranking.start_run(user["id"])}
+
+
+@app.post("/api/dodge/finish")
+def dodge_finish(body: DodgeEnd, authorization: str = Header(None)):
+    user = _need_login(authorization)
+    try:
+        return ranking.finish_run(user["id"], body.run, body.ms, body.dodged)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/dodge/me")
+def dodge_me(authorization: str = Header(None)):
+    return ranking.my_dodge(_need_login(authorization)["id"])
 
 
 # 이 줄은 항상 맨 아래! 위의 주소들을 먼저 찾고, 없으면 static 을 내려준다
