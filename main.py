@@ -235,8 +235,12 @@ def join_room(body: JoinIn, authorization: str = Header(None)):
 
 
 @app.get("/api/rooms/{room_id}")
-async def room_detail(room_id: int, fresh: bool = False, authorization: str = Header(None)):
-    """방 사람들의 지표를 나란히. 방에 들어온 사람만 볼 수 있다."""
+async def room_detail(room_id: int, fresh: bool = False, lite: bool = False,
+                      authorization: str = Header(None)):
+    """방 사람들의 지표를 나란히. 방에 들어온 사람만 볼 수 있다.
+
+    lite=1 이면 OP.GG 를 부르지 않고 사람 목록만 바로 준다.
+    """
     user = _need_login(authorization)
     room = _room_row(room_id)
     ids = _member_ids(room_id)
@@ -244,24 +248,46 @@ async def room_detail(room_id: int, fresh: bool = False, authorization: str = He
         raise HTTPException(status_code=404, detail="방을 찾지 못했습니다")
 
     accounts = [a for a in (find_account(i) for i in ids) if a]
+    head = {"id": room["id"], "name": room["name"], "code": room["code"],
+            "owner_id": room["owner_id"], "me": user["id"]}
+    if lite:
+        # 화면이 먼저 뜨도록 사람 목록만. 카드는 /member/{id} 로 한 명씩 받는다
+        return {**head, "members": [{"account_id": a["id"], "riot_id": a["riot_id"],
+                                     "game_name": a["game_name"]} for a in accounts]}
+    members = await asyncio.gather(*[_member_card(a, fresh) for a in accounts])
+    return {**head, "members": members}
 
-    async def one(acc):
-        try:
-            board = await tierlist.build(acc["game_name"], acc["tagline"], fresh)
-        except opgg.OpggError as e:
-            return {"account_id": acc["id"], "riot_id": acc["riot_id"], "error": str(e)}
-        # 방 화면에는 그림과 이름만 있으면 된다(판 기록까지 보내면 무거워진다)
-        def slim(c):
-            return {"id": c["id"], "name": c["name"], "image": c["image"],
-                    "score": c["score"], "perf": (c.get("perf") or {}).get("overall")}
-        return {**board["player"], "account_id": acc["id"],
-                "op": slim(board["op"]) if board["op"] else None,
-                "tiers": {t: [slim(c) for c in cs] for t, cs in board["tiers"].items()},
-                "bracket": board["bracket"]}
 
-    members = await asyncio.gather(*[one(a) for a in accounts])
-    return {"id": room["id"], "name": room["name"], "code": room["code"],
-            "owner_id": room["owner_id"], "me": user["id"], "members": members}
+async def _member_card(acc, fresh=False):
+    """그룹방 카드 한 장. OP.GG 가 실패하면 error 만 담아 돌려준다."""
+    try:
+        board = await tierlist.build(acc["game_name"], acc["tagline"], fresh)
+    except opgg.OpggError as e:
+        return {"account_id": acc["id"], "riot_id": acc["riot_id"],
+                "game_name": acc["game_name"], "error": str(e)}
+
+    # 방 화면에는 그림과 이름만 있으면 된다(판 기록까지 보내면 무거워진다)
+    def slim(c):
+        return {"id": c["id"], "name": c["name"], "image": c["image"],
+                "score": c["score"], "perf": (c.get("perf") or {}).get("overall")}
+    return {**board["player"], "account_id": acc["id"],
+            "op": slim(board["op"]) if board["op"] else None,
+            "tiers": {t: [slim(c) for c in cs] for t, cs in board["tiers"].items()},
+            "bracket": board["bracket"]}
+
+
+@app.get("/api/rooms/{room_id}/member/{account_id}")
+async def room_member(room_id: int, account_id: int, fresh: bool = False,
+                      authorization: str = Header(None)):
+    """그룹방 카드 한 장. 나도 그 사람도 이 방에 있어야 볼 수 있다."""
+    user = _need_login(authorization)
+    ids = _member_ids(room_id)
+    if user["id"] not in ids or account_id not in ids:
+        raise HTTPException(status_code=404, detail="방을 찾지 못했습니다")
+    acc = find_account(account_id)
+    if acc is None:
+        raise HTTPException(status_code=404, detail="그 사람을 찾지 못했습니다")
+    return await _member_card(acc, fresh)
 
 
 @app.get("/api/rooms/{room_id}/members")

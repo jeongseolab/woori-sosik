@@ -33,8 +33,10 @@ PROFILE_TTL = 10 * 60          # 전적은 금방 바뀐다
 META_TTL = 12 * 60 * 60        # 챔피언 통계는 하루에 몇 번이면 충분하다
 CHAMPION_LIST_TTL = 24 * 60 * 60
 
-# OP.GG 에 한꺼번에 몇 개까지 물어볼지
-_PARALLEL = 4
+# OP.GG 에 한꺼번에 몇 개까지 물어볼지.
+# 4 였을 때 그룹방(4명, 요청 30~40개) 이 줄을 서느라 13초 걸렸다.
+# 너무 올리면 OP.GG 가 거절할 수 있어서 8 에서 멈춘다
+_PARALLEL = 8
 
 
 class OpggError(Exception):
@@ -225,11 +227,33 @@ def _cache_put(key, value):
     conn.close()
 
 
+# 지금 OP.GG 에 물어보고 있는 것. 같은 걸 또 물으면 새로 보내지 않고 이 대답을 같이 기다린다.
+# 그룹방에서 여럿이 같은 챔피언을 하면 같은 통계를 동시에 여러 번 물어보던 것을 막는다
+_in_flight = {}
+
+
 async def _cached(key, ttl, fetch, fresh=False):
     if not fresh:
         hit = _cache_get(key, ttl)
         if hit is not None:
             return hit
+    loop = asyncio.get_running_loop()
+    slot = (id(loop), key)
+    waiting = _in_flight.get(slot)
+    if waiting is not None:
+        return await asyncio.shield(waiting)
+    task = loop.create_task(_fetch_and_store(key, fetch))
+    _in_flight[slot] = task
+    try:
+        return await asyncio.shield(task)
+    finally:
+        if task.done():
+            _in_flight.pop(slot, None)
+        else:
+            task.add_done_callback(lambda _t: _in_flight.pop(slot, None))
+
+
+async def _fetch_and_store(key, fetch):
     value = await fetch()
     _cache_put(key, value)
     return value
