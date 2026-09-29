@@ -3,6 +3,14 @@
 둘 다 OP.GG 를 부르지 않는다. 이미 쌓아 둔 것(dodge_runs, match_rows) 만 읽어서 빠르다.
 
 주간은 한국 시각 월요일 0시부터다.
+
+주간 종합 점수(0~100, 50 = 보통):
+  플레이 점수 50% + 승률 25% + KDA 25%.
+  셋 다 "50점이 보통" 인 잣대로 바꿔서 섞는다.
+    - 플레이 점수: 원래 50 이 그 라인·그 티어의 보통이다
+    - 승률: 50% 가 50점
+    - KDA: 그 사람이 간 라인의 보통 KDA(perf.KDA, 서폿 3.2 · 탑 2.3 ...) 가 50점
+  한 주 판수로는 승률이 운에 크게 흔들려서 플레이 점수를 가장 크게 본다.
 주간 랭킹의 경기는 match_rows 에 쌓인 판만 센다. Tier.gg 에서 누군가 그 사람의 전적을
 불러올 때마다 쌓이므로(그룹방을 열면 방 사람 전부) 방을 자주 볼수록 정확해진다.
 """
@@ -25,6 +33,8 @@ RUN_SLACK_SEC = 2.0
 RUN_MIN_MS = 1000
 # 주간 순위에 들려면 이번 주에 이만큼은 해야 한다(1판 운으로 1등이 되지 않게)
 WEEK_MIN_GAMES = 3
+# 주간 종합 점수의 비중. 합은 1
+WEEK_WEIGHTS = {"play": 0.5, "win_rate": 0.25, "kda": 0.25}
 
 
 def week_start(now=None):
@@ -136,17 +146,31 @@ def _week_line(acc, since):
             if perf.counts(r) and (at := _played_at(r)) is not None and at >= since]
     n = len(rows)
     line = {"account_id": acc["id"], "riot_id": acc["riot_id"], "game_name": acc["game_name"],
-            "games": n, "wins": 0, "win_rate": None, "play": None, "kda": None, "deaths_avg": None}
+            "games": n, "wins": 0, "win_rate": None, "play": None, "kda": None, "score": None}
     if not n:
         return line
     wins = sum(r["result"] == "WIN" for r in rows)
     k = sum(r["kills"] or 0 for r in rows)
     d = sum(r["deaths"] or 0 for r in rows)
     a = sum(r["assists"] or 0 for r in rows)
+    kda = (k + a) / max(d, 1)
     play = perf.summarize([perf.game(r) for r in rows])
-    line.update(wins=wins, win_rate=round(wins / n, 3), kda=round((k + a) / max(d, 1), 2),
-                deaths_avg=round(d / n, 1), play=play["overall"] if play else None)
+    line.update(wins=wins, win_rate=round(wins / n, 3), kda=round(kda, 2),
+                play=play["overall"] if play else None)
+    if n >= WEEK_MIN_GAMES:
+        line["score"] = _week_score(rows, line["play"], wins / n, kda)
     return line
+
+
+def _week_score(rows, play, win_rate, kda):
+    """주간 종합 점수. 모르는 항목(플레이 점수를 못 매긴 경우) 은 빼고 남은 비중으로 나눈다."""
+    # 이 사람이 이번 주에 간 라인들의 보통 KDA. 라인을 모르면 미드 기준
+    lanes = [r.get("position") if r.get("position") in perf.KDA else "mid" for r in rows]
+    kda_base = sum(perf.KDA[lane] for lane in lanes) / len(lanes)
+    parts = {"play": play, "win_rate": win_rate * 100, "kda": perf._pts(kda, kda_base, 50)}
+    known = {name: v for name, v in parts.items() if v is not None}
+    weight = sum(WEEK_WEIGHTS[name] for name in known)
+    return round(sum(v * WEEK_WEIGHTS[name] for name, v in known.items()) / weight, 1)
 
 
 def weekly(accounts):
@@ -157,4 +181,4 @@ def weekly(accounts):
     for line in lines:
         line["dodge_best"] = dodge.get(line["account_id"], (None, 0))[0]
     return {"since": since.isoformat(), "until": (since + timedelta(days=7)).isoformat(),
-            "min_games": WEEK_MIN_GAMES, "members": lines}
+            "min_games": WEEK_MIN_GAMES, "weights": WEEK_WEIGHTS, "members": lines}

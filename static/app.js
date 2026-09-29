@@ -974,64 +974,57 @@ async function renderRoom(roomId, fresh = false) {
 
 // ── 주간 랭킹 ───────────────────────────────────────────
 
-// need: 이번 주 판수가 min_games 이상이어야 순위에 든다. low: 적을수록 1등
-const WEEK_AWARDS = [
-  { key: "play", label: "플레이 점수", icon: "👑", show: v => v + "점", need: true },
-  { key: "win_rate", label: "승률", icon: "🏆", show: v => pct(v), need: true },
-  { key: "kda", label: "KDA", icon: "⚔️", show: v => num(v, 2), need: true },
-  { key: "deaths_avg", label: "적게 죽기", icon: "🛡️", show: v => num(v) + "데스", need: true, low: true },
-  { key: "games", label: "많이 한 사람", icon: "🔥", show: v => v + "판" },
-  { key: "dodge_best", label: "스킬샷 피하기", icon: "💨", show: v => DodgeGame.fmt(v / 1000) },
-];
-
 function shortDate(iso) {
   const d = new Date(iso);
   return (d.getMonth() + 1) + "/" + d.getDate();
 }
 
-function weeklyView(data, colorOf, waiting) {
-  const ranked = WEEK_AWARDS.map(a => {
-    const rows = data.members
-      // 판수·스킬샷은 0 이면 안 한 것이라 뺀다. 데스 0 은 진짜 기록이다
-      .filter(m => m[a.key] != null && (a.need || a.low || m[a.key] > 0))
-      .filter(m => !a.need || m.games >= data.min_games)
-      .sort((x, y) => a.low ? x[a.key] - y[a.key] : y[a.key] - x[a.key]);
-    // 같은 값이면 같은 순위(1, 1, 3)
-    const ranks = rows.map(m => rows.findIndex(o => o[a.key] === m[a.key]) + 1);
-    return { a, rows, ranks };
-  });
+// 값이 큰 순서로 줄 세우고, 같은 값이면 같은 순위(1, 1, 3)
+function rankBy(rows, key) {
+  rows = rows.filter(m => m[key] != null).sort((x, y) => y[key] - x[key]);
+  return rows.map(m => ({ m, rank: rows.findIndex(o => o[key] === m[key]) + 1 }));
+}
 
-  // 1등(공동 포함)을 가장 많이 한 사람이 이번 주 MVP
-  const firsts = {};
-  ranked.forEach(({ rows, ranks }) => rows.forEach((m, i) => {
-    if (ranks[i] === 1) firsts[m.account_id] = (firsts[m.account_id] || 0) + 1;
-  }));
-  const most = Math.max(0, ...Object.values(firsts));
-  const mvps = data.members.filter(m => most && firsts[m.account_id] === most);
+// 주간 순위표 한 장. detail: 이름 밑에 작게 적을 내용
+function weekBoard(title, icon, ranked, show, detail, me, colorOf, empty) {
+  return `
+    <section class="award">
+      <h3><span aria-hidden="true">${icon}</span> ${esc(title)}</h3>
+      ${ranked.length ? `<ol>${ranked.map(({ m, rank }) => `
+        <li class="${m.account_id === me ? "me" : ""} ${rank === 1 ? "first" : ""}">
+          <span class="rk">${rank}</span>
+          <span class="who2">
+            <span class="mwho"><i style="background:${colorOf(m.account_id)}"></i><span>${esc(m.game_name)}</span></span>
+            ${detail ? `<small>${detail(m)}</small>` : ""}
+          </span>
+          <b>${esc(show(m))}</b>
+        </li>`).join("")}</ol>`
+        : `<p class="note">${esc(empty)}</p>`}
+    </section>`;
+}
+
+function weeklyView(data, colorOf, waiting) {
+  const w = data.weights;
+  const pctW = k => Math.round(w[k] * 100) + "%";
+  const total = rankBy(data.members, "score");
+  const short = data.members.filter(m => m.score == null && m.games > 0);
+  const dodge = rankBy(data.members.filter(m => m.dodge_best > 0), "dodge_best");
   const end = new Date(new Date(data.until).getTime() - 1);
 
-  const card = ({ a, rows, ranks }) => `
-    <section class="award">
-      <h3><span aria-hidden="true">${a.icon}</span> ${esc(a.label)}</h3>
-      ${rows.length ? `<ol>${rows.map((m, i) => `
-        <li class="${m.account_id === data.me ? "me" : ""} ${ranks[i] === 1 ? "first" : ""}">
-          <span class="rk">${ranks[i]}</span>
-          <span class="mwho"><i style="background:${colorOf(m.account_id)}"></i><span>${esc(m.game_name)}</span></span>
-          <b>${esc(a.show(m[a.key]))}</b>
-        </li>`).join("")}</ol>`
-        : `<p class="note">${a.need ? "이번 주 " + data.min_games + "판 이상 한 사람이 없어요" : "아직 기록이 없어요"}</p>`}
-    </section>`;
-
   return `
-    <div class="week-head">
-      <h2 class="sub-h">이번 주 <small>${shortDate(data.since)}(월) ~ ${shortDate(end)}(일) · 한국 시각</small></h2>
-      ${mvps.length ? `<p class="mvp"><span aria-hidden="true">⭐</span> 이번 주 ${mvps.length > 1 ? "공동 " : ""}MVP
-        ${mvps.map(m => `<b style="color:${colorOf(m.account_id)}">${esc(m.game_name)}</b>`).join(", ")} <small>1등 ${most}개</small></p>` : ""}
-    </div>
+    <h2 class="sub-h">이번 주 <small>${shortDate(data.since)}(월) ~ ${shortDate(end)}(일) · 한국 시각</small></h2>
     ${waiting ? `<p class="note">아직 ${waiting}명의 전적을 불러오는 중이에요. 다 오면 순위를 다시 매겨요.</p>` : ""}
-    <div class="awards">${ranked.map(card).join("")}</div>
-    <p class="note">협곡 판(솔로·자유·일반)만, Tier.gg 에서 한 번이라도 불러온 판만 세요. 방을 열 때마다 모두의 새 판이 쌓여요.
-      점수·승률·KDA·데스는 이번 주 ${data.min_games}판 이상 한 사람만 순위에 들어요.</p>`;
+    <div class="awards two">
+      ${weekBoard("종합 순위", "👑", total, m => num(m.score) + "점",
+        m => `플레이 ${m.play ?? "-"} · 승률 ${pct(m.win_rate)} · KDA ${num(m.kda, 2)} · ${m.games}판`,
+        data.me, colorOf, "이번 주 " + data.min_games + "판 이상 한 사람이 없어요")}
+      ${weekBoard("스킬샷 피하기", "💨", dodge, m => DodgeGame.fmt(m.dodge_best / 1000), null,
+        data.me, colorOf, "이번 주 기록이 아직 없어요")}
+    </div>
+    ${short.length ? `<p class="note">${data.min_games}판이 안 돼서 종합 순위에서 빠진 사람: ${short.map(m => esc(m.game_name) + " " + m.games + "판").join(", ")}</p>` : ""}
+    <p class="note">종합 점수 = 플레이 점수 ${pctW("play")} + 승률 ${pctW("win_rate")} + KDA ${pctW("kda")}.
+      셋 다 50점이 보통이에요(승률 50%, KDA 는 그 라인의 보통 KDA 가 50점).
+      협곡 판(솔로·자유·일반) 중 Tier.gg 에서 한 번이라도 불러온 판만 세요. 방을 열 때마다 모두의 새 판이 쌓여요.</p>`;
 }
 
 // ── 스킬샷 순위 (그룹방) ────────────────────────────────

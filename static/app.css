@@ -691,10 +691,6 @@ dialog.modal::backdrop { background: rgba(5, 10, 20, .72); }
 }
 
 /* ── 그룹방: 주간 랭킹 ── */
-.week-head { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 4px 16px; }
-.mvp { margin: 0 0 12px; font-size: 15px; }
-.mvp b { font-size: 17px; }
-.mvp small { color: var(--muted); margin-left: 4px; }
 .awards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin-bottom: 16px; }
 .award { padding: 14px 16px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); }
 .award h3 { margin: 0 0 10px; font-size: 16px; }
@@ -706,6 +702,9 @@ dialog.modal::backdrop { background: rgba(5, 10, 20, .72); }
 .award .rk { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; background: var(--line); font-size: 12px; font-weight: 700; }
 .award li b { font-variant-numeric: tabular-nums; }
 .award .note { margin: 0; }
+.awards.two { grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr)); }
+.award .who2 { display: grid; min-width: 0; }
+.award .who2 small { color: var(--muted); font-size: 12px; line-height: 1.4; }
 
 /* ── 그룹방·연습장: 스킬샷 순위 ── */
 .dodge-board-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
