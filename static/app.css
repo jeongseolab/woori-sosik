@@ -681,6 +681,33 @@ dialog.modal::backdrop { background: rgba(5, 10, 20, .72); }
   .modal-body { padding: 14px 12px 24px; }
 }
 
+/* ── 작은 확인 창 (닉네임 변경 등) ── */
+dialog.ask {
+  width: min(420px, calc(100vw - 32px));
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+  color: var(--text);
+}
+dialog.ask::backdrop { background: rgba(5, 10, 20, .72); }
+.ask-box { padding: 22px 22px 20px; }
+.ask-box h2 { margin: 0 0 12px; font-size: 22px; }
+.ask-box p { margin: 0 0 12px; font-size: 14px; color: var(--muted); }
+.ask-box p b { color: var(--text); }
+.rename-pair {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  padding: 12px 14px; border-radius: 10px; background: var(--night);
+}
+.rename-pair .old { color: var(--muted); text-decoration: line-through; overflow-wrap: anywhere; }
+.ask-box .rename-pair b { color: var(--gold); font-size: 16px; overflow-wrap: anywhere; }
+.rename-pair svg { width: 18px; height: 18px; flex: none; fill: none; stroke: var(--muted); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.ask-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+.ask-box .fun-loader { padding: 4px 0 0; }
+@media (prefers-reduced-motion: no-preference) {
+  dialog.ask[open] { animation: pop-in .18s ease-out; }
+}
+
 /* ── 좁은 화면 ──────────────────────── */
 @media (max-height: 620px) and (min-width: 861px) {
   .gate-sample { display: none; }

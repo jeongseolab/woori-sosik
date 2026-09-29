@@ -35,9 +35,11 @@ def _clamp(x):
     return max(0, min(100, round(x)))
 
 
-async def compare(a_name, a_tag, b_name, b_tag, fresh=False):
+async def compare(a_name, a_tag, b_name, b_tag, fresh=False, a_puuid=None, b_puuid=None):
+    """a_puuid, b_puuid 는 가입한 사람일 때 본인 확인용(opgg.profile_of)."""
     pa, pb, _, _ = await asyncio.gather(
-        opgg.profile(a_name, a_tag, fresh), opgg.profile(b_name, b_tag, fresh),
+        opgg.profile_of(a_name, a_tag, a_puuid, fresh),
+        opgg.profile_of(b_name, b_tag, b_puuid, fresh),
         opgg.matches(a_name, a_tag, fresh), opgg.matches(b_name, b_tag, fresh))
 
     # 같이 한 판은 쌓아 둔 협곡 경기(솔로·자유·일반) 전부에서 찾는다.
