@@ -1,4 +1,4 @@
-/* 마이티어
+/* Tier.gg
    협곡의 밤하늘 같은 남색 바탕 위에, 게이머들에게 익숙한 티어메이커식 색 띠를 올린다.
    OP 칸 하나만 금색으로 빛나게 하고 나머지는 조용히 둔다. */
 
@@ -171,7 +171,8 @@ h2 { font-size: 22px; margin: 0 0 14px; }
   margin-bottom: 22px;
 }
 .player img { width: 64px; height: 64px; border-radius: 12px; border: 2px solid var(--line); }
-.player .name { font: 26px/1.1 var(--display); }
+.player > div { min-width: 0; }
+.player .name { font: 26px/1.1 var(--display); overflow-wrap: anywhere; }
 .player .name small { font: 15px var(--body); color: var(--muted); margin-left: 4px; }
 .player .rank { color: var(--muted); font-size: 14px; }
 .stats { display: flex; gap: 22px; margin-left: auto; flex-wrap: wrap; }
@@ -290,7 +291,9 @@ h2 { font-size: 22px; margin: 0 0 14px; }
 .box form input { padding: 8px 10px; }
 .box form button { white-space: nowrap; padding: 8px 12px; }
 .room-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.room-list span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .room-list a {
+  gap: 8px;
   display: flex;
   justify-content: space-between;
   padding: 8px 10px;
@@ -325,7 +328,7 @@ th button[aria-sort]::after { content: " ▾"; }
 th button[aria-sort="ascending"]::after { content: " ▴"; }
 td .mem { display: flex; align-items: center; gap: 10px; text-decoration: none; }
 td .mem img { width: 36px; height: 36px; border-radius: 8px; }
-td .mem span { font-weight: 700; }
+td .mem span { font-weight: 700; max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
 td.best { color: var(--gold); font-weight: 700; }
 td .mini { display: flex; gap: 4px; }
 td .mini img { width: 28px; height: 28px; border-radius: 6px; }
@@ -345,15 +348,17 @@ td button, td a.btn { padding: 5px 10px; font-size: 13px; }
 
 .versus {
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   gap: 20px;
   align-items: center;
   margin: 30px 0 22px;
 }
-.side-card { display: flex; text-decoration: none; align-items: center; gap: 12px; }
+.side-card { min-width: 0; display: flex; text-decoration: none; align-items: center; gap: 12px; }
 .side-card.right { flex-direction: row-reverse; text-align: right; }
 .side-card img { width: 56px; height: 56px; border-radius: 12px; }
-.side-card b { font: 20px/1.2 var(--display); display: block; }
+.side-card > div { min-width: 0; }
+.side-card b, .side-card span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side-card b { font: 20px/1.2 var(--display); }
 .side-card span { color: var(--muted); font-size: 13px; }
 .dial {
   width: 150px;
@@ -379,12 +384,15 @@ td button, td a.btn { padding: 5px 10px; font-size: 13px; }
 .bar div { display: flex; justify-content: space-between; font-size: 13px; }
 .bar i { display: block; height: 8px; border-radius: 4px; background: var(--panel-2); margin-top: 4px; overflow: hidden; }
 .bar i::before { content: ""; display: block; height: 100%; width: var(--w); background: var(--c, var(--gold)); }
-.cmp { width: 100%; min-width: 0; font-size: 14px; }
-.cmp td, .cmp th { padding: 7px 0; background: none; }
+/* 칸 너비를 고정해 두면 긴 이름도 제 칸 안에서 말줄임표로 끝난다 */
+.cmp { width: 100%; min-width: 0; font-size: 14px; table-layout: fixed; }
+.cmp td, .cmp th { padding: 7px 0; background: none; overflow: hidden; text-overflow: ellipsis; }
+.cmp td:nth-child(2), .cmp th:nth-child(2) { width: 34%; padding: 7px 4px; white-space: normal; }
 .cmp td:nth-child(2), .cmp th:nth-child(2) { text-align: center; color: var(--muted); font-size: 12px; }
 .cmp td:last-child, .cmp th:last-child { text-align: right; }
 .cmp .win { color: var(--gold); font-weight: 700; }
 .games { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 14px; }
+.games li span { min-width: 0; overflow-wrap: anywhere; }
 .games li { display: flex; justify-content: space-between; gap: 8px; padding: 6px 10px; border-radius: 6px; background: var(--panel-2); border-left: 3px solid var(--lose); }
 .games li.w { border-left-color: var(--win); }
 
@@ -420,7 +428,8 @@ td button, td a.btn { padding: 5px 10px; font-size: 13px; }
   .row > b { font-size: 26px; }
   .champ { width: 64px; }
   .champ img { width: 52px; height: 52px; }
-  .versus { grid-template-columns: 1fr; justify-items: center; }
+  .versus { grid-template-columns: minmax(0, 1fr); justify-items: center; }
+  .side-card { max-width: 100%; }
   .side-card, .side-card.right { flex-direction: row; text-align: left; }
   .duo-form { flex-direction: column; }
 }

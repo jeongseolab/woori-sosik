@@ -1,4 +1,4 @@
-// 마이티어 화면.
+// Tier.gg 화면.
 // 주소 뒤의 # 로 화면을 바꾼다.
 //   #/tier            내 티어표
 //   #/tier/이름#태그   다른 사람 티어표
@@ -426,7 +426,7 @@ async function renderRoom(roomId, fresh = false) {
           <tr class="${m.account_id === room.me ? "me" : ""}">
             <td><a class="mem" href="${tierHref(m.riot_id)}">
               ${m.icon ? `<img src="${esc(m.icon)}" alt="" width="36" height="36">` : ""}
-              <span>${esc(m.game_name)}</span></a></td>
+              <span title="${esc(m.riot_id)}">${esc(m.game_name)}</span></a></td>
             ${COLUMNS.map(c => `<td class="${best[c.key] != null && c.value(m) === best[c.key] ? "best" : ""}">${c.show(m)}</td>`).join("")}
             <td>${esc(m.main_lane_ko || "-")}</td>
             <td>${m.op ? `<span class="op-mini">${m.op.image ? `<img src="${esc(m.op.image)}" alt="">` : ""}${esc(m.op.name)}</span>` : "-"}</td>
@@ -521,7 +521,7 @@ async function drawDuo(partner, fresh) {
   const side = (p, right) => `
     <a class="side-card ${right ? "right" : ""}" href="${tierHref(p.riot_id)}">
       ${p.icon ? `<img src="${esc(p.icon)}" alt="" width="56" height="56">` : ""}
-      <div><b>${esc(p.game_name)}</b><span>${esc(rankText(p.rank))}</span></div>
+      <div><b title="${esc(p.riot_id)}">${esc(p.game_name)}</b><span>${esc(rankText(p.rank))}</span></div>
     </a>`;
 
   const cmpRow = (label, av, bv, fmt, higher = true) => {
@@ -554,7 +554,7 @@ async function drawDuo(partner, fresh) {
       <section class="card">
         <h3>지표 비교</h3>
         <table class="cmp">
-          <tr><th>${esc(d.a.game_name)}</th><th></th><th>${esc(d.b.game_name)}</th></tr>
+          <tr><th title="${esc(d.a.riot_id)}">${esc(d.a.game_name)}</th><th></th><th title="${esc(d.b.riot_id)}">${esc(d.b.game_name)}</th></tr>
           ${cmpRow("최근 승률", d.a.win_rate, d.b.win_rate, pct)}
           ${cmpRow("최근 KDA", d.a.kda, d.b.kda, v => num(v, 2))}
           ${cmpRow("분당 CS", d.a.cs_per_min, d.b.cs_per_min, v => num(v))}

@@ -1,4 +1,4 @@
-"""마이티어 API.
+"""Tier.gg API.
 
   - 로그인/가입: Riot ID + 비밀번호
   - 나만의 티어표: 내가 한 챔피언만으로 OP 1명 + 1~5티어
@@ -27,7 +27,7 @@ from database import get_conn, init_db
 # 서버를 어느 폴더에서 켜든 파일을 찾을 수 있게, 이 파일 위치를 기준으로 잡는다
 HERE = os.path.dirname(os.path.abspath(__file__))
 
-app = FastAPI(title="마이티어")
+app = FastAPI(title="Tier.gg")
 init_db()
 
 
