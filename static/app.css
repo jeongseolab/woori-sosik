@@ -158,6 +158,8 @@ h2 { font-size: 22px; margin: 0 0 14px; }
 }
 .gate-card h2 { margin-bottom: 4px; }
 .gate-card form button[type="submit"] { width: 100%; margin-top: 20px; padding: 12px; }
+.id-pair { display: grid; grid-template-columns: minmax(0, 1fr) auto 96px; align-items: center; gap: 8px; }
+.id-pair span { color: var(--muted); font-weight: 700; font-size: 18px; }
 .switch { margin-top: 14px; text-align: center; font-size: 14px; color: var(--muted); }
 .switch button { background: none; color: var(--gold); padding: 0; font-weight: 700; }
 .err { color: var(--lose); font-size: 14px; min-height: 1.6em; margin: 10px 0 0; }
