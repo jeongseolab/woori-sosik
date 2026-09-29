@@ -142,22 +142,30 @@ function renderGate(mode = "login") {
         </div>
       </div>
       <div class="gate-card">
-        <h2>${signup ? "Riot 계정으로 가입" : "Riot 계정으로 로그인"}</h2>
+        <h2>${signup ? "LOL 계정으로 가입" : "LOL 계정으로 로그인"}</h2>
         <p class="note">${signup
           ? "가입할 때 OP.GG 에서 계정이 있는지 확인해요. 한국 서버 계정만 됩니다."
-          : "가입할 때 쓴 Riot ID 와 비밀번호를 넣어 주세요."}</p>
+          : "가입할 때 쓴 LOL ID 와 비밀번호를 넣어 주세요."}</p>
         <form id="gate-form" novalidate>
-          <label for="riot-id">Riot ID</label>
-          <input id="riot-id" name="riot_id" placeholder="이름#태그" autocomplete="username" required>
+          <label for="lol-name">LOL ID</label>
+          <div class="id-pair">
+            <input id="lol-name" name="lol_name" placeholder="닉네임" autocomplete="username" required>
+            <span aria-hidden="true">#</span>
+            <input id="lol-tag" name="lol_tag" placeholder="KR1" aria-label="태그 (# 뒤)" maxlength="5" required>
+          </div>
           <label for="pw">${signup ? "이 사이트에서 쓸 비밀번호" : "비밀번호"}</label>
           <input id="pw" name="password" type="password" autocomplete="${signup ? "new-password" : "current-password"}"
                  placeholder="${signup ? "6글자 이상" : ""}" required>
-          <p class="err" id="gate-err"></p>
+          ${signup ? `
+          <label for="pw2">비밀번호 확인</label>
+          <input id="pw2" name="password2" type="password" autocomplete="new-password"
+                 placeholder="한 번 더 입력" required>` : ""}
+          <p class="err" id="gate-err" aria-live="polite"></p>
           <button type="submit">${signup ? "가입하기" : "로그인"}</button>
         </form>
         <p class="switch">${signup ? "이미 가입했나요?" : "처음인가요?"}
           <button type="button" id="gate-switch">${signup ? "로그인" : "가입하기"}</button></p>
-        ${signup ? `<p class="note">Riot 비밀번호가 아니라 이 사이트 전용 비밀번호예요. Riot 비밀번호는 절대 넣지 마세요.</p>` : ""}
+        ${signup ? `<p class="note">LOL 계정 비밀번호가 아니라 이 사이트 전용 비밀번호예요. LOL 계정 비밀번호는 절대 넣지 마세요.</p>` : ""}
       </div>
     </section>`;
 
@@ -166,9 +174,19 @@ function renderGate(mode = "login") {
   form.onsubmit = async (e) => {
     e.preventDefault();
     const err = document.getElementById("gate-err");
-    const riot_id = form.riot_id.value.trim();
+    const name = form.lol_name.value.trim();
+    // 태그 칸에 # 까지 적어도 괜찮게 앞의 # 는 뗀다
+    const tag = form.lol_tag.value.trim().replace(/^#+/, "");
     const password = form.password.value;
-    if (!riot_id.includes("#")) { err.textContent = "Riot ID 는 이름#태그 모양으로 적어 주세요"; return; }
+    if (!name) { err.textContent = "닉네임을 적어 주세요"; form.lol_name.focus(); return; }
+    if (!tag) { err.textContent = "# 뒤의 태그를 적어 주세요 (예: KR1)"; form.lol_tag.focus(); return; }
+    if (signup && password.length < 6) { err.textContent = "비밀번호는 6글자 이상이어야 합니다"; form.password.focus(); return; }
+    if (signup && password !== form.password2.value) {
+      err.textContent = "비밀번호 확인이 달라요. 두 칸에 똑같이 적어 주세요";
+      form.password2.focus();
+      return;
+    }
+    const riot_id = name + "#" + tag;
     const button = form.querySelector("button[type=submit]");
     button.disabled = true;
     button.textContent = signup ? "계정 확인 중…" : "로그인 중…";
@@ -186,7 +204,17 @@ function renderGate(mode = "login") {
       button.textContent = signup ? "가입하기" : "로그인";
     }
   };
-  form.riot_id.focus();
+  // 닉네임에 "이름#태그" 를 통째로 붙여 넣으면 알아서 두 칸으로 나눈다
+  form.lol_name.addEventListener("input", () => {
+    const v = form.lol_name.value;
+    const at = v.lastIndexOf("#");
+    if (at > 0) {
+      form.lol_name.value = v.slice(0, at).trim();
+      form.lol_tag.value = v.slice(at + 1).trim();
+      form.lol_tag.focus();
+    }
+  });
+  form.lol_name.focus();
 }
 
 // ── 티어표 ──────────────────────────────────────────────

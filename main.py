@@ -57,7 +57,7 @@ def _need_login(authorization):
 def _riot_id_or_400(text):
     parts = split_riot_id(text)
     if parts is None:
-        raise HTTPException(status_code=400, detail="Riot ID 는 이름#태그 모양으로 적어 주세요")
+        raise HTTPException(status_code=400, detail="LOL ID 는 닉네임과 태그(# 뒤)를 모두 적어 주세요")
     return parts
 
 
@@ -80,7 +80,7 @@ async def signup(body: SignupIn):
     account_id = await asyncio.to_thread(
         create_account, p["game_name"], p["tagline"], p["puuid"], body.password)
     if account_id is None:
-        raise HTTPException(status_code=409, detail="이미 가입된 Riot 계정입니다. 로그인해 주세요")
+        raise HTTPException(status_code=409, detail="이미 가입된 LOL 계정입니다. 로그인해 주세요")
 
     return {"token": start_session(account_id), "user": find_account(account_id)}
 
@@ -90,7 +90,7 @@ def login(body: SignupIn):
     user = check_login(body.riot_id, body.password)
     if user is None:
         # 아이디가 틀렸는지 비번이 틀렸는지 알려주지 않는다
-        raise HTTPException(status_code=401, detail="Riot ID 나 비밀번호가 틀렸습니다")
+        raise HTTPException(status_code=401, detail="LOL ID 나 비밀번호가 틀렸습니다")
     return {"token": start_session(user["id"]), "user": user}
 
 
