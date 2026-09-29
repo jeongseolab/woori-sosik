@@ -1,321 +1,283 @@
+"""마이티어 API.
+
+  - 로그인/가입: Riot ID + 비밀번호
+  - 나만의 티어표: 내가 한 챔피언만으로 OP 1명 + 1~5티어
+  - 그룹방: 초대 코드로 모인 친구들끼리 지표를 나란히 본다
+  - 듀오 궁합: 같이 한 판을 찾아 승률·지표를 정리한다
+
+로그인 표(token) 는 Authorization: Bearer <token> 머리글로 받는다.
+"""
+import asyncio
+import os
+import secrets
 from datetime import datetime
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
+
+from fastapi import FastAPI, Header, HTTPException
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-import os
+import duo
+import opgg
+import tierlist
+from auth import (check_login, create_account, end_session, find_account,
+                  split_riot_id, start_session, who_is)
+from database import get_conn, init_db
 
 # 서버를 어느 폴더에서 켜든 파일을 찾을 수 있게, 이 파일 위치를 기준으로 잡는다
 HERE = os.path.dirname(os.path.abspath(__file__))
 
-from auth import (check_login, create_user, end_session, ensure_admin,
-                  start_session, who_is)
-from censor import find_blocked, mask
-from database import get_conn, init_db
-from meal import router as meal_router
-
-
-# ── 관리자 ───────────────────────────────────────────────
-# 관리자는 남의 포스트잇도 뗄 수 있다.
-# 열쇠는 코드에 박아 두면 화면 소스만 봐도 들통나므로 파일/환경변수에서 읽는다.
-# admin_key.txt 를 만들어 아무 문장이나 한 줄 적어 두면 그게 열쇠가 된다.
-def _load_admin_key():
-    key = os.environ.get("MEMO_ADMIN_KEY", "").strip()
-    if key:
-        return key
-    try:
-        with open(os.path.join(HERE, "admin_key.txt"), encoding="utf-8") as f:
-            return f.read().strip()
-    except FileNotFoundError:
-        return ""
-
-
-ADMIN_KEY = _load_admin_key()
-
-
-def _is_admin(token):
-    """로그인 표를 보고 관리자인지 확인한다.
-
-    예전엔 열쇠 한 줄로 했는데, 이제 계정으로 한다.
-    열쇠(admin_key.txt)는 첫 관리자 계정의 비밀번호로만 쓴다."""
-    user = who_is(token)
-    return bool(user and user["is_admin"])
-
-
-app = FastAPI(title="우리 학교 API")
-
+app = FastAPI(title="마이티어")
 init_db()
 
-# 관리자 계정을 한 번 만들어 둔다.
-# 이름은 admin, 비밀번호는 admin_key.txt 에 적힌 값.
-# 이미 있으면 그대로 두므로 비밀번호를 바꿔도 덮어쓰지 않는다
-if ADMIN_KEY:
-    _made = ensure_admin("admin", ADMIN_KEY)
-    if _made:
-        print("[알림] 관리자 계정을 만들었습니다 -> 아이디: admin")
+
+@app.exception_handler(opgg.NotFound)
+async def _not_found(_, exc):
+    return JSONResponse(status_code=404, content={"detail": str(exc)})
 
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-app.include_router(meal_router)
+@app.exception_handler(opgg.OpggError)
+async def _opgg_down(_, exc):
+    return JSONResponse(status_code=502, content={"detail": str(exc)})
 
 
-class MemoIn(BaseModel):
-    title: str
-    content: str
-    # 로그인했으면 이 표를 보낸다. 게스트면 비어 있다
-    token: str | None = None
-    # 브라우저가 만들어 보내는 "내 것" 표시. 이게 맞아야 뗄 수 있다
-    owner_token: str | None = None
+def _token(authorization):
+    if authorization and authorization.lower().startswith("bearer "):
+        return authorization[7:].strip()
+    return None
 
 
-def _may_touch(row, token, owner_token):
-    """이 메모를 고치거나 뗄 수 있는 사람인지 본다."""
-    user = who_is(token)
-
-    # 관리자는 전부 가능
-    if user and user["is_admin"]:
-        return True
-
-    # 로그인한 사람은 자기 계정으로 쓴 글이면 가능 (기기가 바뀌어도 된다)
-    if user and row["author_id"] and row["author_id"] == user["id"]:
-        return True
-
-    # 게스트는 예전처럼 브라우저 번호가 맞아야 한다.
-    # 단, 계정 글은 브라우저 번호로 못 건드린다
-    if row["author_id"]:
-        return False
-
-    return bool(row["owner_token"]) and row["owner_token"] == owner_token
+def _need_login(authorization):
+    user = who_is(_token(authorization))
+    if user is None:
+        raise HTTPException(status_code=401, detail="로그인이 필요합니다")
+    return user
 
 
-def _censor(title: str, content: str):
-    """막을 말이 있으면 400 으로 돌려보내고, 가벼운 건 ** 로 덮어서 준다."""
-    hits = find_blocked(title) + find_blocked(content)
-    if hits:
-        raise HTTPException(status_code=400, detail="그런 말은 붙일 수 없습니다")
-    return mask(title), mask(content)
+def _riot_id_or_400(text):
+    parts = split_riot_id(text)
+    if parts is None:
+        raise HTTPException(status_code=400, detail="Riot ID 는 이름#태그 모양으로 적어 주세요")
+    return parts
 
 
-@app.post("/memos", status_code=201)
-def create_memo(memo: MemoIn):
-    title, content = _censor(memo.title, memo.content)
-    now = datetime.now().isoformat()
+# ── 로그인 ───────────────────────────────────────────────
 
-    # 로그인했으면 이름을 남기고, 게스트면 비워 둔다
-    user = who_is(memo.token)
-    author = user["username"] if user else None
-    author_id = user["id"] if user else None
-
-    conn = get_conn()
-    cursor = conn.execute(
-        "INSERT INTO memos (title, content, created_at, owner_token, author, author_id)"
-        " VALUES (?, ?, ?, ?, ?, ?)",
-        (title, content, now, memo.owner_token, author, author_id),
-    )
-    conn.commit()
-    new_id = cursor.lastrowid
-    conn.close()
-
-    return {
-        "id": new_id,
-        "title": title,
-        "content": content,
-        "created_at": now,
-        "likes": 0,
-        "author": author,
-    }
-
-
-def _public(row):
-    """화면에 내보낼 메모. owner_token 은 남한테 보이면 안 되니 뺀다."""
-    memo = dict(row)
-    memo.pop("owner_token", None)
-    # 계정 번호는 화면에서 쓸 일이 없다. 이름만 내보낸다
-    memo.pop("author_id", None)
-    return memo
-
-
-@app.get("/memos")
-def read_memos(keyword: str = None):
-    conn = get_conn()
-
-    if keyword:
-        rows = conn.execute(
-            "SELECT * FROM memos WHERE title LIKE ? ORDER BY id DESC",
-            (f"%{keyword}%",),
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT * FROM memos ORDER BY id DESC"
-        ).fetchall()
-
-    conn.close()
-    return [_public(row) for row in rows]
-
-
-@app.get("/memos/{memo_id}")
-def read_memo(memo_id: int):
-    conn = get_conn()
-    row = conn.execute(
-        "SELECT * FROM memos WHERE id = ?", (memo_id,)
-    ).fetchone()
-    conn.close()
-
-    if row is None:
-        raise HTTPException(status_code=404, detail="그런 메모 없습니다")
-
-    return _public(row)
-
-
-@app.post("/memos/{memo_id}/like")
-def like_memo(memo_id: int):
-    return _change_likes(memo_id, +1)
-
-
-@app.delete("/memos/{memo_id}/like")
-def unlike_memo(memo_id: int):
-    return _change_likes(memo_id, -1)
-
-
-def _change_likes(memo_id: int, amount: int):
-    """좋아요를 amount 만큼 더한다. 0 밑으로는 안 내려가게 막는다."""
-    conn = get_conn()
-    cursor = conn.execute(
-        "UPDATE memos SET likes = MAX(0, likes + ?) WHERE id = ?",
-        (amount, memo_id),
-    )
-    conn.commit()
-
-    if cursor.rowcount == 0:
-        conn.close()
-        raise HTTPException(status_code=404, detail="그런 메모 없습니다")
-
-    row = conn.execute(
-        "SELECT likes FROM memos WHERE id = ?", (memo_id,)
-    ).fetchone()
-    conn.close()
-
-    return {"id": memo_id, "likes": row["likes"]}
-
-
-@app.put("/memos/{memo_id}")
-def update_memo(memo_id: int, new_data: MemoIn):
-    title, content = _censor(new_data.title, new_data.content)
-
-    conn = get_conn()
-    row = conn.execute(
-        "SELECT owner_token, author_id FROM memos WHERE id = ?", (memo_id,)
-    ).fetchone()
-
-    if row is None:
-        conn.close()
-        raise HTTPException(status_code=404, detail="그런 메모 없습니다")
-
-    # 떼기와 같은 규칙: 내가 붙인 것만 고칠 수 있다 (관리자는 예외)
-    if not _may_touch(row, new_data.token, new_data.owner_token):
-        conn.close()
-        raise HTTPException(status_code=403, detail="내가 붙인 포스트잇만 고칠 수 있습니다")
-
-    conn.execute(
-        "UPDATE memos SET title = ?, content = ? WHERE id = ?",
-        (title, content, memo_id),
-    )
-    conn.commit()
-    conn.close()
-
-    return {"id": memo_id, "title": title, "content": content}
-
-
-@app.delete("/memos/{memo_id}")
-def delete_memo(memo_id: int, owner_token: str = None, token: str = None):
-    conn = get_conn()
-    row = conn.execute(
-        "SELECT owner_token, author_id FROM memos WHERE id = ?", (memo_id,)
-    ).fetchone()
-
-    if row is None:
-        conn.close()
-        raise HTTPException(status_code=404, detail="그런 메모 없습니다")
-
-    # 화면에서 떼기 버튼을 숨기는 것만으로는 막을 수 없어서 서버에서 한 번 더 확인한다.
-    # 주인 표시가 없는 옛날 메모는 관리자만 뗄 수 있다
-    if not _may_touch(row, token, owner_token):
-        conn.close()
-        raise HTTPException(status_code=403, detail="내가 붙인 포스트잇만 뗄 수 있습니다")
-
-    conn.execute("DELETE FROM memos WHERE id = ?", (memo_id,))
-    conn.commit()
-    conn.close()
-
-    return {"ok": True, "deleted_id": memo_id}
-
-
-class LoginIn(BaseModel):
-    username: str
+class SignupIn(BaseModel):
+    riot_id: str
     password: str
 
 
-@app.post("/signup")
-def signup(body: LoginIn):
-    """계정을 만든다. 학생이 직접 만드는 건 항상 일반 계정이다."""
-    name = (body.username or "").strip()
+@app.post("/api/signup")
+async def signup(body: SignupIn):
+    name, tag = _riot_id_or_400(body.riot_id)
+    if len(body.password or "") < 6:
+        raise HTTPException(status_code=400, detail="비밀번호는 6글자 이상이어야 합니다")
 
-    if len(name) < 2:
-        raise HTTPException(status_code=400, detail="아이디는 2글자 이상이어야 합니다")
-    if len(body.password or "") < 4:
-        raise HTTPException(status_code=400, detail="비밀번호는 4글자 이상이어야 합니다")
-    # 아이디에도 욕이 들어갈 수 있다
-    if find_blocked(name):
-        raise HTTPException(status_code=400, detail="그런 아이디는 쓸 수 없습니다")
+    # 정말 있는 계정인지 OP.GG 에 물어보고, 대소문자까지 정확한 이름으로 저장한다
+    p = await opgg.profile(name, tag, fresh=True)
+    # 비밀번호 해시는 일부러 느리다. 그동안 다른 요청이 멈추지 않게 따로 돌린다
+    account_id = await asyncio.to_thread(
+        create_account, p["game_name"], p["tagline"], p["puuid"], body.password)
+    if account_id is None:
+        raise HTTPException(status_code=409, detail="이미 가입된 Riot 계정입니다. 로그인해 주세요")
 
-    # 관리자는 여기서 못 만든다. is_admin 은 항상 꺼진 채로 들어간다
-    user_id = create_user(name, body.password, is_admin=False)
-    if user_id is None:
-        raise HTTPException(status_code=409, detail="이미 쓰는 아이디입니다")
-
-    token = start_session(user_id)
-    return {"token": token, "username": name, "is_admin": False}
+    return {"token": start_session(account_id), "user": find_account(account_id)}
 
 
-@app.post("/login")
-def login(body: LoginIn):
-    user = check_login(body.username, body.password)
+@app.post("/api/login")
+def login(body: SignupIn):
+    user = check_login(body.riot_id, body.password)
     if user is None:
         # 아이디가 틀렸는지 비번이 틀렸는지 알려주지 않는다
-        raise HTTPException(status_code=401, detail="아이디나 비밀번호가 틀렸습니다")
-
-    token = start_session(user["id"])
-    return {"token": token, "username": user["username"],
-            "is_admin": user["is_admin"]}
+        raise HTTPException(status_code=401, detail="Riot ID 나 비밀번호가 틀렸습니다")
+    return {"token": start_session(user["id"]), "user": user}
 
 
-@app.post("/logout")
-def logout(token: str = None):
-    end_session(token)
+@app.post("/api/logout")
+def logout(authorization: str = Header(None)):
+    end_session(_token(authorization))
     return {"ok": True}
 
 
-@app.get("/me")
-def me(token: str = None):
-    """내가 누구인지 알려준다. 게스트면 user 가 없다."""
-    user = who_is(token)
-    if user is None:
-        return {"user": None, "is_admin": False}
-    return {"user": user["username"], "is_admin": user["is_admin"]}
+@app.get("/api/me")
+def me(authorization: str = Header(None)):
+    return {"user": who_is(_token(authorization))}
 
 
-@app.get("/admin/check")
-def admin_check(token: str = None):
-    """내가 관리자인지 알려준다. 열쇠 자체는 돌려주지 않는다."""
-    return {"admin": _is_admin(token)}
+# ── 티어표 ───────────────────────────────────────────────
+
+@app.get("/api/tierlist")
+async def get_tierlist(riot_id: str = None, fresh: bool = False,
+                       authorization: str = Header(None)):
+    """riot_id 가 없으면 내 티어표."""
+    user = _need_login(authorization)
+    if riot_id:
+        name, tag = _riot_id_or_400(riot_id)
+    else:
+        name, tag = user["game_name"], user["tagline"]
+    return await tierlist.build(name, tag, fresh)
+
+
+# ── 그룹방 ───────────────────────────────────────────────
+
+class RoomIn(BaseModel):
+    name: str
+
+
+class JoinIn(BaseModel):
+    code: str
+
+
+def _room_row(room_id):
+    conn = get_conn()
+    row = conn.execute("SELECT * FROM rooms WHERE id = ?", (room_id,)).fetchone()
+    conn.close()
+    return row
+
+
+def _member_ids(room_id):
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT account_id FROM room_members WHERE room_id = ? ORDER BY joined_at",
+        (room_id,)).fetchall()
+    conn.close()
+    return [r["account_id"] for r in rows]
+
+
+def _add_member(room_id, account_id):
+    conn = get_conn()
+    conn.execute(
+        "INSERT INTO room_members (room_id, account_id, joined_at) VALUES (?, ?, ?)"
+        " ON CONFLICT (room_id, account_id) DO NOTHING",
+        (room_id, account_id, datetime.now().isoformat()))
+    conn.commit()
+    conn.close()
+
+
+@app.get("/api/rooms")
+def my_rooms(authorization: str = Header(None)):
+    user = _need_login(authorization)
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT r.id, r.name, r.code, r.owner_id,"
+        " (SELECT COUNT(*) FROM room_members m2 WHERE m2.room_id = r.id) AS members"
+        " FROM rooms r JOIN room_members m ON m.room_id = r.id"
+        " WHERE m.account_id = ? ORDER BY r.id DESC", (user["id"],)).fetchall()
+    conn.close()
+    return {"rooms": [dict(r) for r in rows]}
+
+
+@app.post("/api/rooms", status_code=201)
+def create_room(body: RoomIn, authorization: str = Header(None)):
+    user = _need_login(authorization)
+    name = (body.name or "").strip()
+    if not 1 <= len(name) <= 30:
+        raise HTTPException(status_code=400, detail="방 이름은 1~30글자로 지어 주세요")
+
+    # 헷갈리는 글자(0/O, 1/I) 는 뺀 6글자 코드
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    for _ in range(5):
+        code = "".join(secrets.choice(alphabet) for _ in range(6))
+        conn = get_conn()
+        try:
+            cur = conn.execute(
+                "INSERT INTO rooms (name, code, owner_id, created_at) VALUES (?, ?, ?, ?)",
+                (name, code, user["id"], datetime.now().isoformat()))
+            conn.commit()
+        except Exception as e:
+            # 코드가 겹쳤으면(UNIQUE) 새로 뽑는다. 다른 고장은 그대로 알린다
+            text = (str(e) + type(e).__name__).lower()
+            if "unique" not in text and "duplicate" not in text:
+                raise
+            continue
+        finally:
+            conn.close()
+        room_id = cur.lastrowid
+        _add_member(room_id, user["id"])
+        return {"id": room_id, "name": name, "code": code}
+    raise HTTPException(status_code=500, detail="방 코드를 만들지 못했습니다. 다시 시도해 주세요")
+
+
+@app.post("/api/rooms/join")
+def join_room(body: JoinIn, authorization: str = Header(None)):
+    user = _need_login(authorization)
+    conn = get_conn()
+    row = conn.execute("SELECT * FROM rooms WHERE code = ?",
+                       ((body.code or "").strip().upper(),)).fetchone()
+    conn.close()
+    if row is None:
+        raise HTTPException(status_code=404, detail="그 코드의 방이 없습니다. 코드를 다시 확인해 주세요")
+    _add_member(row["id"], user["id"])
+    return {"id": row["id"], "name": row["name"], "code": row["code"]}
+
+
+@app.get("/api/rooms/{room_id}")
+async def room_detail(room_id: int, fresh: bool = False, authorization: str = Header(None)):
+    """방 사람들의 지표를 나란히. 방에 들어온 사람만 볼 수 있다."""
+    user = _need_login(authorization)
+    room = _room_row(room_id)
+    ids = _member_ids(room_id)
+    if room is None or user["id"] not in ids:
+        raise HTTPException(status_code=404, detail="방을 찾지 못했습니다")
+
+    accounts = [a for a in (find_account(i) for i in ids) if a]
+
+    async def one(acc):
+        try:
+            board = await tierlist.build(acc["game_name"], acc["tagline"], fresh)
+        except opgg.OpggError as e:
+            return {"account_id": acc["id"], "riot_id": acc["riot_id"], "error": str(e)}
+        top = [c for t in ("1", "2") for c in board["tiers"][t]][:3]
+        return {**board["player"], "account_id": acc["id"],
+                "op": board["op"], "top": top, "bracket": board["bracket"]}
+
+    members = await asyncio.gather(*[one(a) for a in accounts])
+    return {"id": room["id"], "name": room["name"], "code": room["code"],
+            "owner_id": room["owner_id"], "me": user["id"], "members": members}
+
+
+@app.get("/api/rooms/{room_id}/members")
+def room_members(room_id: int, authorization: str = Header(None)):
+    """방 사람들의 Riot ID 만. 듀오 화면에서 친구를 고를 때 쓴다."""
+    user = _need_login(authorization)
+    ids = _member_ids(room_id)
+    if user["id"] not in ids:
+        raise HTTPException(status_code=404, detail="방을 찾지 못했습니다")
+    return {"members": [a["riot_id"] for a in (find_account(i) for i in ids) if a]}
+
+
+@app.delete("/api/rooms/{room_id}/me")
+def leave_room(room_id: int, authorization: str = Header(None)):
+    """방에서 나간다. 마지막 사람이 나가면 방도 없앤다."""
+    user = _need_login(authorization)
+    conn = get_conn()
+    conn.execute("DELETE FROM room_members WHERE room_id = ? AND account_id = ?",
+                 (room_id, user["id"]))
+    left = conn.execute("SELECT COUNT(*) AS n FROM room_members WHERE room_id = ?",
+                        (room_id,)).fetchone()
+    if left["n"] == 0:
+        conn.execute("DELETE FROM rooms WHERE id = ?", (room_id,))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+# ── 듀오 궁합 ────────────────────────────────────────────
+
+@app.get("/api/duo")
+async def duo_check(partner: str, me_id: str = None, fresh: bool = False,
+                    authorization: str = Header(None)):
+    """나(또는 me_id) 와 partner 의 궁합."""
+    user = _need_login(authorization)
+    b_name, b_tag = _riot_id_or_400(partner)
+    if me_id:
+        a_name, a_tag = _riot_id_or_400(me_id)
+    else:
+        a_name, a_tag = user["game_name"], user["tagline"]
+    if (a_name + "#" + a_tag).replace(" ", "").lower() == (b_name + "#" + b_tag).replace(" ", "").lower():
+        raise HTTPException(status_code=400, detail="다른 사람의 Riot ID 를 넣어 주세요")
+    return await duo.compare(a_name, a_tag, b_name, b_tag, fresh)
 
 
 # 이 줄은 항상 맨 아래! 위의 주소들을 먼저 찾고, 없으면 static 을 내려준다

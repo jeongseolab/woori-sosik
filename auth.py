@@ -1,12 +1,17 @@
 """로그인/계정.
 
-비밀번호를 그대로 저장하면 memo.db 파일을 여는 순간 전부 보인다.
+아이디는 Riot ID(이름#태그) 다. 가입할 때 OP.GG 에 정말 있는 계정인지 확인하고
+그 계정의 puuid 를 같이 저장한다.
+
+비밀번호를 그대로 저장하면 DB 를 여는 순간 전부 보인다.
 그래서 소금(salt)을 섞어 해시로 바꿔 저장하고, 맞는지는 해시끼리 비교한다.
 원래 비밀번호는 어디에도 남지 않는다.
+
+나중에 Riot 공식 로그인(RSO) 승인을 받으면 check_login 자리만 바꾸면 된다.
+나머지 코드는 start_session / who_is 만 쓴다.
 """
 import hashlib
 import hmac
-import os
 import secrets
 from datetime import datetime
 
@@ -17,6 +22,20 @@ from database import get_conn
 _ROUNDS = 200_000
 
 
+def riot_key(game_name: str, tagline: str) -> str:
+    """대소문자와 공백을 무시한 비교용 이름. 'Hide on bush#KR1' -> 'hideonbush#kr1'"""
+    return (game_name.replace(" ", "") + "#" + tagline.replace(" ", "")).lower()
+
+
+def split_riot_id(text: str):
+    """'이름#태그' 를 (이름, 태그) 로 나눈다. 모양이 틀리면 None."""
+    name, sep, tag = (text or "").strip().rpartition("#")
+    name, tag = name.strip(), tag.strip()
+    if not sep or not name or not tag:
+        return None
+    return name, tag
+
+
 def _hash_pw(password: str, salt: str) -> str:
     """비밀번호 + 소금 -> 해시. 같은 입력이면 항상 같은 값이 나온다."""
     return hashlib.pbkdf2_hmac(
@@ -24,27 +43,28 @@ def _hash_pw(password: str, salt: str) -> str:
     ).hex()
 
 
-def create_user(username: str, password: str, is_admin: bool = False):
-    """계정을 만든다. 이미 있는 이름이면 None 을 돌려준다."""
-    username = (username or "").strip()
-    if not username or not password:
-        return None
+def _public(row):
+    return {"id": row["id"], "game_name": row["game_name"],
+            "tagline": row["tagline"], "puuid": row["puuid"],
+            "riot_id": row["game_name"] + "#" + row["tagline"]}
 
+
+def create_account(game_name: str, tagline: str, puuid: str, password: str):
+    """계정을 만든다. 이미 가입된 Riot 계정이면 None 을 돌려준다."""
     salt = secrets.token_hex(16)
     conn = get_conn()
     try:
         cursor = conn.execute(
-            "INSERT INTO users (username, pw_hash, pw_salt, is_admin, created_at)"
-            " VALUES (?, ?, ?, ?, ?)",
-            (username, _hash_pw(password, salt), salt,
-             1 if is_admin else 0, datetime.now().isoformat()),
+            "INSERT INTO accounts (riot_key, game_name, tagline, puuid,"
+            " pw_hash, pw_salt, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (riot_key(game_name, tagline), game_name, tagline, puuid,
+             _hash_pw(password, salt), salt, datetime.now().isoformat()),
         )
         conn.commit()
         return cursor.lastrowid
     except Exception as e:
-        # 이름이 겹친 것(UNIQUE)만 조용히 None 을 준다.
-        # 그 밖의 고장은 삼키면 "이미 쓰는 아이디" 로 잘못 보이므로 다시 던진다.
-        # (예전에 이걸 다 삼켜서, DB 가 고장 난 걸 아이디 중복으로 착각했다)
+        # 겹친 것(UNIQUE)만 조용히 None 을 준다.
+        # 그 밖의 고장은 삼키면 "이미 가입된 계정" 으로 잘못 보이므로 다시 던진다
         text = (str(e) + type(e).__name__).lower()
         if "unique" in text or "duplicate" in text:
             return None
@@ -53,13 +73,16 @@ def create_user(username: str, password: str, is_admin: bool = False):
         conn.close()
 
 
-def check_login(username: str, password: str):
-    """맞으면 사용자 정보를, 틀리면 None 을 돌려준다."""
-    conn = get_conn()
-    row = conn.execute(
-        "SELECT * FROM users WHERE username = ?", ((username or "").strip(),)
-    ).fetchone()
-    conn.close()
+def check_login(riot_id: str, password: str):
+    """맞으면 계정 정보를, 틀리면 None 을 돌려준다."""
+    parts = split_riot_id(riot_id)
+    row = None
+    if parts:
+        conn = get_conn()
+        row = conn.execute(
+            "SELECT * FROM accounts WHERE riot_key = ?", (riot_key(*parts),)
+        ).fetchone()
+        conn.close()
 
     if row is None:
         # 없는 이름이어도 똑같이 시간을 쓴다.
@@ -71,18 +94,16 @@ def check_login(username: str, password: str):
     # 글자를 하나씩 비교하면 몇 글자까지 맞았는지가 시간으로 새어 나간다
     if not hmac.compare_digest(got, row["pw_hash"]):
         return None
-
-    return {"id": row["id"], "username": row["username"],
-            "is_admin": bool(row["is_admin"])}
+    return _public(row)
 
 
-def start_session(user_id: int) -> str:
+def start_session(account_id: int) -> str:
     """로그인 표를 끊어 준다. 이 번호가 곧 신분증이 된다."""
     token = secrets.token_urlsafe(32)
     conn = get_conn()
     conn.execute(
-        "INSERT INTO sessions (token, user_id, created_at) VALUES (?, ?, ?)",
-        (token, user_id, datetime.now().isoformat()),
+        "INSERT INTO account_sessions (token, account_id, created_at) VALUES (?, ?, ?)",
+        (token, account_id, datetime.now().isoformat()),
     )
     conn.commit()
     conn.close()
@@ -94,39 +115,27 @@ def end_session(token: str):
     if not token:
         return
     conn = get_conn()
-    conn.execute("DELETE FROM sessions WHERE token = ?", (token,))
+    conn.execute("DELETE FROM account_sessions WHERE token = ?", (token,))
     conn.commit()
     conn.close()
 
 
 def who_is(token: str):
-    """표를 보고 누구인지 알려준다. 게스트면 None."""
+    """표를 보고 누구인지 알려준다. 로그인 안 했으면 None."""
     if not token:
         return None
-
     conn = get_conn()
     row = conn.execute(
-        "SELECT u.id, u.username, u.is_admin FROM sessions s"
-        " JOIN users u ON u.id = s.user_id WHERE s.token = ?",
+        "SELECT a.* FROM account_sessions s"
+        " JOIN accounts a ON a.id = s.account_id WHERE s.token = ?",
         (token,),
     ).fetchone()
     conn.close()
-
-    if row is None:
-        return None
-
-    return {"id": row["id"], "username": row["username"],
-            "is_admin": bool(row["is_admin"])}
+    return _public(row) if row else None
 
 
-def ensure_admin(username: str, password: str):
-    """관리자 계정이 없으면 만든다. 이미 있으면 그대로 둔다."""
+def find_account(account_id: int):
     conn = get_conn()
-    row = conn.execute(
-        "SELECT id FROM users WHERE username = ?", (username,)
-    ).fetchone()
+    row = conn.execute("SELECT * FROM accounts WHERE id = ?", (account_id,)).fetchone()
     conn.close()
-
-    if row is None:
-        return create_user(username, password, is_admin=True)
-    return None
+    return _public(row) if row else None

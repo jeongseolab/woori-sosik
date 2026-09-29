@@ -1,6 +1,6 @@
 fastapi==0.141.1
 uvicorn==0.53.0
 httpx==0.28.1
-# 인터넷에 올렸을 때 글을 저장할 PostgreSQL 드라이버.
+# 인터넷에 올렸을 때 계정과 방을 저장할 PostgreSQL 드라이버.
 # 집에서 파일(SQLite)로 쓸 때는 안 쓰이지만 깔려 있어도 상관없다
 psycopg[binary]==3.2.10
