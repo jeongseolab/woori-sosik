@@ -65,23 +65,100 @@ function rankText(rank) {
 function tierHref(riotId) { return "#/tier/" + encodeURIComponent(riotId); }
 function duoHref(riotId) { return "#/duo/" + encodeURIComponent(riotId); }
 
-function loading(message) {
-  view.innerHTML = `
-    <div class="loading">
-      <div class="skeleton"><div></div><div></div><div></div></div>
-      <p>${esc(message)}</p>
+// 기다리는 동안 돌아가며 보여 줄 한 줄. 협곡에서 흔히 보는 장면들
+const QUIPS = [
+  "미니언 막타 치는 중…",
+  "정글러가 부쉬에서 기다리는 중…",
+  "OP.GG 에 와드 박는 중…",
+  "용 타이머 계산하는 중…",
+  "바론 버스 출발 기다리는 중…",
+  "OP 후보 면접 보는 중…",
+  "KDA 하나하나 세는 중…",
+  "포탑 다이브 각 재는 중…",
+  "귀환 중… 8초만요",
+  "서폿이 와드 사는 중…",
+];
+let quipAt = Math.floor(Math.random() * QUIPS.length);
+function nextQuip() { quipAt = (quipAt + 1) % QUIPS.length; return QUIPS[quipAt]; }
+
+// 화면에 .quip 이 있을 때만 1.8초마다 문구를 바꾼다
+setInterval(() => {
+  const els = document.querySelectorAll(".quip");
+  if (!els.length) return;
+  els.forEach(el => { el.textContent = nextQuip(); });
+}, 1800);
+
+// 티어표가 채워지는 모양의 로딩. 칸마다 챔피언 자리가 차례로 톡톡 들어온다
+function funLoader(sub, small = false) {
+  return `
+    <div class="fun-loader ${small ? "small" : ""}" role="status" aria-live="polite">
+      <div class="fl-board" aria-hidden="true">
+        ${["1", "2", "3", "4", "5"].slice(0, small ? 3 : 5).map(t =>
+          `<div class="fl-row" data-t="${t}"><b>${t}</b><span><i></i><i></i><i></i></span></div>`).join("")}
+      </div>
+      <p class="quip">${esc(nextQuip())}</p>
+      ${sub ? `<p class="note">${esc(sub)}</p>` : ""}
     </div>`;
 }
 
-function failed(message, retry) {
-  view.innerHTML = `
+function loading(message, target = view) {
+  target.innerHTML = funLoader(message);
+}
+
+function failed(message, retry, target = view) {
+  target.innerHTML = `
     <div class="empty-state">
       <strong>${esc(message)}</strong>
       <p>잠시 뒤 다시 시도해 주세요.</p>
-      <button type="button" id="retry">다시 불러오기</button>
+      <button type="button" class="retry">다시 불러오기</button>
     </div>`;
-  document.getElementById("retry").onclick = retry;
+  target.querySelector(".retry").onclick = retry;
 }
+
+// ── 다른 사람 티어표 팝업 ───────────────────────────────
+// 그룹방에서 누군가의 티어표를 열면 방 화면 위에 창을 띄운다. 닫으면 방 화면 그대로다
+function openPlayer(riotId) {
+  closePlayer();
+  const dlg = document.createElement("dialog");
+  dlg.className = "modal";
+  dlg.setAttribute("aria-label", riotId + " 티어표");
+  dlg.innerHTML = `
+    <div class="modal-box">
+      <header class="modal-head">
+        <button type="button" class="icon-btn" data-close aria-label="그룹방으로 돌아가기">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+        <b>${esc(riotId.split("#")[0])} 님의 티어표</b>
+        <button type="button" class="icon-btn" data-close aria-label="닫기">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+      </header>
+      <div class="modal-body"></div>
+    </div>`;
+  document.body.appendChild(dlg);
+  // 바깥(어두운 곳) 을 누르거나, ← / ✕ 를 누르면 닫는다
+  dlg.addEventListener("click", e => {
+    if (e.target === dlg || e.target.closest("[data-close]")) dropModal(dlg);
+  });
+  // Esc 는 브라우저가 닫는다. 그때도 뒷정리를 한다.
+  // close 신호는 늦게 올 수 있어서, 이 창 하나만 치운다(그새 새로 연 창은 건드리지 않게)
+  dlg.addEventListener("close", () => dropModal(dlg));
+  document.body.classList.add("modal-open");
+  dlg.showModal();
+  renderTier(riotId, false, dlg.querySelector(".modal-body"), true);
+}
+
+// 창 하나를 닫고 치운다. 이미 치운 창이면 아무것도 안 한다
+function dropModal(dlg) {
+  if (!dlg.isConnected) return;
+  if (dlg.open) dlg.close();
+  dlg.remove();
+  if (!document.querySelector("dialog.modal")) document.body.classList.remove("modal-open");
+}
+
+function closePlayer() {
+  document.querySelectorAll("dialog.modal").forEach(dropModal);
+}
+// 창 안에서 다른 화면(듀오 궁합 등) 으로 가면 창은 닫는다
+window.addEventListener("hashchange", closePlayer);
 
 // ── 길 찾기 ─────────────────────────────────────────────
 
@@ -387,9 +464,9 @@ function champDetail(c, bracket) {
     </div>`;
 }
 
-async function renderTier(riotId, fresh = false) {
+async function renderTier(riotId, fresh = false, target = view, inModal = false) {
   const mine = !riotId || riotId.toLowerCase().replace(/\s/g, "") === me.riot_id.toLowerCase().replace(/\s/g, "");
-  loading("OP.GG 에서 전적과 챔피언 통계를 모으는 중이에요. 처음엔 15초쯤 걸려요.");
+  loading("OP.GG 에서 전적과 챔피언 통계를 모으는 중이에요. 처음 만드는 티어표는 조금 걸려요.", target);
   let data;
   try {
     const q = new URLSearchParams();
@@ -397,7 +474,7 @@ async function renderTier(riotId, fresh = false) {
     if (fresh) q.set("fresh", "1");
     data = await api("/api/tierlist?" + q);
   } catch (ex) {
-    return failed(ex.message, () => renderTier(riotId, fresh));
+    return failed(ex.message, () => renderTier(riotId, fresh, target, inModal), target);
   }
 
   const p = data.player;
@@ -415,14 +492,14 @@ async function renderTier(riotId, fresh = false) {
     : "";
 
   if (!data.op) {
-    view.innerHTML = playerStrip(p) + `
+    target.innerHTML = playerStrip(p) + `
       <div class="empty-state"><strong>최근 협곡 게임 기록이 없어요</strong>
       <p>솔로랭크, 자유랭크, 일반 게임을 몇 판 하고 나면 티어표가 만들어져요. 칼바람과 아레나는 세지 않아요.</p></div>`;
     return;
   }
 
-  view.innerHTML = `
-    <h1>${title}</h1>
+  target.innerHTML = `
+    ${inModal ? "" : `<h1>${title}</h1>`}
     <p class="lead">최근 ${data.games}판(${esc(queues)})에서 고른 챔피언 ${data.champion_count}개를 판마다의 플레이 점수로 줄 세웠어요. ${esc(basis)}</p>
     ${short}
     ${playerStrip(p)}
@@ -444,21 +521,21 @@ async function renderTier(riotId, fresh = false) {
                 : `<span class="empty">비어 있음</span>`}</div>
             </div>`).join("")}
         </div>
-        <div id="detail-slot"></div>
+        <div class="detail-slot"></div>
       </div>
     </section>
     <div class="toolbar">
-      <button type="button" class="ghost" id="refresh">최신 전적으로 다시 만들기</button>
+      <button type="button" class="ghost refresh">최신 전적으로 다시 만들기</button>
       ${mine ? "" : `<a class="btn" href="${duoHref(p.riot_id)}">나와 듀오 궁합 보기</a>`}
       <span class="note">챔피언을 누르면 왜 그 자리인지 보여 줘요.</span>
     </div>`;
 
-  document.getElementById("refresh").onclick = () => renderTier(riotId, true);
-  const slot = document.getElementById("detail-slot");
-  view.querySelectorAll(".champ").forEach(btn => {
+  target.querySelector(".refresh").onclick = () => renderTier(riotId, true, target, inModal);
+  const slot = target.querySelector(".detail-slot");
+  target.querySelectorAll(".champ").forEach(btn => {
     btn.onclick = () => {
       const open = btn.getAttribute("aria-expanded") === "true";
-      view.querySelectorAll(".champ").forEach(b => b.setAttribute("aria-expanded", "false"));
+      target.querySelectorAll(".champ").forEach(b => b.setAttribute("aria-expanded", "false"));
       if (open) { slot.innerHTML = ""; return; }
       btn.setAttribute("aria-expanded", "true");
       const c = all.find(x => String(x.id) === btn.dataset.id);
@@ -585,7 +662,7 @@ function boardCard(m, color, isMe) {
     <article class="pcard ${isMe ? "me" : ""}" style="--mc:${color}">
       <header>
         ${m.icon ? `<img src="${esc(m.icon)}" alt="" width="40" height="40">` : ""}
-        <div><a href="${tierHref(m.riot_id)}" title="${esc(m.riot_id)}">${esc(m.game_name)}</a>
+        <div><a href="${tierHref(m.riot_id)}" data-player="${esc(m.riot_id)}" title="${esc(m.riot_id)}">${esc(m.game_name)}</a>
           <small>${esc(rankShort(m.rank))}${m.main_lane_ko ? " · " + esc(m.main_lane_ko) : ""}</small></div>
         <span class="pscore" title="최근 판 플레이 점수"><b style="color:${scoreColor(m.play && m.play.overall)}">${m.play ? m.play.overall : "-"}</b><small>플레이</small></span>
       </header>
@@ -596,7 +673,7 @@ function boardCard(m, color, isMe) {
       </div>
       <div class="mtiers">${["1", "2", "3", "4", "5"].map(tierRow).join("")}</div>
       <footer>
-        <a class="btn ghost" href="${tierHref(m.riot_id)}">티어표 크게 보기</a>
+        <a class="btn ghost" href="${tierHref(m.riot_id)}" data-player="${esc(m.riot_id)}">티어표 크게 보기</a>
         ${isMe ? "" : `<a class="btn ghost" href="${duoHref(m.riot_id)}">나와 궁합</a>`}
       </footer>
     </article>`;
@@ -623,43 +700,66 @@ function roomTable(room, members) {
 }
 
 // 방을 옮겨 다녀도 보던 탭을 기억한다
+// 아직 전적을 받는 중인 사람의 카드
+function pendingCard(m, color) {
+  return `
+    <article class="pcard pending" style="--mc:${color}">
+      <header><div><b>${esc(m.game_name)}</b><small>전적 불러오는 중</small></div></header>
+      ${funLoader("", true)}
+    </article>`;
+}
+
 let roomTab = "board";
+// 방을 옮기거나 새로 부르면 앞서 오던 대답은 버린다
+let roomLoadSeq = 0;
 
 async function renderRoom(roomId, fresh = false) {
+  const seq = ++roomLoadSeq;
   const body = document.getElementById("room-body");
-  body.innerHTML = `<div class="loading"><div class="skeleton"><div></div><div></div></div>
-    <p>방 사람들의 전적을 모으는 중이에요.</p></div>`;
+  body.innerHTML = funLoader("방 사람들을 부르는 중이에요.");
   let room;
-  try { room = await api("/api/rooms/" + roomId + (fresh ? "?fresh=1" : "")); }
+  try { room = await api("/api/rooms/" + roomId + "?lite=1"); }
   catch (ex) {
     body.innerHTML = `<div class="empty-state"><strong>${esc(ex.message)}</strong></div>`;
     return;
   }
+  if (seq !== roomLoadSeq) return;
 
   // 색은 들어온 순서(서버가 주는 순서)로 고정
-  const members = room.members.map((m, i) => ({ m, color: memberColor(i) }));
-  const ok = members.filter(({ m }) => !m.error);
-  const broken = members.filter(({ m }) => m.error);
+  const members = room.members.map((m, i) => ({ m: { ...m, pending: true }, color: memberColor(i) }));
+  let arrived = 0;
 
   function draw() {
+    const ok = members.filter(({ m }) => !m.pending && !m.error);
+    const waiting = members.filter(({ m }) => m.pending);
+    const broken = members.filter(({ m }) => m.error);
+    const total = members.length;
     body.innerHTML = `
       <div class="room-head">
         <h1>${esc(room.name)}</h1>
         <span class="code">초대 코드 <b>${esc(room.code)}</b><button type="button" class="ghost" id="copy-code">복사</button></span>
       </div>
+      ${waiting.length ? `
+        <div class="progress" role="status">
+          <span class="bar"><i style="width:${Math.round(arrived / total * 100)}%"></i></span>
+          <span>${total}명 중 ${arrived}명 불러옴</span>
+        </div>` : ""}
       <div class="seg" role="tablist" aria-label="방 화면">
         <button type="button" role="tab" data-tab="board" aria-selected="${roomTab === "board"}">OP · 티어표</button>
         <button type="button" role="tab" data-tab="stats" aria-selected="${roomTab === "stats"}">지표 비교</button>
       </div>
       ${roomTab === "board" ? `
-        <div class="pcards">${ok.map(({ m, color }) => boardCard(m, color, m.account_id === room.me)).join("")}</div>`
-      : `
+        <div class="pcards">${members.filter(({ m }) => !m.error).map(({ m, color }) =>
+          m.pending ? pendingCard(m, color) : boardCard(m, color, m.account_id === room.me)).join("")}</div>`
+      : ok.length ? `
+        ${waiting.length ? `<p class="note">아직 ${waiting.length}명을 불러오는 중이에요. 오는 대로 그래프에 더해져요.</p>` : ""}
         <div class="legend">${ok.map(({ m, color }) => `<span><i style="background:${color}"></i>${esc(m.game_name)}</span>`).join("")}</div>
         <h2 class="sub-h">플레이 점수 <small>50점이 그 라인과 그 판 티어의 보통</small></h2>
         <div class="metrics">${PLAY_METRICS.map(x => metricChart(x, ok)).join("")}</div>
         <h2 class="sub-h">기본 지표 <small>최근 20판</small></h2>
         <div class="metrics">${BASIC_METRICS.map(x => metricChart(x, ok)).join("")}</div>
-        ${roomTable(room, ok)}`}
+        ${roomTable(room, ok)}`
+      : funLoader("그래프를 그릴 전적을 모으는 중이에요.")}
       ${broken.length ? `<p class="note">전적을 못 불러온 사람: ${broken.map(({ m }) => esc(m.riot_id) + " (" + esc(m.error) + ")").join(", ")}</p>` : ""}
       <div class="toolbar">
         <button type="button" class="ghost" id="room-refresh">모두 최신 전적으로</button>
@@ -667,6 +767,12 @@ async function renderRoom(roomId, fresh = false) {
       </div>`;
 
     body.querySelectorAll(".seg button").forEach(b => b.onclick = () => { roomTab = b.dataset.tab; draw(); });
+    // 티어표 링크는 팝업으로. Ctrl/가운데 클릭(새 탭) 은 그대로 둔다
+    body.querySelectorAll("a[data-player]").forEach(a => a.onclick = e => {
+      if (e.ctrlKey || e.metaKey || e.shiftKey || e.button !== 0) return;
+      e.preventDefault();
+      openPlayer(a.dataset.player);
+    });
     document.getElementById("copy-code").onclick = async () => {
       try { await navigator.clipboard.writeText(room.code); toast("코드를 복사했어요"); }
       catch { toast("코드: " + room.code); }
@@ -683,6 +789,17 @@ async function renderRoom(roomId, fresh = false) {
     };
   }
   draw();
+
+  // 사람마다 따로 받아서, 오는 대로 카드를 채운다
+  members.forEach(slot => {
+    api("/api/rooms/" + roomId + "/member/" + slot.m.account_id + (fresh ? "?fresh=1" : ""))
+      .then(card => { slot.m = card; },
+            ex => { slot.m = { ...slot.m, pending: false, error: ex.message }; })
+      .finally(() => {
+        arrived += 1;
+        if (seq === roomLoadSeq && body.isConnected) draw();
+      });
+  });
 }
 
 // ── 듀오 궁합 ───────────────────────────────────────────
@@ -741,8 +858,7 @@ async function fillPicks() {
 
 async function drawDuo(partner, fresh) {
   const body = document.getElementById("duo-body");
-  body.innerHTML = `<div class="loading"><div class="skeleton"><div></div><div></div></div>
-    <p>두 사람의 최근 경기를 맞춰 보는 중이에요.</p></div>`;
+  body.innerHTML = funLoader("두 사람의 최근 경기를 맞춰 보는 중이에요.");
   let d;
   try {
     d = await api("/api/duo?" + new URLSearchParams({ partner, ...(fresh ? { fresh: "1" } : {}) }));
