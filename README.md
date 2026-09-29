@@ -1,4 +1,4 @@
-# 마이티어 — 내 챔피언만으로 만드는 티어표
+# Tier.gg — 내 챔피언만으로 만드는 티어표
 
 FastAPI 로 만든 롤 전적 서비스. 데이터는 OP.GG 가 공개한 MCP 서버에서 받는다.
 
@@ -58,6 +58,13 @@ uvicorn main:app --reload
 3. Deploy.
 
 무료 요금제는 15분 안 쓰면 잠들고, 다시 깨는 데 30초쯤 걸린다.
+
+### 주소(도메인)
+
+- Render 주소(`이름.onrender.com`)는 서비스를 **만들 때** 이름으로 정해지고, 나중에 바꿀 수 없다.
+  `render.yaml` 의 이름은 `tier-gg` 라서 새로 만들면 `tier-gg.onrender.com` 이 된다.
+  예전 `woori-sosik.onrender.com` 서비스는 이름만 바꿔도 주소가 그대로다.
+- `tier.gg` 같은 진짜 도메인은 따로 사서 Render 서비스의 **Settings → Custom Domains** 에 붙인다.
 
 ## 파일
 

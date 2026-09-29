@@ -2,7 +2,8 @@
 # 이 파일이 저장소에 있으면 Render 가 알아서 읽는다.
 services:
   - type: web
-    name: woori-sosik
+    # 이 이름이 주소가 된다(tier-gg.onrender.com). 만든 뒤에는 주소를 바꿀 수 없다
+    name: tier-gg
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
