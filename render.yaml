@@ -9,11 +9,8 @@ services:
     # $PORT 는 Render 가 정해서 알려주는 번호다. 고정하면 안 된다
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     envVars:
-      # 관리자 비밀번호. Render 대시보드에서 직접 넣는다(파일에 적지 않는다)
-      - key: MEMO_ADMIN_KEY
-        sync: false
-      # 글을 저장할 바깥 데이터베이스 주소(Neon 등).
+      # 계정과 방을 저장할 바깥 데이터베이스 주소(Neon 등).
       # 무료 플랜은 디스크를 못 쓰고, 서버가 잠들었다 깨면 폴더가 초기화된다.
-      # 그래서 글은 서버 밖에 둔다. 이 값이 비어 있으면 그냥 memo.db 를 쓴다
+      # 그래서 서버 밖에 둔다. 이 값이 비어 있으면 그냥 mytier.db 파일을 쓴다
       - key: DATABASE_URL
         sync: false
