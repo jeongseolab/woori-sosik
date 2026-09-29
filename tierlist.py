@@ -54,6 +54,27 @@ def rank_of(profile):
     return None
 
 
+TIER_ORDER = ["IRON", "BRONZE", "SILVER", "GOLD", "PLATINUM", "EMERALD",
+              "DIAMOND", "MASTER", "GRANDMASTER", "CHALLENGER"]
+
+
+def real_tier(profile, rows):
+    """이 사람의 실제 티어. 공식 티어표와 플레이 점수 기준을 이 티어에 맞춘다.
+
+    1. 솔로랭크 티어  2. 없으면 자유랭크 티어
+    3. 둘 다 없으면(언랭) 최근 판들의 평균 티어 - 그 사람이 실제로 섞여 노는 수준이다
+    4. 그것도 모르면 None (전체 구간)
+    """
+    rank = rank_of(profile)
+    if rank:
+        return {"tier": rank["tier"], "tier_ko": rank["tier_ko"], "source": rank["queue"]}
+    seen = [TIER_ORDER.index(t) for t in (r.get("avg_tier") for r in rows) if t in TIER_ORDER]
+    if seen:
+        tier = TIER_ORDER[round(sum(seen) / len(seen))]
+        return {"tier": tier, "tier_ko": TIER_KO[tier], "source": "최근 판 평균"}
+    return None
+
+
 def _kda(k, d, a):
     return round((k + a) / max(d, 1), 2)
 
@@ -77,7 +98,7 @@ def _totals(rows):
 
 def summary(profile, rows):
     """그룹방에서 나란히 놓고 볼 개인 지표. rows 는 최근 20판."""
-    bracket = (rank_of(profile) or {}).get("tier")
+    bracket = (real_tier(profile, rows) or {}).get("tier")
     play = perf.summarize([perf.game(r, bracket) for r in rows if perf.counts(r)])
     lanes = Counter(r["position"] for r in rows if r.get("position") in LANE_KO)
     main_lane = lanes.most_common(1)[0][0] if lanes else None
@@ -117,7 +138,7 @@ def _reason(c, bracket_ko):
             bits.append("%s %d" % (perf.AREA_KO[best], areas[best]))
     bits.append("%d판 %d승" % (c["play"], c["win"]))
     if c.get("meta_tier"):
-        where = bracket_ko + " 구간" if bracket_ko else "전체 구간"
+        where = bracket_ko + " 공식" if bracket_ko and c.get("meta_scope") == "bracket" else "전체 구간 공식"
         bits.append("%s %d티어" % (where, c["meta_tier"]))
     return ", ".join(bits)
 
@@ -127,10 +148,10 @@ async def build(game_name: str, tagline: str, fresh=False):
     (profile, rows), index, lanes = await asyncio.gather(
         recent(game_name, tagline, fresh), opgg.champion_index(), opgg.main_lanes())
 
-    rank = rank_of(profile)
+    real = real_tier(profile, rows)
     # OP.GG 티어 이름을 그대로 소문자로 쓰면 구간 필터가 된다(silver, gold ...)
-    bracket = rank["tier"].lower() if rank else None
-    bracket_ko = rank["tier_ko"] if rank else None
+    bracket = real["tier"].lower() if real else None
+    bracket_ko = real["tier_ko"] if real else None
 
     key_by_name = {v["name"]: k for k, v in index.items()}
     by_champ = defaultdict(list)
@@ -145,7 +166,7 @@ async def build(game_name: str, tagline: str, fresh=False):
         played = Counter(g["position"] for g in games if g.get("position") in LANE_KO)
         lane = played.most_common(1)[0][0] if played else lanes.get(name) or "mid"
         t = _totals(games)
-        scored = [perf.game(g, rank["tier"] if rank else None) for g in games if perf.counts(g)]
+        scored = [perf.game(g, real["tier"] if real else None) for g in games if perf.counts(g)]
         champs.append({
             "perf": perf.summarize(scored),
             "_perf_sum": sum(s["overall"] for s in scored if s and s["overall"] is not None),
@@ -157,15 +178,25 @@ async def build(game_name: str, tagline: str, fresh=False):
             "kda": t["kda"], "cs_per_min": t["cs_per_min"],
         })
 
-    metas = await asyncio.gather(*[
-        opgg.champion_meta(c["key"], c["lane"], bracket) if c["key"] else _none()
-        for c in champs])
+    async def official(c):
+        """내 티어 구간의 공식 티어. 못 받으면 전체 구간 것을 쓰고 그렇다고 표시한다."""
+        if not c["key"]:
+            return None, None
+        if bracket:
+            got = await opgg.champion_meta(c["key"], c["lane"], bracket)
+            if got and got.get("tier"):
+                return got, "bracket"
+        got = await opgg.champion_meta(c["key"], c["lane"], None)
+        return (got, "all") if got and got.get("tier") else (None, None)
 
-    for c, meta in zip(champs, metas):
+    metas = await asyncio.gather(*[official(c) for c in champs])
+
+    for c, (meta, scope) in zip(champs, metas):
         meta = meta or {}
         c["meta_tier"] = meta.get("tier")
         c["meta_rank"] = meta.get("rank")
         c["meta_win_rate"] = meta.get("win_rate")
+        c["meta_scope"] = scope
 
         # 판마다의 플레이 점수 평균. 판이 적으면 보통(50) 쪽으로 당긴다
         adjusted = (c.pop("_perf_sum") + PRIOR_GAMES * 50) / (c.pop("_perf_n") + PRIOR_GAMES)
@@ -191,6 +222,7 @@ async def build(game_name: str, tagline: str, fresh=False):
     return {
         "player": summary(profile, rows),
         "bracket": bracket_ko,
+        "bracket_source": real["source"] if real else None,
         "op": op,
         "tiers": tiers,
         "champion_count": len(champs),
