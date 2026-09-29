@@ -161,7 +161,7 @@ function renderGate(mode = "login") {
   view.innerHTML = `
     <section class="gate">
       <div class="gate-intro">
-        <p class="gate-logo">Tier.gg</p>
+        <p class="gate-logo"><svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#f0b429"/><rect x="6" y="7" width="20" height="4.5" rx="2" fill="#0f1b33"/><rect x="6" y="13.75" width="14" height="4.5" rx="2" fill="#0f1b33"/><rect x="6" y="20.5" width="8" height="4.5" rx="2" fill="#0f1b33"/></svg><span>Tier.gg</span></p>
         <h1>내가 한 챔피언만으로 만드는 티어표</h1>
         <p class="lead">최근 20판에서 판마다 얼마나 잘했는지를 라인과 티어 기준으로 매겨, 나만의 OP와 1~5티어를 정해 줘요.</p>
         <ul class="gate-points">
@@ -276,7 +276,8 @@ function renderGate(mode = "login") {
     }
   });
   // 저장된 아이디가 있으면 바로 비밀번호부터
-  (!signup && last.name ? form.password : form.lol_name).focus();
+  // 화면이 아래로 밀려 로고가 가려지지 않게 스크롤은 하지 않는다
+  (!signup && last.name ? form.password : form.lol_name).focus({ preventScroll: true });
 }
 
 // ── 티어표 ──────────────────────────────────────────────
@@ -346,18 +347,30 @@ function diagnosis(p) {
     </section>`;
 }
 
+// 지금 그리는 티어표의 구간 이름(실버 등). 챔피언 칸의 설명에 쓴다
+let bracketNow = null;
+
+function officialLabel(c, bracket) {
+  if (!c.meta_tier) return "공식 티어 정보 없음";
+  const where = c.meta_scope === "bracket" && bracket ? bracket + " 구간" : "전체 구간";
+  return where + " OP.GG 공식 " + c.meta_tier + "티어" + (c.meta_rank ? " (" + c.meta_rank + "위)" : "");
+}
+
 function champButton(c) {
   return `
     <button type="button" class="champ" data-id="${c.id}" aria-expanded="false"
             aria-label="${esc(c.name)} 자세히">
-      ${c.image ? `<img src="${esc(c.image)}" alt="" width="60" height="60" loading="lazy">` : ""}
+      <span class="pic">
+        ${c.image ? `<img src="${esc(c.image)}" alt="" width="60" height="60" loading="lazy">` : ""}
+        ${c.meta_tier ? `<em class="official" data-t="${esc(c.meta_tier)}" title="${esc(officialLabel(c, bracketNow))}">${esc(c.meta_tier)}</em>` : ""}
+      </span>
       <span>${esc(c.name)}</span>
       <small>${c.perf ? "플레이 " + c.perf.overall : pct(c.win_rate)} · ${c.play}판</small>
     </button>`;
 }
 
 function champDetail(c, bracket) {
-  const where = bracket ? bracket + " 구간" : "전체 구간";
+  const where = c.meta_scope === "bracket" && bracket ? bracket : "전체 구간";
   return `
     <div class="detail">
       <h3>${esc(c.name)} ${c.tier ? c.tier + "티어" : "OP"}</h3>
@@ -369,7 +382,7 @@ function champDetail(c, bracket) {
         <div><dt>KDA</dt><dd>${num(c.kda, 2)}</dd></div>
         <div><dt>분당 CS</dt><dd>${num(c.cs_per_min)}</dd></div>
         <div><dt>라인</dt><dd>${esc(c.lane_ko || "-")}</dd></div>
-        <div><dt>${esc(where)} 메타</dt><dd>${c.meta_tier ? esc(c.meta_tier) + "티어 (" + esc(c.meta_rank) + "위)" : "정보 없음"}</dd></div>
+        <div><dt>${esc(where)} 공식 티어</dt><dd>${c.meta_tier ? esc(c.meta_tier) + "티어 (" + esc(c.meta_rank) + "위)" : "정보 없음"}</dd></div>
       </dl>
     </div>`;
 }
@@ -390,7 +403,12 @@ async function renderTier(riotId, fresh = false) {
   const p = data.player;
   const all = [data.op, ...Object.values(data.tiers).flat()].filter(Boolean);
   const title = mine ? "내 티어표" : esc(p.game_name) + " 님의 티어표";
-  const basis = data.bracket ? data.bracket + " 구간 메타를 반영했어요." : "랭크 기록이 없어 전체 구간 메타를 반영했어요.";
+  bracketNow = data.bracket;
+  const basis = !data.bracket
+    ? "티어를 알 수 없어 전체 구간 OP.GG 공식 티어를 반영했어요."
+    : data.bracket_source === "최근 판 평균"
+      ? "랭크가 없어서 최근 판들의 평균 티어(" + data.bracket + ")를 실제 티어로 보고, 그 구간의 OP.GG 공식 티어를 반영했어요."
+      : data.bracket + " 구간(" + data.bracket_source + " 기준) OP.GG 공식 티어를 반영했어요. 챔피언 그림 옆 숫자가 공식 티어예요.";
   const queues = Object.entries(p.queues || {}).map(([q, n]) => q + " " + n).join(", ");
   const short = data.games < data.target_games
     ? `<p class="note">칼바람과 아레나를 빼고 나니 아직 ${data.games}판이에요. OP.GG 는 모드를 가리지 않고 최근 20판만 알려 줘서, 볼 때마다 쌓아 두고 ${data.target_games}판까지 채워요.</p>`
