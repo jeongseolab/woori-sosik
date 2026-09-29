@@ -119,10 +119,13 @@ def summary(profile, rows):
     }
 
 
-async def recent(game_name: str, tagline: str, fresh=False):
-    """프로필과 최근 20판. 새 판을 받아 쌓은 뒤 쌓인 것에서 최근 20판을 꺼낸다."""
+async def recent(game_name: str, tagline: str, fresh=False, puuid=None):
+    """프로필과 최근 20판. 새 판을 받아 쌓은 뒤 쌓인 것에서 최근 20판을 꺼낸다.
+
+    puuid 를 주면 그 이름이 아직 그 사람인지 확인한다(opgg.profile_of).
+    """
     profile, _ = await asyncio.gather(
-        opgg.profile(game_name, tagline, fresh),
+        opgg.profile_of(game_name, tagline, puuid, fresh),
         opgg.matches(game_name, tagline, fresh))
     return profile, opgg.stored_matches(profile["puuid"], RECENT_GAMES)
 
@@ -143,10 +146,10 @@ def _reason(c, bracket_ko):
     return ", ".join(bits)
 
 
-async def build(game_name: str, tagline: str, fresh=False):
-    """티어표 한 장을 만든다."""
+async def build(game_name: str, tagline: str, fresh=False, puuid=None):
+    """티어표 한 장을 만든다. puuid 는 가입한 사람일 때 본인 확인용."""
     (profile, rows), index, lanes = await asyncio.gather(
-        recent(game_name, tagline, fresh), opgg.champion_index(), opgg.main_lanes())
+        recent(game_name, tagline, fresh, puuid), opgg.champion_index(), opgg.main_lanes())
 
     real = real_tier(profile, rows)
     # OP.GG 티어 이름을 그대로 소문자로 쓰면 구간 필터가 된다(silver, gold ...)

@@ -20,8 +20,9 @@ from pydantic import BaseModel
 import duo
 import opgg
 import tierlist
-from auth import (check_login, create_account, end_session, find_account,
-                  split_riot_id, start_session, who_is)
+from auth import (check_by_puuid, check_login, create_account, end_session,
+                  find_account, puuid_of, rename_account, riot_key, split_riot_id,
+                  start_session, who_is)
 from database import get_conn, init_db
 
 # 서버를 어느 폴더에서 켜든 파일을 찾을 수 있게, 이 파일 위치를 기준으로 잡는다
@@ -48,6 +49,12 @@ async def _not_found(_, exc):
     return JSONResponse(status_code=404, content={"detail": str(exc)})
 
 
+@app.exception_handler(opgg.Renamed)
+async def _renamed(_, exc):
+    # 화면이 "다시 로그인" 을 권할 수 있게 따로 알린다
+    return JSONResponse(status_code=409, content={"detail": str(exc), "renamed": True})
+
+
 @app.exception_handler(opgg.OpggError)
 async def _opgg_down(_, exc):
     return JSONResponse(status_code=502, content={"detail": str(exc)})
@@ -64,6 +71,13 @@ def _need_login(authorization):
     if user is None:
         raise HTTPException(status_code=401, detail="로그인이 필요합니다")
     return user
+
+
+def _puuid_for(name, tag, user):
+    """그 이름이 가입한 사람이면 puuid. 본인 확인(opgg.profile_of) 에 쓴다."""
+    if riot_key(name, tag) == riot_key(user["game_name"], user["tagline"]):
+        return user["puuid"]
+    return puuid_of(name, tag)
 
 
 def _riot_id_or_400(text):
@@ -102,18 +116,77 @@ async def signup(body: SignupIn):
     account_id = await asyncio.to_thread(
         create_account, p["game_name"], p["tagline"], p["puuid"], body.password)
     if account_id is None:
-        raise HTTPException(status_code=409, detail="이미 가입된 LOL 계정입니다. 로그인해 주세요")
+        raise HTTPException(status_code=409, detail="이미 가입된 LOL 계정입니다. 로그인해 주세요."
+                            " 닉네임을 바꿨다면 새 닉네임으로 로그인하면 옮겨 드려요")
 
     return {"token": start_session(account_id), "user": find_account(account_id)}
 
 
+class LoginIn(SignupIn):
+    # 닉네임 변경 확인 창에서 "예" 를 누르고 다시 보낼 때 true
+    confirm_rename: bool = False
+
+
 @app.post("/api/login")
-def login(body: SignupIn):
-    user = check_login(body.riot_id, body.password)
-    if user is None:
+async def login(body: LoginIn):
+    user = await asyncio.to_thread(check_login, body.riot_id, body.password)
+    if user is not None:
+        user = await _fix_spelling(user)
+        return {"token": start_session(user["id"]), "user": user}
+
+    moved = await _renamed_account(body.riot_id, body.password)
+    if moved is None:
         # 아이디가 틀렸는지 비번이 틀렸는지 알려주지 않는다
         raise HTTPException(status_code=401, detail="LOL ID 나 비밀번호가 틀렸습니다")
+
+    old, now = moved
+    new_id = now["game_name"] + "#" + now["tagline"]
+    if not body.confirm_rename:
+        # 비밀번호까지 맞은 본인에게만 옛 닉네임을 보여 주고 바꿀지 묻는다
+        return JSONResponse(status_code=409, content={
+            "detail": "닉네임이 바뀌었는지 확인해 주세요",
+            "rename": {"old": old["riot_id"], "new": new_id}})
+    user = await asyncio.to_thread(
+        rename_account, old["id"], now["puuid"], now["game_name"], now["tagline"])
     return {"token": start_session(user["id"]), "user": user}
+
+
+async def _fix_spelling(user):
+    """라이엇에서 대소문자만 바꾼 경우(Hide on bush -> HIDE ON BUSH) 표기를 맞춘다.
+
+    riot_key 는 대소문자를 무시해서 로그인은 되지만, 화면에는 옛 표기가 남는다.
+    OP.GG 가 알려 준 정확한 표기와 다르면 조용히 고친다. OP.GG 가 안 되면 그냥 둔다.
+    """
+    try:
+        now = await opgg.profile(user["game_name"], user["tagline"])
+    except opgg.OpggError:
+        return user
+    same_person = now["puuid"] == user["puuid"]
+    spelled = (now["game_name"], now["tagline"]) != (user["game_name"], user["tagline"])
+    if not (same_person and spelled):
+        return user
+    return await asyncio.to_thread(
+        rename_account, user["id"], now["puuid"], now["game_name"], now["tagline"])
+
+
+async def _renamed_account(riot_id, password):
+    """새 닉네임으로 들어온 사람인지 본다. 맞으면 (옛 계정, 지금 OP.GG 프로필).
+
+    새 닉네임은 계정 표에 없지만 puuid 는 그대로다. OP.GG 에서 새 닉네임의 puuid 를 받아
+    그 puuid 로 가입한 계정이 있고 비밀번호도 맞는지 본다.
+    """
+    parts = split_riot_id(riot_id)
+    if parts is None:
+        return None
+    try:
+        # 이름 주인이 막 바뀌었을 수 있어서 들고 있던 것 말고 새로 묻는다
+        now = await opgg.profile(*parts, fresh=True)
+    except opgg.OpggError:
+        return None
+    old = await asyncio.to_thread(check_by_puuid, now["puuid"], password)
+    if old is None or riot_key(old["game_name"], old["tagline"]) == riot_key(*parts):
+        return None
+    return old, now
 
 
 @app.post("/api/logout")
@@ -138,7 +211,7 @@ async def get_tierlist(riot_id: str = None, fresh: bool = False,
         name, tag = _riot_id_or_400(riot_id)
     else:
         name, tag = user["game_name"], user["tagline"]
-    return await tierlist.build(name, tag, fresh)
+    return await tierlist.build(name, tag, fresh, _puuid_for(name, tag, user))
 
 
 # ── 그룹방 ───────────────────────────────────────────────
@@ -261,7 +334,11 @@ async def room_detail(room_id: int, fresh: bool = False, lite: bool = False,
 async def _member_card(acc, fresh=False):
     """그룹방 카드 한 장. OP.GG 가 실패하면 error 만 담아 돌려준다."""
     try:
-        board = await tierlist.build(acc["game_name"], acc["tagline"], fresh)
+        board = await tierlist.build(acc["game_name"], acc["tagline"], fresh, acc["puuid"])
+    except opgg.Renamed:
+        return {"account_id": acc["id"], "riot_id": acc["riot_id"],
+                "game_name": acc["game_name"], "renamed": True,
+                "error": "닉네임이 바뀐 것 같아요. 본인이 새 닉네임으로 로그인하면 다시 보여요"}
     except opgg.OpggError as e:
         return {"account_id": acc["id"], "riot_id": acc["riot_id"],
                 "game_name": acc["game_name"], "error": str(e)}
@@ -330,7 +407,8 @@ async def duo_check(partner: str, me_id: str = None, fresh: bool = False,
         a_name, a_tag = user["game_name"], user["tagline"]
     if (a_name + "#" + a_tag).replace(" ", "").lower() == (b_name + "#" + b_tag).replace(" ", "").lower():
         raise HTTPException(status_code=400, detail="다른 사람의 Riot ID 를 넣어 주세요")
-    return await duo.compare(a_name, a_tag, b_name, b_tag, fresh)
+    return await duo.compare(a_name, a_tag, b_name, b_tag, fresh,
+                             _puuid_for(a_name, a_tag, user), _puuid_for(b_name, b_tag, user))
 
 
 # 이 줄은 항상 맨 아래! 위의 주소들을 먼저 찾고, 없으면 static 을 내려준다

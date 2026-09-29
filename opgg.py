@@ -47,6 +47,13 @@ class NotFound(OpggError):
     """그런 소환사가 없을 때."""
 
 
+class Renamed(NotFound):
+    """가입해 둔 닉네임이 지금은 없거나 다른 사람 것일 때. 그 사람이 닉네임을 바꾼 것이다."""
+
+    def __init__(self, text="LOL 닉네임이 바뀐 것 같아요. 새 닉네임으로 다시 로그인하면 반영돼요"):
+        super().__init__(text)
+
+
 # ── 대답 읽기 ────────────────────────────────────────────
 
 _NUMBER = re.compile(r"-?\d+(\.\d+)?([eE][-+]?\d+)?")
@@ -289,6 +296,25 @@ async def profile(game_name: str, tagline: str, fresh=False):
 
     key = "profile:" + (game_name + "#" + tagline).replace(" ", "").lower()
     return await _cached(key, PROFILE_TTL, fetch, fresh)
+
+
+async def profile_of(game_name: str, tagline: str, puuid: str | None, fresh=False):
+    """profile 과 같다. puuid 를 주면 지금 그 이름이 정말 그 사람인지도 본다.
+
+    확인하지 않으면 누가 닉네임을 바꾼 뒤 다른 사람이 옛 닉네임을 가져갔을 때
+    엉뚱한 사람의 전적이 이 사람 이름으로 나온다.
+    """
+    try:
+        p = await profile(game_name, tagline, fresh)
+    except Renamed:
+        raise
+    except NotFound:
+        if puuid:
+            raise Renamed() from None
+        raise
+    if puuid and p["puuid"] != puuid:
+        raise Renamed()
+    return p
 
 
 _MATCH_FIELDS = [

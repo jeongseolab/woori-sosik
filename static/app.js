@@ -43,7 +43,11 @@ async function api(path, options = {}) {
   }
   if (!res.ok) {
     const detail = data && data.detail;
-    throw new Error(typeof detail === "string" ? detail : "요청을 처리하지 못했습니다");
+    const err = new Error(typeof detail === "string" ? detail : "요청을 처리하지 못했습니다");
+    // 닉네임 변경 확인처럼 화면이 따로 받아 처리할 대답이 있다
+    err.status = res.status;
+    err.data = data;
+    throw err;
   }
   return data;
 }
@@ -78,31 +82,59 @@ const QUIPS = [
   "귀환 중… 8초만요",
   "서폿이 와드 사는 중…",
 ];
-let quipAt = Math.floor(Math.random() * QUIPS.length);
-function nextQuip() { quipAt = (quipAt + 1) % QUIPS.length; return QUIPS[quipAt]; }
+// 닉네임을 새로 반영하는 동안. 상점과 컬렉션에서 흔히 하는 일들
+const RENAME_QUIPS = [
+  "코어 템 구매하는 중…",
+  "스킨 변경하는 중…",
+  "크로마 구매하는 중…",
+  "소환사 아이콘 고르는 중…",
+  "닉네임 변경권 쓰는 중…",
+  "와드 스킨 갈아 끼우는 중…",
+  "룬 페이지 다시 짜는 중…",
+  "감정 표현 휠 정리하는 중…",
+];
+const QUIP_SETS = { tier: QUIPS, rename: RENAME_QUIPS };
+const quipAt = {};
+function nextQuip(set = "tier") {
+  const list = QUIP_SETS[set] || QUIPS;
+  const at = quipAt[set];
+  quipAt[set] = at == null ? Math.floor(Math.random() * list.length) : (at + 1) % list.length;
+  return list[quipAt[set]];
+}
 
-// 화면에 .quip 이 있을 때만 1.8초마다 문구를 바꾼다
+// 화면에 .quip 이 있을 때만 1.8초마다 문구를 바꾼다. 어느 묶음인지는 data-quips 로 안다
 setInterval(() => {
   const els = document.querySelectorAll(".quip");
   if (!els.length) return;
-  els.forEach(el => { el.textContent = nextQuip(); });
+  els.forEach(el => { el.textContent = nextQuip(el.dataset.quips); });
 }, 1800);
 
 // 티어표가 채워지는 모양의 로딩. 칸마다 챔피언 자리가 차례로 톡톡 들어온다
-function funLoader(sub, small = false) {
+function funLoader(sub, small = false, quips = "tier") {
   return `
     <div class="fun-loader ${small ? "small" : ""}" role="status" aria-live="polite">
       <div class="fl-board" aria-hidden="true">
         ${["1", "2", "3", "4", "5"].slice(0, small ? 3 : 5).map(t =>
           `<div class="fl-row" data-t="${t}"><b>${t}</b><span><i></i><i></i><i></i></span></div>`).join("")}
       </div>
-      <p class="quip">${esc(nextQuip())}</p>
+      <p class="quip" data-quips="${quips}">${esc(nextQuip(quips))}</p>
       ${sub ? `<p class="note">${esc(sub)}</p>` : ""}
     </div>`;
 }
 
 function loading(message, target = view) {
   target.innerHTML = funLoader(message);
+}
+
+// 옛 닉네임으로 로그인해 있는데 닉네임이 바뀐 경우. 새 닉네임으로 로그인하면 옮겨 준다
+function renamedNotice(target = view) {
+  target.innerHTML = `
+    <div class="empty-state">
+      <strong>LOL 닉네임이 바뀐 것 같아요</strong>
+      <p>로그아웃한 뒤 <b>새 닉네임</b>과 지금 비밀번호로 로그인하면, 전적과 그룹방은 그대로 두고 닉네임만 바꿔 드려요.</p>
+      <button type="button" class="relogin">새 닉네임으로 로그인</button>
+    </div>`;
+  target.querySelector(".relogin").onclick = () => document.getElementById("logout").click();
 }
 
 function failed(message, retry, target = view) {
@@ -159,6 +191,60 @@ function closePlayer() {
 }
 // 창 안에서 다른 화면(듀오 궁합 등) 으로 가면 창은 닫는다
 window.addEventListener("hashchange", closePlayer);
+
+// ── 작은 확인 창 ────────────────────────────────────────
+// 티어표 팝업(dialog.modal) 과 섞이지 않게 dialog.ask 로 따로 띄운다
+
+function openAsk(html, label) {
+  const dlg = document.createElement("dialog");
+  dlg.className = "ask";
+  dlg.setAttribute("aria-label", label);
+  dlg.innerHTML = html;
+  document.body.appendChild(dlg);
+  dlg.addEventListener("close", () => dlg.remove());
+  dlg.showModal();
+  return dlg;
+}
+
+// 닉네임이 바뀌었는지 묻는다. "예" 면 true
+function askRename(oldId, newId) {
+  return new Promise(resolve => {
+    const dlg = openAsk(`
+      <div class="ask-box">
+        <h2>닉네임 변경 확인</h2>
+        <p class="rename-pair">
+          <span class="old">${esc(oldId)}</span>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+          <b>${esc(newId)}</b>
+        </p>
+        <p>이름이 변경되었습니까? <b>예</b>를 누르면 Tier.gg 계정도 새 닉네임으로 바꿔요. 전적과 그룹방은 그대로예요.</p>
+        <div class="ask-actions">
+          <button type="button" class="ghost" value="no">아니요</button>
+          <button type="button" value="yes">예</button>
+        </div>
+      </div>`, "닉네임 변경 확인");
+    let answer = false;
+    dlg.querySelectorAll("button").forEach(b => b.onclick = () => {
+      answer = b.value === "yes";
+      dlg.close();
+    });
+    // Esc 로 닫으면 "아니요" 로 본다
+    dlg.addEventListener("close", () => resolve(answer));
+    dlg.querySelector('button[value="yes"]').focus();
+  });
+}
+
+// 기다리는 동안 띄워 두는 창. 돌려준 함수를 부르면 닫힌다
+function showBusy(title, quips) {
+  const dlg = openAsk(`
+    <div class="ask-box">
+      <h2>${esc(title)}</h2>
+      ${funLoader("", true, quips)}
+    </div>`, title);
+  // 일하는 중에는 Esc 로 닫히지 않게 한다
+  dlg.addEventListener("cancel", e => e.preventDefault());
+  return () => { if (dlg.open) dlg.close(); };
+}
 
 // ── 길 찾기 ─────────────────────────────────────────────
 
@@ -327,20 +413,53 @@ function renderGate(mode = "login") {
     button.disabled = true;
     button.textContent = signup ? "계정 확인 중…" : "로그인 중…";
     err.textContent = "";
-    try {
-      const data = await api(signup ? "/api/signup" : "/api/login",
-        { method: "POST", body: JSON.stringify({ riot_id, password }) });
+    const done = (data) => {
       setToken(data.token);
       me = data.user;
       try { localStorage.setItem(LAST_ID_KEY, JSON.stringify({ name: me.game_name, tag: me.tagline })); } catch {}
       location.hash = "#/tier";
       route();
-    } catch (ex) {
-      err.textContent = ex.message;
+    };
+    const reset = (message) => {
+      err.textContent = message;
       button.disabled = false;
       button.textContent = signup ? "가입하기" : "로그인";
+    };
+    try {
+      done(await api(signup ? "/api/signup" : "/api/login",
+        { method: "POST", body: JSON.stringify({ riot_id, password }) }));
+    } catch (ex) {
+      const rename = !signup && ex.status === 409 && ex.data && ex.data.rename;
+      if (!rename) return reset(ex.message);
+      // 새 닉네임으로 들어왔고 비밀번호도 맞다. 바꿀지 본인에게 묻는다
+      if (!await askRename(rename.old, rename.new)) {
+        return reset("닉네임이 바뀐 게 아니라면 가입할 때 쓴 LOL ID(" + rename.old + ")로 로그인해 주세요");
+      }
+      await applyRename(riot_id, password, done, reset);
     }
   };
+
+  // 닉네임을 바꾸고, 새 닉네임으로 티어표를 미리 받아 둔다. 그동안 "반영 중" 창을 띄운다
+  async function applyRename(riot_id, password, done, reset) {
+    const close = showBusy("정보를 반영 중입니다", "rename");
+    // 너무 빨리 끝나 창이 번쩍하고 사라지지 않게 잠깐은 띄워 둔다
+    const atLeast = new Promise(r => setTimeout(r, 2000));
+    let data;
+    try {
+      data = await api("/api/login", { method: "POST",
+        body: JSON.stringify({ riot_id, password, confirm_rename: true }) });
+      setToken(data.token);
+      // 티어표를 미리 받아 두면 창이 닫히자마자 바로 보인다. 실패해도 티어표 화면이 다시 부른다
+      await api("/api/tierlist").catch(() => {});
+      await atLeast;
+    } catch (ex) {
+      close();
+      return reset(ex.message);
+    }
+    close();
+    toast("닉네임을 " + data.user.riot_id + " 로 바꿨어요");
+    done(data);
+  }
 
   // 닉네임에 "이름#태그" 를 통째로 붙여 넣으면 알아서 두 칸으로 나눈다
   form.lol_name.addEventListener("input", () => {
@@ -474,6 +593,7 @@ async function renderTier(riotId, fresh = false, target = view, inModal = false)
     if (fresh) q.set("fresh", "1");
     data = await api("/api/tierlist?" + q);
   } catch (ex) {
+    if (mine && ex.data && ex.data.renamed) return renamedNotice(target);
     return failed(ex.message, () => renderTier(riotId, fresh, target, inModal), target);
   }
 

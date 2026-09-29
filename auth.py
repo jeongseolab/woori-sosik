@@ -9,6 +9,11 @@
 
 나중에 Riot 공식 로그인(RSO) 승인을 받으면 check_login 자리만 바꾸면 된다.
 나머지 코드는 start_session / who_is 만 쓴다.
+
+닉네임이 바뀌면:
+  Riot 계정은 이름을 바꿔도 puuid 가 그대로다. 새 이름으로 로그인하면 riot_key 로는
+  못 찾지만, OP.GG 에서 새 이름의 puuid 를 받아 그 puuid 의 계정과 비밀번호를 맞춰 본다.
+  맞으면 check_by_puuid 가 그 계정을 돌려주고, 사용자가 "예" 하면 rename_account 로 고친다.
 """
 import hashlib
 import hmac
@@ -49,11 +54,30 @@ def _public(row):
             "riot_id": row["game_name"] + "#" + row["tagline"]}
 
 
+def _free_riot_key(conn, key: str, puuid: str):
+    """그 이름을 쥐고 있는 다른 사람(puuid 가 다른 계정) 에게서 이름을 뗀다.
+
+    닉네임을 바꾼 사람의 옛 이름이 계정 표에 남아 있으면, 그 이름을 새로 가져간
+    사람이 가입도 로그인도 못 한다. 부르는 쪽이 OP.GG 에서 "지금 이 이름은 puuid 사람" 임을
+    확인한 뒤에만 부른다. 뗀 자리에는 '#' 없는 표식을 넣어 진짜 이름과 겹치지 않게 한다.
+    """
+    rows = conn.execute(
+        "SELECT id, puuid FROM accounts WHERE riot_key = ? AND puuid <> ?", (key, puuid)
+    ).fetchall()
+    for row in rows:
+        conn.execute("UPDATE accounts SET riot_key = ? WHERE id = ?",
+                     ("renamed:" + row["puuid"], row["id"]))
+
+
 def create_account(game_name: str, tagline: str, puuid: str, password: str):
-    """계정을 만든다. 이미 가입된 Riot 계정이면 None 을 돌려준다."""
+    """계정을 만든다. 이미 가입된 Riot 계정이면 None 을 돌려준다.
+
+    puuid 는 방금 OP.GG 에서 확인한 값이라, 같은 이름을 쥔 옛 계정은 이름을 떼어 준다.
+    """
     salt = secrets.token_hex(16)
     conn = get_conn()
     try:
+        _free_riot_key(conn, riot_key(game_name, tagline), puuid)
         cursor = conn.execute(
             "INSERT INTO accounts (riot_key, game_name, tagline, puuid,"
             " pw_hash, pw_salt, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -95,6 +119,42 @@ def check_login(riot_id: str, password: str):
     if not hmac.compare_digest(got, row["pw_hash"]):
         return None
     return _public(row)
+
+
+def check_by_puuid(puuid: str, password: str):
+    """puuid 로 계정을 찾아 비밀번호를 맞춰 본다. 닉네임을 바꾼 사람을 찾을 때 쓴다."""
+    conn = get_conn()
+    row = conn.execute("SELECT * FROM accounts WHERE puuid = ?", (puuid,)).fetchone()
+    conn.close()
+    if row is None:
+        _hash_pw(password or "", "dummy")
+        return None
+    got = _hash_pw(password or "", row["pw_salt"])
+    if not hmac.compare_digest(got, row["pw_hash"]):
+        return None
+    return _public(row)
+
+
+def rename_account(account_id: int, puuid: str, game_name: str, tagline: str):
+    """계정의 닉네임을 새 것으로 바꾼다. puuid 는 OP.GG 에서 방금 확인한 값이다."""
+    conn = get_conn()
+    key = riot_key(game_name, tagline)
+    _free_riot_key(conn, key, puuid)
+    conn.execute(
+        "UPDATE accounts SET riot_key = ?, game_name = ?, tagline = ? WHERE id = ?",
+        (key, game_name, tagline, account_id))
+    conn.commit()
+    conn.close()
+    return find_account(account_id)
+
+
+def puuid_of(game_name: str, tagline: str):
+    """가입한 사람이면 그 계정의 puuid, 아니면 None."""
+    conn = get_conn()
+    row = conn.execute("SELECT puuid FROM accounts WHERE riot_key = ?",
+                       (riot_key(game_name, tagline),)).fetchone()
+    conn.close()
+    return row["puuid"] if row else None
 
 
 def start_session(account_id: int) -> str:
