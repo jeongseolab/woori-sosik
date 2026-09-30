@@ -1,7 +1,8 @@
 // 스킬샷 피하기. 서버 없이 이 파일만으로 돈다(기록 저장만 app.js 가 서버에 보낸다).
 //
 // 거리와 속도는 롤의 게임 단위(유닛) 그대로 쓰고, 그릴 때만 화면 크기에 맞춰 줄인다.
-//   - 내 챔피언: 판정 반지름 65(대부분의 챔피언), 이동 속도 345
+//   - 내 챔피언: 판정 반지름 65(데이터에 따로 없는 챔피언의 기본값. 블리츠·초가스는 80, 베이가는 55),
+//     이동 속도 335(챔피언 기본 이동 속도 baseMoveSpeed 는 325~345, 그 가운데 값)
 //   - 맞았는지: 스킬 판정(투사체 원, 장판 원, 레이저 띠, 감옥 테두리)과 내 판정 원이 겹치면 맞은 것
 //   - 목숨 LIVES 개. 다 잃으면 끝. 맞은 뒤 SAFE_AFTER_HIT 초는 무적(스킬 두 개에 한꺼번에 목숨 둘을 잃지 않게).
 //     스킬 하나는 한 번만 때린다(맞힌 투사체는 사라지고, 감옥은 한 번 스턴하면 끝)
@@ -23,12 +24,14 @@
 
 (function () {
   // 게임 규칙이 바뀌면 올린다. 서버는 같은 버전의 기록끼리만 순위를 매긴다
-  const VERSION = 4;
+  const VERSION = 5;
 
   const ARENA = { w: 1400, h: 900 };
-  const CHAMP = { radius: 65, speed: 345 };
+  const CHAMP = { radius: 65, speed: 335 };
   const STEP = 1 / 240;
   const FAR = 4000;            // 경기장보다 긴 사거리(레이저 등)
+  // 가끔 스킬(rare: 애쉬 R, 럭스 R) 이 나올 확률(둘을 합쳐서). 나머지는 열린 스킬 중에서 똑같은 확률로 고른다
+  const RARE_CHANCE = 0.03;
   const LIVES = 3;
   const SAFE_AFTER_HIT = 1.0;
   // 바닥 표시를 보고 움직이기 시작하기까지 걸리는 시간(사람의 반응 시간).
@@ -52,7 +55,7 @@
     // 벨코즈 Q 는 내 옆을 지날 때(벨코즈가 다시 눌러서) 또는 사거리 끝에서 양옆 직각으로 갈라진다.
     // 갈라지기 telegraph 초 전부터 구슬이 부풀며 번쩍인다(SplitTelegraphTime). 롤처럼 갈라질 경로는 안 보여 준다.
     // 갈라진 것은 VelkozQMissileSplit
-    { kind: "line", name: "벨코즈 Q", champ: "Velkoz", cast: 0.25, speed: 1300, radius: 50, range: 1100, color: "#d0bfff", from: 15,
+    { kind: "line", name: "벨코즈 Q", champ: "Velkoz", cast: 0.251, speed: 1300, radius: 50, range: 1100, color: "#d0bfff", from: 15,
       split: { speed: 2100, radius: 45, range: 1100, telegraph: 0.25 } },
     { kind: "line", name: "제라스 E", champ: "Xerath", cast: 0.25, speed: 1400, radius: 60, range: 1125, color: "#91a7ff", from: 15 },
     { kind: "line", name: "이즈리얼 Q", champ: "Ezreal", cast: 0.25, speed: 2000, radius: 60, range: 1200, color: "#74c0fc", from: 25, look: "bolt" },
@@ -77,7 +80,8 @@
 
     // ── 지연 레이저: 시전하는 동안 가는 선이 보이고, 끝나는 순간 선 전체를 친다 ──
     { kind: "beam", name: "진 W", champ: "Jhin", cast: 0.75, radius: 40, range: FAR, color: "#ff6b6b", from: 35 },
-    { kind: "beam", name: "럭스 R", champ: "Lux", cast: 1.0, radius: 100, range: FAR, color: "#fff3bf", from: 50, rare: true, src: "cast, radius: wiki" },
+    // 럭스 R 반지름은 데이터 LuxR 의 mLineWidth(190). 시전 시간은 데이터에 없어 위키 값(1초)
+    { kind: "beam", name: "럭스 R", champ: "Lux", cast: 1.0, radius: 190, range: FAR, color: "#fff3bf", from: 50, rare: true, src: "cast: wiki" },
 
     // ── 감옥: 시전 → delay 초 뒤 테두리가 서고 last 초 동안 남는다. 테두리에 닿으면 맞은 것 ──
     { kind: "cage", name: "베이가 E", champ: "Veigar", cast: 0.25, delay: 0.5, last: 3, radius: 390, range: 700, color: "#845ef7", from: 35, src: "last: wiki" },
@@ -231,7 +235,7 @@
         open = open.filter(s => s.kind !== "cage");
       }
       const rare = open.filter(s => s.rare);
-      if (rare.length && Math.random() < 0.08) return rare[Math.floor(Math.random() * rare.length)];
+      if (rare.length && Math.random() < RARE_CHANCE) return rare[Math.floor(Math.random() * rare.length)];
       const common = open.filter(s => !s.rare);
       return common[Math.floor(Math.random() * common.length)];
     }
@@ -659,26 +663,38 @@
         ctx.fill();
       }
 
-      // 자이라 E: 지나온 길에 덩굴이 자란다(바닥에 붙어 있다)
+      // 자이라 E: 머리가 지나간 바로 뒤에 덩굴이 솟았다가 금방 사그라든다(바닥에 붙어 있다).
+      // 쏜 자리부터 끝까지 다 그리면 사거리(1150) 전체가 한 줄로 보여서 실제보다 길어 보인다
+      const VINE = 380;
       for (const m of missiles) {
         if (m.skill.look !== "vines") continue;
-        const o = { x: m.ox, y: m.oy };
-        groundBand(o, m, m.skill.radius * 0.35);
-        ctx.fillStyle = "#2b8a3e";
-        ctx.fill();
-        groundBand(o, m, m.skill.radius * 0.12);
-        ctx.fillStyle = "#8ce99a";
-        ctx.fill();
-        // 가시 달린 잎: 길 양옆으로 번갈아
-        const len = Math.hypot(m.x - o.x, m.y - o.y);
-        for (let d = 40, i = 0; d < len; d += 55, i++) {
-          const side = i % 2 ? 1 : -1;
-          const lx = o.x + m.dx * d - m.dy * side * m.skill.radius * 0.45;
-          const ly = o.y + m.dy * d + m.dx * side * m.skill.radius * 0.45;
+        const len = Math.min(VINE, Math.hypot(m.x - m.ox, m.y - m.oy));
+        const steps = 8;
+        for (let i = 0; i < steps; i++) {
+          // 뒤로 갈수록 가늘고 옅게
+          const a = { x: m.x - m.dx * len * (i + 1) / steps, y: m.y - m.dy * len * (i + 1) / steps };
+          const b = { x: m.x - m.dx * len * i / steps, y: m.y - m.dy * len * i / steps };
+          const fade = 1 - i / steps;
+          ctx.globalAlpha = fade;
+          groundBand(a, b, m.skill.radius * 0.35 * (0.5 + 0.5 * fade));
+          ctx.fillStyle = "#2b8a3e";
+          ctx.fill();
+          groundBand(a, b, m.skill.radius * 0.12);
+          ctx.fillStyle = "#8ce99a";
+          ctx.fill();
+        }
+        // 가시 달린 잎: 길 양옆으로 번갈아. 머리가 지나간 거리로 자리를 잡아서 따라 움직이지 않는다
+        for (let d = Math.floor(m.flown / 55) * 55, i = 0; d > m.flown - len; d -= 55, i++) {
+          const back = m.flown - d;
+          const side = Math.floor(d / 55) % 2 ? 1 : -1;
+          ctx.globalAlpha = Math.max(0, 1 - back / len);
+          const lx = m.x - m.dx * back - m.dy * side * m.skill.radius * 0.45;
+          const ly = m.y - m.dy * back + m.dx * side * m.skill.radius * 0.45;
           groundCircle(lx, ly, 16, 0, 10);
           ctx.fillStyle = "#40c057";
           ctx.fill();
         }
+        ctx.globalAlpha = 1;
       }
 
       // 투사체의 바닥 그림자 = 실제 판정 원. 내 발밑 초록 링(65) 과 이 원이 겹치면 맞는다
