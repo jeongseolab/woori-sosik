@@ -81,7 +81,7 @@ function forget(test) {
   }
 }
 
-function forgetAll() { memo.clear(); memoDone.clear(); }
+function forgetAll() { memo.clear(); memoDone.clear(); lastStamp = null; }
 
 // 서버가 돌려준 새 값을 그대로 기억한다(다시 물어볼 필요 없게)
 function remember(path, data) {
@@ -96,6 +96,8 @@ let warmed = false;
 async function warmUp() {
   if (warmed) return;
   warmed = true;
+  // 받기 전에 지문부터 받아 둔다. 이 뒤로 바뀐 것은 다음 확인 때 알아챈다
+  checkStamp();
   const quiet = p => p.catch(() => null);
   load("/api/dodge/me").catch(() => {});
   await quiet(load("/api/tierlist"));
@@ -110,6 +112,97 @@ async function warmUp() {
     load("/api/rooms/" + r.id + "/members").catch(() => {});   // 듀오 궁합의 친구 고르기
   }
 }
+
+// ── 바뀐 것만 다시 받기 ─────────────────────────────────
+// 받아 둔 것을 계속 쓰되, 바뀐 게 있으면 그것만 조용히 다시 받는다.
+//   1분마다: 서버의 지문(/api/stamp, DB 만 읽음)을 보고 달라진 항목만 다시 받는다
+//            (방 사람, 무빙 기록, 쌓인 경기 수)
+//   5분마다: 받아 둔 티어표·방 카드·듀오를 다시 받아 본다. 새 판이 생겼으면 여기서 잡힌다
+//            (서버가 OP.GG 대답을 10분 들고 있어서 OP.GG 를 매번 부르지는 않는다)
+// 지금 보는 화면의 것이 바뀌었으면 로딩 없이 다시 그린다.
+let lastStamp = null, lastStampAt = 0, checking = false;
+
+// 지문 항목이 바뀌었을 때 다시 받을 주소들
+function pathsFor(key) {
+  const [kind, id] = key.split(":");
+  const base = "/api/rooms/" + id;
+  const cached = re => [...memoDone.keys()].filter(k => re.test(k));
+  if (key === "rooms") return ["/api/rooms"];
+  if (key === "me:dodge") return ["/api/dodge/me"];
+  if (key === "me:games") return ["/api/tierlist"];
+  if (kind === "room") return [base + "?lite=1", base + "/members", base + "/weekly", base + "/dodge"];
+  if (kind === "dodge") return [base + "/dodge"];
+  // 누가 새 판을 했으면(쌓인 경기가 늘면) 그 방의 카드와 주간 랭킹이 바뀐다
+  if (kind === "games") return [base + "/weekly", ...cached(new RegExp("^" + base + "/member/"))];
+  return [];
+}
+
+async function checkStamp() {
+  if (checking || !me) return;
+  checking = true;
+  lastStampAt = Date.now();
+  try {
+    const now = await api("/api/stamp");
+    const prev = lastStamp;
+    lastStamp = now;
+    if (!prev) return;             // 처음 받은 지문은 기준으로만 쓴다
+    const paths = new Set();
+    for (const k of new Set([...Object.keys(prev), ...Object.keys(now)])) {
+      if (prev[k] !== now[k]) pathsFor(k).forEach(p => paths.add(p));
+    }
+    if (paths.size) await refresh([...paths]);
+  } catch {} finally {
+    checking = false;
+  }
+}
+
+async function refreshGames() {
+  const paths = [...memoDone.keys()].filter(k =>
+    k.startsWith("/api/tierlist") || /\/member\/\d+$/.test(k) || k.startsWith("/api/duo"));
+  await refresh(paths);
+}
+
+// OP.GG 가 알려 준 "갱신 시각" 처럼 내용과 상관없이 바뀌는 값은 비교에서 뺀다
+const sameData = (a, b) => {
+  const skip = (k, v) => (k === "updated_at" ? undefined : v);
+  return JSON.stringify(a, skip) === JSON.stringify(b, skip);
+};
+
+// 받아 둔 것만 다시 받는다(아직 안 본 것은 볼 때 받으면 된다). 달라진 것만 바꾸고 화면에 알린다
+async function refresh(paths) {
+  const changed = [];
+  for (const path of paths) {
+    if (!memoDone.has(path)) continue;
+    let d;
+    try { d = await api(path); } catch { continue; }
+    if (!me) return;
+    if (!sameData(memoDone.get(path), d)) { remember(path, d); changed.push(path); }
+  }
+  if (changed.length) repaint(changed);
+}
+
+// 지금 보는 화면이 바뀐 것을 쓰고 있으면 다시 그린다(받아 둔 걸로 그려서 로딩 없이 바로)
+function repaint(changed) {
+  const page = ((location.hash || "#/tier").match(/^#\/([^/]*)/) || [])[1] || "tier";
+  const uses = p =>
+    page === "tier" || page === "login" ? p.startsWith("/api/tierlist")
+    : page === "rooms" ? p.startsWith("/api/rooms")
+    : page === "duo" ? p.startsWith("/api/duo") || p.endsWith("/members")
+    : false;   // 연습장은 게임 중일 수 있어서 건드리지 않는다(다음에 열 때 반영된다)
+  if (!changed.some(uses)) return;
+  // 티어표 팝업을 보고 있거나 뭔가 적는 중이면 방해하지 않는다. 다음에 그 화면을 열 때 반영된다
+  if (document.querySelector("dialog[open]")) return;
+  if (document.activeElement && /^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName)) return;
+  route();
+  toast("새 정보가 있어서 화면을 바꿨어요");
+}
+
+setInterval(() => { if (me && !document.hidden) checkStamp(); }, 60 * 1000);
+setInterval(() => { if (me && !document.hidden) refreshGames(); }, 5 * 60 * 1000);
+// 다른 탭에 있다가 돌아오면 바로 한 번 본다
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && me && Date.now() - lastStampAt > 30 * 1000) checkStamp();
+});
 
 function toast(text) {
   const el = document.getElementById("toast");
