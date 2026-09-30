@@ -19,17 +19,32 @@
 //   wiki  데이터 파일에 없는 값(장판 지연 시간 몇 개 등). 공식 롤 위키(Meraki 가 정리한 것) 값
 // 스킬을 고칠 때는 이 표만 바꾸면 된다.
 //
+// 화면은 롤 인터페이스를 흉내 낸다: 아래 가운데 HUD(초상화·체력·소환사 주문), 위 시계·전적,
+// 오른쪽 아래 미니맵, 머리 위 체력바, 안내 문구(환영·연속 회피·처치당함), 죽으면 회색 화면.
+//
 // 조작: 우클릭(누른 채 끌면 계속 따라감) 또는 WASD·방향키. 휴대폰은 화면을 누르면 이동.
+// 소환사 주문: 점멸 F(커서 쪽으로 400), 유체화 E(잠깐 빨라짐). WASD 의 D 와 겹쳐서 롤 기본(D/F) 대신 E/F.
 // WASD 는 e.code 로 읽는다. 한글 입력 상태에서도 ㅈㅁㄴㅇ 이 아니라 WASD 로 잡힌다.
 
 (function () {
   // 게임 규칙이 바뀌면 올린다. 서버는 같은 버전의 기록끼리만 순위를 매긴다
-  const VERSION = 5;
+  const VERSION = 6;
 
   const ARENA = { w: 1400, h: 900 };
   const CHAMP = { radius: 65, speed: 335 };
   const STEP = 1 / 240;
   const FAR = 4000;            // 경기장보다 긴 사거리(레이저 등)
+  // 소환사 주문. 아이콘·실제 쿨타임(점멸 300초, 유체화 240초) 은 롤 데이터(summoner-spells.json),
+  // 점멸 거리 400·유체화 이속(+24~48%) 은 롤 위키. 쿨타임과 유체화 지속 시간은 이 게임에 맞게 줄였다
+  const ICONS = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/data/spells/icons2d/";
+  const SPELLS = [
+    { id: "flash", key: "KeyF", label: "F", name: "점멸", cd: 15, range: 400, icon: ICONS + "summoner_flash.png" },
+    { id: "ghost", key: "KeyE", label: "E", name: "유체화", cd: 20, last: 3, bonus: 0.4, icon: ICONS + "summoner_haste.png" },
+  ];
+  const HP_MAX = 1500;            // 체력(한 번 맞을 때마다 HP_MAX / LIVES)
+  // 연속으로 피한 수에 따라 롤 안내 문구
+  const SPREES = [[20, "학살 중입니다!"], [40, "도저히 막을 수 없습니다!"], [60, "미쳐 날뛰고 있습니다!"], [80, "전설의 출현!"]];
+
   // 가끔 스킬(rare: 애쉬 R, 럭스 R) 이 나올 확률(둘을 합쳐서). 나머지는 열린 스킬 중에서 똑같은 확률로 고른다
   const RARE_CHANCE = 0.03;
   const LIVES = 3;
@@ -110,6 +125,38 @@
 
   const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 
+  // ── 효과음: 소리 파일 없이 WebAudio 로 짧게 만든다. 끌 수 있고 브라우저에 기억한다 ──
+  const SOUND_KEY = "tiergg-dodge-sound";
+  let audio = null;
+  function soundOn() { try { return localStorage.getItem(SOUND_KEY) !== "off"; } catch { return true; } }
+  function setSound(on) { try { localStorage.setItem(SOUND_KEY, on ? "on" : "off"); } catch {} }
+  function sfx(kind) {
+    if (!soundOn()) return;
+    try {
+      audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+      const now = audio.currentTime;
+      const out = audio.createGain();
+      out.connect(audio.destination);
+      const tone = (type, f0, f1, dur, vol, delay = 0) => {
+        const o = audio.createOscillator(), g = audio.createGain();
+        o.type = type;
+        o.frequency.setValueAtTime(f0, now + delay);
+        o.frequency.exponentialRampToValueAtTime(f1, now + delay + dur);
+        g.gain.setValueAtTime(vol, now + delay);
+        g.gain.exponentialRampToValueAtTime(0.0001, now + delay + dur);
+        o.connect(g); g.connect(out);
+        o.start(now + delay); o.stop(now + delay + dur + 0.02);
+      };
+      if (kind === "hit") { tone("square", 180, 60, 0.18, 0.12); tone("sine", 90, 40, 0.25, 0.2); }
+      else if (kind === "flash") { tone("sine", 400, 1400, 0.16, 0.12); tone("triangle", 900, 2400, 0.12, 0.06, 0.03); }
+      else if (kind === "ghost") { tone("sine", 300, 700, 0.3, 0.08); }
+      else if (kind === "level") { tone("triangle", 660, 990, 0.12, 0.07); tone("triangle", 990, 1320, 0.16, 0.06, 0.1); }
+      else if (kind === "announce") { tone("sine", 523, 523, 0.25, 0.06); tone("sine", 784, 784, 0.35, 0.05, 0.12); }
+      else if (kind === "death") { tone("sawtooth", 300, 70, 0.9, 0.08); tone("sine", 150, 50, 1.1, 0.12); }
+      else if (kind === "deny") { tone("square", 160, 150, 0.08, 0.05); }
+    } catch {}
+  }
+
   // 점 p 에서 선분 ab 까지의 거리
   function segDist(p, a, b) {
     const dx = b.x - a.x, dy = b.y - a.y;
@@ -121,17 +168,42 @@
   function mount(root, opts = {}) {
     root.innerHTML = `
       <div class="dodge-hud">
-        <span>버틴 시간 <b data-hud="time">0.00초</b></span>
-        <span>목숨 <b data-hud="lives" class="dodge-lives"></b></span>
-        <span>피한 스킬 <b data-hud="dodged">0</b></span>
         <span data-hud="best"></span>
+        <button type="button" class="ghost dodge-sound" data-sound aria-pressed="true">효과음 켜짐</button>
       </div>
       <div class="dodge-stage">
-        <canvas aria-label="스킬샷 피하기 게임 화면"></canvas>
+        <div class="lol-view">
+          <canvas aria-label="스킬샷 피하기 게임 화면"></canvas>
+          <div class="lol-top"><b data-hud="clock">00:00</b></div>
+          <div class="lol-score">
+            <span title="피한 스킬"><i class="ico-dodge"></i><b data-hud="dodged">0</b></span>
+            <span title="맞은 횟수"><i class="ico-hit"></i><b data-hud="hitcount">0</b></span>
+          </div>
+          <div class="lol-banner" data-banner></div>
+          <canvas class="lol-minimap" aria-hidden="true"></canvas>
+          <div class="lol-hud">
+            <div class="lol-face"><img data-hud="face" alt=""><span data-hud="level">1</span></div>
+            <div class="lol-main">
+              <div class="lol-spells">
+                ${SPELLS.map(sp => `
+                  <button type="button" class="lol-spell" data-spell="${sp.id}" title="${sp.name} (${sp.label})">
+                    <img src="${sp.icon}" alt="${sp.name}"><i></i><b></b><kbd>${sp.label}</kbd>
+                  </button>`).join("")}
+              </div>
+              <div class="lol-hp"><i data-hud="hpfill"></i><span data-hud="hptext"></span></div>
+            </div>
+          </div>
+        </div>
         <div class="dodge-over" data-over></div>
       </div>`;
-    const canvas = root.querySelector("canvas");
+    const canvas = root.querySelector(".lol-view > canvas");
     const ctx = canvas.getContext("2d");
+    const view = root.querySelector(".lol-view");
+    const mini = root.querySelector(".lol-minimap");
+    const mctx = mini.getContext("2d");
+    const banner = root.querySelector("[data-banner]");
+    const soundBtn = root.querySelector("[data-sound]");
+    let face = champImage(opts.champ || "Ezreal");
     const over = root.querySelector("[data-over]");
     const hud = name => root.querySelector(`[data-hud="${name}"]`);
     preload();
@@ -141,6 +213,8 @@
     let player, target, casters, missiles, zones, flashes;
     let lives, hits, safe, lastHit, dead;
     let fx, parts, shake, hurt;          // 그림 효과(판정과 상관없음)
+    let cds, ghostLeft, cursor, facing, level, pops, lastSpree, lastMark;
+    let bannerTimer = 0, overTimer = 0;
     const keys = new Set();
     let holding = false;
 
@@ -162,6 +236,14 @@
       dead = false;
       t = 0; dodged = 0; acc = 0;
       nextCast = 0.8;          // 시작하고 잠깐은 숨 돌릴 틈
+      cds = { flash: 0, ghost: 0 };   // 소환사 주문 남은 쿨타임
+      ghostLeft = 0;           // 유체화 남은 시간
+      cursor = null;           // 마우스가 가리키는 바닥(점멸 방향)
+      facing = { x: 0, y: -1 };    // 마지막으로 움직인 방향(커서가 없을 때 점멸 방향)
+      level = 1;
+      pops = [];               // 떠오르는 피해 숫자
+      lastSpree = 0;
+      lastMark = 0;
     }
 
     // ── 유사 3D 시점 ──
@@ -197,7 +279,10 @@
     // ── 화면 크기 ──
     function fit() {
       // 가로는 칸에 꽉 차게, 단 세로가 창 안에 다 들어오게 줄인다(게임 중에 스크롤하면 안 되니까)
-      const stage = canvas.parentElement;
+      // 폭을 다시 재기 전에 지난번에 박아 둔 폭을 푼다(안 풀면 창을 줄여도 예전 폭 그대로 잰다)
+      view.style.width = "";
+      canvas.style.width = "0px";
+      const stage = view.parentElement;
       const room = Math.max(220, window.innerHeight - Math.max(0, stage.getBoundingClientRect().top + window.scrollY) - 16);
       // 배율 1 로 경기장 네 귀퉁이(와 먼 쪽 위로 선 것들) 가 화면 어디에 오는지 본다
       S = 1; OX = 0; OY = 0;
@@ -207,9 +292,12 @@
       const minX = Math.min(...pts.map(p => p.x)), maxX = Math.max(...pts.map(p => p.x));
       const minY = Math.min(...pts.map(p => p.y)), maxY = Math.max(...pts.map(p => p.y));
       const pad = 12;
-      S = Math.min((stage.clientWidth - pad * 2) / (maxX - minX), (room - pad * 2) / (maxY - minY));
+      // 아래 HUD·미니맵이 경기장을 가리지 않게 화면 폭의 HUD_ROOM 만큼 아래를 비워 둔다
+      // 휴대폰에서는 주문 칸이 손가락 크기라 HUD 가 상대적으로 커서 더 비운다
+      const HUD_ROOM = stage.clientWidth < 600 ? 0.2 : 0.12;
+      S = Math.min((stage.clientWidth - pad * 2) / (maxX - minX), (room - pad * 2) / ((maxY - minY) + HUD_ROOM * (maxX - minX)));
       VW = Math.floor(Math.min(stage.clientWidth, (maxX - minX) * S + pad * 2));
-      VH = Math.floor((maxY - minY) * S + pad * 2);
+      VH = Math.floor((maxY - minY) * S + pad * 2 + HUD_ROOM * VW);
       OX = VW / 2 - (minX + maxX) / 2 * S;
       OY = pad - minY * S;
       DPR = window.devicePixelRatio || 1;
@@ -217,6 +305,14 @@
       canvas.style.height = VH + "px";
       canvas.width = Math.round(VW * DPR);
       canvas.height = Math.round(VH * DPR);
+      // HUD 는 화면 폭에 맞춰 줄고 는다(1000px 폭일 때 --u = 1px)
+      view.style.width = VW + "px";
+      view.style.setProperty("--u", (VW / 1000).toFixed(4) + "px");
+      const mw = Math.round(Math.max(90, VW * 0.17)), mh = Math.round(mw * ARENA.h / ARENA.w);
+      mini.style.width = mw + "px";
+      mini.style.height = mh + "px";
+      mini.width = Math.round(mw * DPR);
+      mini.height = Math.round(mh * DPR);
       draw(0);
     }
 
@@ -303,6 +399,42 @@
       if (c.wind <= 0) release(c);
     }
 
+    // 소환사 주문
+    function useSpell(id) {
+      if (state !== "play") return;
+      const sp = SPELLS.find(x => x.id === id);
+      if (cds[id] > 0) { sfx("deny"); return; }
+      cds[id] = sp.cd;
+      if (id === "flash") {
+        // 커서 쪽으로 최대 400. 커서를 모르면(휴대폰·WASD) 가던 방향으로
+        let dx = facing.x, dy = facing.y, len = sp.range;
+        if (cursor) {
+          const d = Math.hypot(cursor.x - player.x, cursor.y - player.y);
+          if (d > 1) { dx = (cursor.x - player.x) / d; dy = (cursor.y - player.y) / d; len = Math.min(sp.range, d); }
+        }
+        const from = { x: player.x, y: player.y };
+        player.x = Math.min(ARENA.w - CHAMP.radius, Math.max(CHAMP.radius, player.x + dx * len));
+        player.y = Math.min(ARENA.h - CHAMP.radius, Math.max(CHAMP.radius, player.y + dy * len));
+        target = null;
+        burst(from.x, from.y, 60, "#ffe066", 16, 260);
+        burst(player.x, player.y, 60, "#fff3bf", 16, 260);
+        fx.push({ kind: "ring", x: player.x, y: player.y, r: CHAMP.radius + 20, color: "#ffe066", life: 0.35, max: 0.35 });
+        sfx("flash");
+      } else if (id === "ghost") {
+        ghostLeft = sp.last;
+        sfx("ghost");
+      }
+    }
+
+    // 화면 가운데 안내 문구(롤의 알림처럼 잠깐 떴다 사라진다)
+    function announce(text, kind = "gold", ms = 1800) {
+      banner.innerHTML = "<b>" + esc(text) + "</b>";
+      banner.className = "lol-banner show " + kind;
+      clearTimeout(bannerTimer);
+      bannerTimer = setTimeout(() => { banner.className = "lol-banner"; }, ms);
+      if (kind !== "death") sfx("announce");
+    }
+
     // 맞았다. 무적 중이면 없던 일로(false). 목숨을 다 잃으면 끝
     function hit(s) {
       if (safe > 0 || dead) return false;
@@ -313,6 +445,10 @@
       shake = 0.25;
       hurt = 0.4;
       burst(player.x, player.y, 90, s.color, 26, 420);
+      // 롤처럼 머리 위로 피해 숫자(마법 피해는 보라)
+      pops.push({ x: player.x, y: player.y, text: String(Math.round(HP_MAX / LIVES)), life: 1, max: 1 });
+      sfx("hit");
+      if (lives === 1) announce("체력이 낮습니다", "warn");
       if (lives <= 0) dead = true;
       return true;
     }
@@ -372,6 +508,12 @@
       t += dt;
       safe = Math.max(0, safe - dt);
 
+      // 소환사 주문 쿨타임, 유체화
+      for (const sp of SPELLS) cds[sp.id] = Math.max(0, cds[sp.id] - dt);
+      ghostLeft = Math.max(0, ghostLeft - dt);
+      const ghost = SPELLS.find(sp => sp.id === "ghost");
+      const spd = CHAMP.speed * (ghostLeft > 0 ? 1 + ghost.bonus : 1);
+
       // 이동: WASD 가 눌려 있으면 그쪽으로, 아니면 찍은 곳으로
       let mx = 0, my = 0;
       if (keys.has("KeyW") || keys.has("ArrowUp")) my -= 1;
@@ -381,24 +523,41 @@
       if (mx || my) {
         target = null;
         const n = Math.hypot(mx, my);
-        player.vx = mx / n * CHAMP.speed;
-        player.vy = my / n * CHAMP.speed;
+        player.vx = mx / n * spd;
+        player.vy = my / n * spd;
       } else if (target) {
         const dx = target.x - player.x, dy = target.y - player.y;
         const d = Math.hypot(dx, dy);
-        if (d <= CHAMP.speed * dt) {
+        if (d <= spd * dt) {
           player.x = target.x; player.y = target.y;
           player.vx = player.vy = 0;
           if (!holding) target = null;
         } else {
-          player.vx = dx / d * CHAMP.speed;
-          player.vy = dy / d * CHAMP.speed;
+          player.vx = dx / d * spd;
+          player.vy = dy / d * spd;
         }
       } else {
         player.vx = player.vy = 0;
       }
+      if (player.vx || player.vy) {
+        const n = Math.hypot(player.vx, player.vy);
+        facing = { x: player.vx / n, y: player.vy / n };
+      }
       player.x = Math.min(ARENA.w - CHAMP.radius, Math.max(CHAMP.radius, player.x + player.vx * dt));
       player.y = Math.min(ARENA.h - CHAMP.radius, Math.max(CHAMP.radius, player.y + player.vy * dt));
+
+      // 레벨: 8초마다 하나씩(18까지). 롤처럼 레벨 업 효과
+      const lv = Math.min(18, 1 + Math.floor(t / 8));
+      if (lv > level) {
+        level = lv;
+        sfx("level");
+        fx.push({ kind: "ring", x: player.x, y: player.y, r: CHAMP.radius + 30, color: "#f0e6d2", life: 0.6, max: 0.6 });
+      }
+      // 30초마다 생존 안내, 연속으로 피한 수에 따라 롤 안내 문구
+      if (Math.floor(t / 30) > lastMark) { lastMark = Math.floor(t / 30); announce(lastMark * 30 + "초 생존!", "gold"); }
+      for (const [n, text] of SPREES) {
+        if (dodged >= n && lastSpree < n) { lastSpree = n; announce(text, "spree"); }
+      }
 
       // 시전
       nextCast -= dt;
@@ -492,7 +651,6 @@
 
     // ── 그리기 ──
     const MISSILE_Z = 90;          // 투사체가 떠서 나는 높이
-    const BODY_H = 190;            // 내 캐릭터 키
     const PORTRAIT_Z = 150;        // 적 초상화 높이
 
     // 파편 n 개를 (x, y, z) 에서 사방으로
@@ -553,6 +711,8 @@
         p.life -= dt;
       }
       parts = parts.filter(p => p.life > 0);
+      for (const p of pops) p.life -= dt;
+      pops = pops.filter(p => p.life > 0);
       // 브랜드 Q 는 날아가며 불티를 흘린다
       if (state === "play") {
         for (const m of missiles) {
@@ -566,34 +726,88 @@
     }
 
     // ── 바닥 ──
+    // 협곡 바닥 질감을 한 번만 만들어 둔다(풀밭 얼룩, 돌길, 가장자리 수풀). 바닥 좌표 절반 크기
+    const TEX = (() => {
+      const c = document.createElement("canvas");
+      c.width = ARENA.w / 2; c.height = ARENA.h / 2;
+      const g = c.getContext("2d");
+      const W = c.width, H = c.height;
+      g.fillStyle = "#1f3a2b";
+      g.fillRect(0, 0, W, H);
+      // 풀밭 얼룩
+      let seed = 7;
+      const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+      for (let i = 0; i < 900; i++) {
+        g.fillStyle = ["#24442f", "#1a3325", "#2a4a31", "#203d2a", "#2f5236"][Math.floor(rnd() * 5)];
+        g.globalAlpha = 0.5;
+        g.beginPath(); g.arc(rnd() * W, rnd() * H, 2 + rnd() * 9, 0, Math.PI * 2); g.fill();
+      }
+      g.globalAlpha = 1;
+      // 가운데를 가로지르는 돌길(협곡의 미드 라인처럼 대각선)
+      g.save();
+      g.translate(W / 2, H / 2);
+      g.rotate(-Math.atan2(H, W));
+      g.fillStyle = "#5b5140";
+      g.fillRect(-W, -34, W * 2, 68);
+      for (let x = -W; x < W; x += 22) {
+        for (const y of [-26, -4, 18]) {
+          g.fillStyle = ["#6b604c", "#4f4636", "#756a55"][Math.floor(rnd() * 3)];
+          g.fillRect(x + rnd() * 6, y + rnd() * 4, 16 + rnd() * 6, 10 + rnd() * 4);
+        }
+      }
+      g.restore();
+      // 강: 반대 대각선으로 얕은 물
+      g.save();
+      g.translate(W / 2, H / 2);
+      g.rotate(Math.atan2(H, W));
+      const river = g.createLinearGradient(0, -40, 0, 40);
+      river.addColorStop(0, "rgba(40, 90, 110, 0)");
+      river.addColorStop(0.5, "rgba(50, 110, 130, .55)");
+      river.addColorStop(1, "rgba(40, 90, 110, 0)");
+      g.fillStyle = river;
+      g.fillRect(-W, -40, W * 2, 80);
+      g.restore();
+      // 가장자리 수풀
+      for (let i = 0; i < 160; i++) {
+        const edge = Math.floor(rnd() * 4);
+        const x = edge === 0 ? rnd() * 26 : edge === 1 ? W - rnd() * 26 : rnd() * W;
+        const y = edge === 2 ? rnd() * 26 : edge === 3 ? H - rnd() * 26 : rnd() * H;
+        if (edge < 2 || edge >= 2) {
+          g.fillStyle = ["#13301d", "#1b3f24", "#0f2818"][Math.floor(rnd() * 3)];
+          g.beginPath(); g.arc(x, y, 6 + rnd() * 10, 0, Math.PI * 2); g.fill();
+        }
+      }
+      // 가장자리를 어둡게
+      const v = g.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.max(W, H) * 0.65);
+      v.addColorStop(0, "rgba(0, 0, 0, 0)");
+      v.addColorStop(1, "rgba(0, 0, 0, .45)");
+      g.fillStyle = v;
+      g.fillRect(0, 0, W, H);
+      return c;
+    })();
+
     function drawGround() {
       const bg = ctx.createLinearGradient(0, 0, 0, VH);
-      bg.addColorStop(0, "#050a14");
-      bg.addColorStop(1, "#0a1424");
+      bg.addColorStop(0, "#010a13");
+      bg.addColorStop(1, "#06141d");
       ctx.fillStyle = bg;
       ctx.fillRect(0, 0, VW, VH);
 
-      // 협곡 바닥 느낌: 가운데가 밝고 가장자리가 어두운 청록
-      const c = proj(ARENA.w / 2, ARENA.h / 2);
-      const g = ctx.createRadialGradient(c.x, c.y, 10, c.x, c.y, VW * 0.6);
-      g.addColorStop(0, "#1b3a3f");
-      g.addColorStop(1, "#0c1a24");
+      // 질감을 가로 띠로 잘라 원근에 맞게 깐다(한 줄 안에서는 가로 배율이 같아서 띠로 충분하다)
+      ctx.save();
       arenaPath();
-      ctx.fillStyle = g;
-      ctx.fill();
+      ctx.clip();
+      const N = 60, th = TEX.height / N;
+      for (let i = 0; i < N; i++) {
+        const y0 = ARENA.h * i / N, y1 = ARENA.h * (i + 1) / N;
+        const a = proj(0, y0), b = proj(ARENA.w, y0), c = proj(0, y1), d = proj(ARENA.w, y1);
+        const left = Math.min(a.x, c.x), right = Math.max(b.x, d.x);
+        ctx.drawImage(TEX, 0, i * th, TEX.width, th + 0.5, left, a.y, right - left, c.y - a.y + 0.8);
+      }
+      ctx.restore();
 
-      ctx.strokeStyle = "rgba(160, 200, 190, .07)";
-      ctx.lineWidth = 1;
-      for (let x = 100; x < ARENA.w; x += 100) {
-        const a = proj(x, 0), b = proj(x, ARENA.h);
-        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
-      }
-      for (let y = 100; y < ARENA.h; y += 100) {
-        const a = proj(0, y), b = proj(ARENA.w, y);
-        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
-      }
       arenaPath();
-      ctx.strokeStyle = "rgba(240, 180, 41, .35)";
+      ctx.strokeStyle = "rgba(200, 170, 110, .55)";
       ctx.lineWidth = 2;
       ctx.stroke();
     }
@@ -761,6 +975,45 @@
     }
 
     // ── 서 있는 것들 ──
+    const U = () => VW / 1000;       // HUD 크기 단위(화면 폭 1000 일 때 1)
+
+    // 머리 위 체력바. ally 면 초록(나), 아니면 빨강(적). frac: 남은 체력 비율, segs: 칸 수
+    function healthBar(x, y, frac, ally, lv, name, segs = 3) {
+      const u = U(), w = 96 * u, h = 11 * u, box = 16 * u;
+      const left = x - w / 2 + box / 2;
+      if (name) {
+        ctx.font = "600 " + Math.max(9, 12 * u) + "px 'IBM Plex Sans KR', sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillStyle = "rgba(0, 0, 0, .6)";
+        ctx.fillText(name, x + 1, y - h - 4 * u + 1);
+        ctx.fillStyle = ally ? "#f0e6d2" : "#ffb4b4";
+        ctx.fillText(name, x, y - h - 4 * u);
+      }
+      ctx.fillStyle = "#010a13";
+      ctx.fillRect(left - 2 * u, y - h - 2 * u, w - box + 4 * u, h + 4 * u);
+      ctx.fillStyle = "#1e2328";
+      ctx.fillRect(left, y - h, w - box, h);
+      ctx.fillStyle = ally ? "#1fa33a" : "#c8352f";
+      ctx.fillRect(left, y - h, (w - box) * Math.max(0, frac), h);
+      ctx.fillStyle = "rgba(255, 255, 255, .25)";
+      ctx.fillRect(left, y - h, (w - box) * Math.max(0, frac), h * 0.35);
+      ctx.strokeStyle = "#010a13";
+      ctx.lineWidth = Math.max(1, 1.5 * u);
+      for (let i = 1; i < segs; i++) {
+        const sx = left + (w - box) * i / segs;
+        ctx.beginPath(); ctx.moveTo(sx, y - h); ctx.lineTo(sx, y); ctx.stroke();
+      }
+      // 레벨 칸
+      ctx.fillStyle = "#010a13";
+      ctx.fillRect(x - w / 2 - box / 2, y - h - 4 * u, box + 2 * u, h + 8 * u);
+      ctx.strokeStyle = "#c8aa6e";
+      ctx.lineWidth = Math.max(1, 1.2 * u);
+      ctx.strokeRect(x - w / 2 - box / 2, y - h - 4 * u, box + 2 * u, h + 8 * u);
+      ctx.fillStyle = "#f0e6d2";
+      ctx.font = "700 " + Math.max(8, 11 * u) + "px 'IBM Plex Sans KR', sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(String(lv), x - w / 2 + u, y - 1 * u);
+    }
     function drawShadow(x, y, r) {
       groundCircle(x, y, r, 0, 24);
       ctx.fillStyle = "rgba(0, 0, 0, .4)";
@@ -768,32 +1021,36 @@
     }
 
     function drawPlayer() {
-      // 원기둥 몸통 + 둥근 머리. 높이는 실제로 z 를 올려서 원근에 맞게 줄어든다
-      const base = proj(player.x, player.y, 0);
-      const neck = upright(player.x, player.y, BODY_H * 0.7);
-      const head = upright(player.x, player.y, BODY_H * 0.86);
-      const w = 30 * base.k, wn = 22 * neck.k, hr = 24 * head.k;
-      ctx.globalAlpha = safe > 0 && Math.floor(safe * 10) % 2 ? 0.35 : 1;
-      const main = dead ? "#ff6b6b" : "#f0b429";
-      const body = ctx.createLinearGradient(base.x - w, 0, base.x + w, 0);
-      body.addColorStop(0, "#7a4d00");
-      body.addColorStop(0.45, main);
-      body.addColorStop(1, "#7a4d00");
-      ctx.fillStyle = body;
-      ctx.beginPath();
-      ctx.moveTo(base.x - w, base.y);
-      ctx.lineTo(neck.x - wn, neck.y);
-      ctx.ellipse(neck.x, neck.y, wn, wn * 0.4, 0, Math.PI, 0, false);
-      ctx.lineTo(base.x + w, base.y);
-      ctx.ellipse(base.x, base.y, w, w * 0.4, 0, 0, Math.PI, false);
-      ctx.closePath();
-      ctx.fill();
-      const hg = ctx.createRadialGradient(head.x - hr * 0.35, head.y - hr * 0.35, hr * 0.1, head.x, head.y, hr);
-      hg.addColorStop(0, "#fff3bf");
-      hg.addColorStop(1, main);
-      ctx.fillStyle = hg;
-      ctx.beginPath(); ctx.arc(head.x, head.y, hr, 0, Math.PI * 2); ctx.fill();
+      // 내 챔피언(티어표 OP 챔피언) 초상화가 받침대 위에 선다. 적과 같은 모양, 테두리만 금색
+      const base = proj(player.x, player.y, 0), head = upright(player.x, player.y, PORTRAIT_Z);
+      const r = 46 * head.k;
+      const blink = safe > 0 && Math.floor(safe * 10) % 2;
+      ctx.globalAlpha = blink ? 0.4 : 1;
+      if (ghostLeft > 0) {
+        // 유체화: 뒤로 잔상이 남고 푸르게 빛난다
+        for (let i = 3; i >= 1; i--) {
+          const q = upright(player.x - player.vx * 0.05 * i, player.y - player.vy * 0.05 * i, PORTRAIT_Z);
+          ctx.globalAlpha = 0.15 * (4 - i);
+          ctx.fillStyle = "#66d9e8";
+          ctx.beginPath(); ctx.arc(q.x, q.y, r, 0, Math.PI * 2); ctx.fill();
+        }
+        ctx.globalAlpha = blink ? 0.4 : 1;
+      }
+      ctx.strokeStyle = "rgba(200, 170, 110, .8)";
+      ctx.lineWidth = Math.max(1, 6 * base.k);
+      ctx.beginPath(); ctx.moveTo(base.x, base.y); ctx.lineTo(head.x, head.y + r); ctx.stroke();
+      ctx.save();
+      ctx.beginPath(); ctx.arc(head.x, head.y, r, 0, Math.PI * 2); ctx.clip();
+      if (face.complete && face.naturalWidth) ctx.drawImage(face, head.x - r, head.y - r, r * 2, r * 2);
+      else { ctx.fillStyle = "#f0b429"; ctx.fillRect(head.x - r, head.y - r, r * 2, r * 2); }
+      ctx.restore();
+      if (ghostLeft > 0) glow("#66d9e8", 16);
+      ctx.strokeStyle = dead ? "#ff6b6b" : "#c8aa6e";
+      ctx.lineWidth = Math.max(2, 5 * head.k);
+      ctx.beginPath(); ctx.arc(head.x, head.y, r, 0, Math.PI * 2); ctx.stroke();
+      noGlow();
       ctx.globalAlpha = 1;
+      healthBar(head.x, head.y - r - 8 * U(), Math.max(0, lives) / LIVES, true, level, opts.name || "나", LIVES);
     }
 
     function drawCaster(c) {
@@ -815,6 +1072,7 @@
       ctx.strokeStyle = "#ff4d4f";
       ctx.lineWidth = Math.max(1.5, 4 * head.k);
       ctx.beginPath(); ctx.arc(head.x, head.y, r, 0, Math.PI * 2); ctx.stroke();
+      healthBar(head.x, head.y - r - 10 * U(), 1, false, 18, c.skill.name.split(" ")[0], 5);
       // 시전 중: 테두리가 스킬 색으로 차오르고 빛난다
       if (c.wind > 0 && c.skill.cast > 0) {
         const p = 1 - c.wind / c.skill.cast;
@@ -1081,6 +1339,55 @@
       ctx.globalCompositeOperation = "source-over";
     }
 
+    // 떠오르는 피해 숫자(마법 피해 보라)
+    function drawPops() {
+      const u = U();
+      for (const p of pops) {
+        const a = p.life / p.max, q = upright(p.x, p.y, PORTRAIT_Z + 80 + (1 - a) * 120);
+        ctx.globalAlpha = Math.min(1, a * 1.6);
+        ctx.font = "800 " + Math.round(26 * u * (1 + (1 - a) * 0.2)) + "px 'IBM Plex Sans KR', sans-serif";
+        ctx.textAlign = "center";
+        ctx.lineWidth = Math.max(2, 4 * u);
+        ctx.strokeStyle = "#1a0b2e";
+        ctx.strokeText(p.text, q.x, q.y);
+        ctx.fillStyle = "#c084fc";
+        ctx.fillText(p.text, q.x, q.y);
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    // 미니맵: 경기장 전체를 위에서. 나는 금테 초록, 적은 빨강
+    function drawMinimap() {
+      const w = mini.width / DPR, h = mini.height / DPR, k = w / ARENA.w;
+      mctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+      mctx.drawImage(TEX, 0, 0, w, h);
+      mctx.fillStyle = "rgba(1, 10, 19, .25)";
+      mctx.fillRect(0, 0, w, h);
+      for (const z of zones) {
+        mctx.globalAlpha = 0.5;
+        mctx.strokeStyle = z.skill.color;
+        mctx.lineWidth = 1.5;
+        mctx.beginPath(); mctx.arc(z.x * k, z.y * k, z.skill.radius * k, 0, Math.PI * 2); mctx.stroke();
+      }
+      mctx.globalAlpha = 1;
+      for (const m of missiles) {
+        mctx.fillStyle = m.skill.color;
+        mctx.beginPath(); mctx.arc(m.x * k, m.y * k, Math.max(1.5, m.skill.radius * k), 0, Math.PI * 2); mctx.fill();
+      }
+      for (const c of casters) {
+        mctx.fillStyle = "#e03131";
+        mctx.strokeStyle = "#010a13";
+        mctx.lineWidth = 1;
+        mctx.beginPath(); mctx.arc(c.x * k, c.y * k, 4, 0, Math.PI * 2); mctx.fill(); mctx.stroke();
+      }
+      if (player) {
+        mctx.fillStyle = "#1fa33a";
+        mctx.strokeStyle = "#f0e6d2";
+        mctx.lineWidth = 1.5;
+        mctx.beginPath(); mctx.arc(player.x * k, player.y * k, 5, 0, Math.PI * 2); mctx.fill(); mctx.stroke();
+      }
+    }
+
     function draw(fdt) {
       if (fdt) tickFx(fdt);
       ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
@@ -1103,8 +1410,20 @@
         actors.forEach(a => a.draw());
         drawCageBars(true);
         drawEffects();
+        drawPops();
       }
       ctx.restore();
+      drawMinimap();
+
+      // 체력이 한 칸 남으면 화면 가장자리가 계속 붉게 숨 쉰다(롤의 낮은 체력)
+      if (player && lives === 1 && state === "play") {
+        const a = 0.18 + 0.1 * Math.sin(performance.now() / 250);
+        const g = ctx.createRadialGradient(VW / 2, VH / 2, Math.min(VW, VH) * 0.4, VW / 2, VH / 2, Math.max(VW, VH) * 0.72);
+        g.addColorStop(0, "rgba(160, 0, 0, 0)");
+        g.addColorStop(1, "rgba(160, 0, 0, " + a.toFixed(3) + ")");
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, VW, VH);
+      }
 
       // 맞았을 때 화면 가장자리가 붉게
       if (hurt > 0) {
@@ -1117,9 +1436,23 @@
     }
 
     function hudUpdate() {
-      hud("time").textContent = fmt(t);
+      const sec = Math.floor(t);
+      hud("clock").textContent = String(Math.floor(sec / 60)).padStart(2, "0") + ":" + String(sec % 60).padStart(2, "0");
       hud("dodged").textContent = dodged;
-      hud("lives").textContent = "♥".repeat(Math.max(0, lives)) + "♡".repeat(LIVES - Math.max(0, lives));
+      hud("hitcount").textContent = hits.length;
+      const hp = Math.max(0, lives) * HP_MAX / LIVES;
+      hud("hpfill").style.width = (hp / HP_MAX * 100) + "%";
+      hud("hptext").textContent = Math.round(hp) + " / " + HP_MAX;
+      hud("level").textContent = level;
+      for (const sp of SPELLS) {
+        const b = root.querySelector('[data-spell="' + sp.id + '"]');
+        const left = cds[sp.id];
+        // 쿨타임은 시계 방향으로 걷히는 그림자와 남은 초
+        b.querySelector("i").style.background = left > 0
+          ? "conic-gradient(rgba(1, 10, 19, .78) " + (left / sp.cd * 360) + "deg, transparent 0)" : "none";
+        b.querySelector("b").textContent = left > 0 ? Math.ceil(left) : "";
+        b.classList.toggle("active", sp.id === "ghost" && ghostLeft > 0);
+      }
     }
 
     // ── 흐름 ──
@@ -1143,6 +1476,9 @@
       reset();
       state = "play";
       over.hidden = true;
+      clearTimeout(overTimer);
+      canvas.classList.remove("dead");
+      announce("소환사의 협곡에 오신 것을 환영합니다", "welcome", 2200);
       canvas.focus({ preventScroll: true });
       if (opts.onStart) opts.onStart();
       last = performance.now();
@@ -1154,21 +1490,28 @@
       state = "over";
       keys.clear();
       holding = false;
+      canvas.classList.add("dead");
+      announce("처치당했습니다", "death", 1600);
+      sfx("death");
       const result = { ms: Math.round(t * 1000), dodged, by: lastHit.name, ver: VERSION };
-      showOver(`
-        <h2>${esc(lastHit.name)}에 마지막 목숨을 잃었어요</h2>
+      clearTimeout(overTimer);
+      overTimer = setTimeout(() => showOver(`
+        <h2>처치당했습니다</h2>
+        <p class="note">마지막 스킬: ${esc(lastHit.name)} · 레벨 ${level}</p>
         <p class="dodge-score">${fmt(t)}</p>
         <p class="note">피한 스킬 ${dodged}개 · 맞은 스킬 ${hits.map(esc).join(" → ")}</p>
         <div data-extra></div>
         <div class="dodge-actions">
           <button type="button" data-start>다시 하기 <small>Space</small></button>
           ${opts.links || ""}
-        </div>`);
+        </div>`), 1300);
       if (opts.onEnd) {
-        Promise.resolve(opts.onEnd(result)).then(html => {
+        // 결과 창이 늦게 뜨므로 저장 결과는 창이 뜬 뒤에 넣는다
+        const saved = Promise.resolve(opts.onEnd(result));
+        setTimeout(() => saved.then(html => {
           const slot = over.querySelector("[data-extra]");
           if (html && slot) slot.innerHTML = html;
-        }, () => {});
+        }, () => {}), 1350);
       }
     }
 
@@ -1193,13 +1536,18 @@
       canvas.setPointerCapture?.(e.pointerId);
     }
     function onPointerMove(e) {
-      if (holding && state === "play") target = toArena(e);
+      cursor = toArena(e);                  // 점멸은 커서 쪽으로
+      if (holding && state === "play") target = cursor;
     }
     function onPointerUp() { holding = false; }
     const MOVE_KEYS = ["KeyW", "KeyA", "KeyS", "KeyD", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"];
     function onKeyDown(e) {
       if (e.target.closest && e.target.closest("input, textarea, select")) return;
-      if (MOVE_KEYS.includes(e.code)) {
+      const sp = SPELLS.find(x => x.key === e.code);
+      if (sp && state === "play") {
+        e.preventDefault();
+        if (!e.repeat) useSpell(sp.id);
+      } else if (MOVE_KEYS.includes(e.code)) {
         e.preventDefault();
         if (state === "play") keys.add(e.code);
       } else if ((e.code === "Space" || e.code === "Enter") && state !== "play") {
@@ -1219,13 +1567,27 @@
     window.addEventListener("keyup", onKeyUp);
     window.addEventListener("blur", onBlur);
     window.addEventListener("resize", fit);
+    // HUD 의 주문 칸은 눌러도 쓴다(휴대폰)
+    root.querySelectorAll("[data-spell]").forEach(b => b.addEventListener("pointerdown", e => {
+      e.preventDefault();
+      e.stopPropagation();
+      useSpell(b.dataset.spell);
+    }));
+    const paintSound = () => {
+      const on = soundOn();
+      soundBtn.textContent = on ? "효과음 켜짐" : "효과음 꺼짐";
+      soundBtn.setAttribute("aria-pressed", String(on));
+    };
+    soundBtn.onclick = () => { setSound(!soundOn()); paintSound(); };
+    paintSound();
+    root.querySelector('[data-hud="face"]').src = face.src;
 
     reset();
     fit();
     hudUpdate();
     showOver(`
       <h2>스킬샷 피하기</h2>
-      <p>사방에서 날아오는 스킬을 피해 오래 버티세요. 목숨 ${LIVES}개, 맞은 뒤 ${SAFE_AFTER_HIT}초는 무적이에요.</p>
+      <p>사방에서 날아오는 스킬을 피해 오래 버티세요. ${LIVES}번 맞으면 처치당해요. 맞은 뒤 ${SAFE_AFTER_HIT}초는 무적이에요.</p>
       <ul class="dodge-keys">
         <li><b>투사체</b> 바닥 그림자가 실제 판정이에요. 옆으로 갈라지는 것도 있어요</li>
         <li><b>장판</b> 바닥 원이 다 차면 터져요</li>
@@ -1236,14 +1598,23 @@
         <li><b>우클릭</b> 찍은 곳으로 이동 (누른 채 끌면 계속 따라가요)</li>
         <li><b>WASD</b> 누른 쪽으로 바로 이동 (방향키도 돼요)</li>
         <li><b>휴대폰</b> 화면을 누른 곳으로 이동</li>
+        <li><b>F · E</b> 점멸(커서 쪽 400) · 유체화. 쿨타임 ${SPELLS.map(sp => sp.cd + "초").join(" · ")} (휴대폰은 아래 칸을 눌러요)</li>
       </ul>
       <p class="note">이동 속도 ${CHAMP.speed}. 스킬 수치는 롤 클라이언트 데이터 그대로예요.</p>
       <div class="dodge-actions"><button type="button" data-start>시작 <small>Space</small></button>${opts.links || ""}</div>`);
 
     function setBest(text) { hud("best").innerHTML = text || ""; }
 
+    // 내 챔피언을 나중에 바꾼다(티어표를 늦게 받았을 때)
+    function setChamp(key, name) {
+      if (key) { face = champImage(key); root.querySelector('[data-hud="face"]').src = face.src; }
+      if (name) opts.name = name;
+    }
+
     function destroy() {
       cancelAnimationFrame(raf);
+      clearTimeout(bannerTimer);
+      clearTimeout(overTimer);
       window.removeEventListener("pointerup", onPointerUp);
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
@@ -1251,7 +1622,7 @@
       window.removeEventListener("resize", fit);
     }
 
-    return { destroy, setBest };
+    return { destroy, setBest, setChamp };
   }
 
   window.DodgeGame = { mount, fmt, SKILLS, VERSION };

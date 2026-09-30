@@ -1281,7 +1281,12 @@ function renderDodge(roomArg) {
     r.best == null ? "" : `최고 <b>${fmt(r.best)}</b> · 이번 주 <b>${fmt(r.week_best)}</b>`);
 
   let runPromise = null;
+  // 내 챔피언은 티어표의 OP 챔피언(받아 둔 게 없으면 이즈리얼)
+  const mine = known("/api/tierlist");
+  const op = mine && mine.op;
   dodgeGame = DodgeGame.mount(document.getElementById("dodge-root"), {
+    champ: (op && op.key) || "Ezreal",
+    name: me ? me.game_name : "",
     links: `<a class="btn ghost" href="${boardHref}">무빙 순위 보기</a>`,
     onStart() {
       runPromise = api("/api/dodge/start", { method: "POST" }).then(r => r.run);
@@ -1308,6 +1313,8 @@ function renderDodge(roomArg) {
   });
 
   load("/api/dodge/me").then(showBest, () => {});
+  // 티어표를 아직 못 받았으면 받는 대로 내 챔피언(OP) 을 바꿔 끼운다
+  if (!op) load("/api/tierlist").then(d => { if (dodgeGame && d.op) dodgeGame.setChamp(d.op.key); }, () => {});
 
   // 방에서 왔으면 그 방 순위를 게임 아래에 작게
   async function drawMini() {
