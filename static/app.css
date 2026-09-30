@@ -254,6 +254,9 @@ main:has(.gate) { padding-bottom: 24px; }
 }
 .op .cname { font: 28px/1.1 var(--display); margin: 0 0 6px; }
 .op .why { color: var(--muted); font-size: 14px; margin: 0; }
+.op img[data-open-op] { cursor: pointer; }
+.op .op-more { margin-top: 14px; font-size: 14px; padding: 6px 14px; }
+.op .op-more[aria-expanded="true"] { color: var(--gold); border-color: var(--gold); }
 
 /* 한 번만 등장하는 연출: OP 가 떠오른다 */
 @media (prefers-reduced-motion: no-preference) {
