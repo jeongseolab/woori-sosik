@@ -91,26 +91,45 @@ function remember(path, data) {
 }
 
 // 로그인하면 자주 보는 것들을 뒤에서 미리 받아 둔다.
-// 내 티어표 -> 방 목록 -> 방마다 사람 카드 -> 그 방의 주간 랭킹·무빙 순위
+// 내 티어표 -> 방 목록 -> 방마다 사람 카드 -> 그 사람들의 티어표(팝업) -> 그 방의 주간 랭킹·무빙 순위
 let warmed = false;
+const quiet = p => p.catch(() => null);
 async function warmUp() {
   if (warmed) return;
   warmed = true;
   // 받기 전에 지문부터 받아 둔다. 이 뒤로 바뀐 것은 다음 확인 때 알아챈다
   checkStamp();
-  const quiet = p => p.catch(() => null);
   load("/api/dodge/me").catch(() => {});
   await quiet(load("/api/tierlist"));
-  const rooms = await quiet(loadRooms());
-  for (const r of rooms || []) {
-    const room = await quiet(load("/api/rooms/" + r.id + "?lite=1"));
-    if (!room) continue;
-    // 방 하나의 카드는 한꺼번에(방 화면과 같다). 다 오면 새 판이 쌓였으니 주간 랭킹을 받는다
-    await Promise.all(room.members.map(m => quiet(load("/api/rooms/" + r.id + "/member/" + m.account_id))));
-    load("/api/rooms/" + r.id + "/weekly").catch(() => {});
-    load("/api/rooms/" + r.id + "/dodge").catch(() => {});
-    load("/api/rooms/" + r.id + "/members").catch(() => {});   // 듀오 궁합의 친구 고르기
+  await warmRooms();
+}
+
+// 방마다 아직 없는 것만 받는다(받아 둔 것은 load 가 그대로 돌려준다).
+// 새 방에 들어갔거나 방에 새 사람이 오면 다시 불러서 빈 곳을 채운다
+let warmingRooms = null;
+function warmRooms() {
+  if (!warmingRooms) {
+    warmingRooms = (async () => {
+      const rooms = await quiet(loadRooms());
+      for (const r of rooms || []) await warmRoom(r.id);
+    })().finally(() => { warmingRooms = null; });
   }
+  return warmingRooms;
+}
+
+async function warmRoom(roomId) {
+  const base = "/api/rooms/" + roomId;
+  const room = await quiet(load(base + "?lite=1"));
+  if (!room || !me) return;
+  // 방 하나의 카드는 한꺼번에(방 화면과 같다). 다 오면 새 판이 쌓였으니 주간 랭킹을 받는다
+  const cards = await Promise.all(room.members.map(m => quiet(load(base + "/member/" + m.account_id))));
+  load(base + "/weekly").catch(() => {});
+  load(base + "/dodge").catch(() => {});
+  load(base + "/members").catch(() => {});   // 듀오 궁합의 친구 고르기
+  if (!me) return;
+  // 카드를 만들며 서버가 티어표를 들고 있어서, 팝업 티어표는 OP.GG 를 다시 부르지 않고 온다
+  await Promise.all(cards.filter(c => c && !c.error && c.riot_id)
+    .map(c => quiet(load(tierPath(c.riot_id)))));
 }
 
 // ── 바뀐 것만 다시 받기 ─────────────────────────────────
@@ -133,7 +152,12 @@ function pathsFor(key) {
   if (kind === "room") return [base + "?lite=1", base + "/members", base + "/weekly", base + "/dodge"];
   if (kind === "dodge") return [base + "/dodge"];
   // 누가 새 판을 했으면(쌓인 경기가 늘면) 그 방의 카드와 주간 랭킹이 바뀐다
-  if (kind === "games") return [base + "/weekly", ...cached(new RegExp("^" + base + "/member/"))];
+  if (kind === "games") {
+    // 그 방 사람들의 티어표(팝업)도 받아 둔 게 있으면 다시 받는다
+    const room = known(base + "?lite=1");
+    const tiers = room ? room.members.map(m => tierPath(m.riot_id)) : [];
+    return [base + "/weekly", ...cached(new RegExp("^" + base + "/member/")), ...tiers];
+  }
   return [];
 }
 
@@ -147,10 +171,22 @@ async function checkStamp() {
     lastStamp = now;
     if (!prev) return;             // 처음 받은 지문은 기준으로만 쓴다
     const paths = new Set();
+    let people = false;   // 방 목록이나 방 사람이 바뀌었다
     for (const k of new Set([...Object.keys(prev), ...Object.keys(now)])) {
-      if (prev[k] !== now[k]) pathsFor(k).forEach(p => paths.add(p));
+      if (prev[k] === now[k]) continue;
+      pathsFor(k).forEach(p => paths.add(p));
+      if (k === "rooms" || k.startsWith("room:")) people = true;
     }
     if (paths.size) await refresh([...paths]);
+    // 새 방·새 사람의 카드와 티어표는 아직 없으니 받아 둔다. 다 오면 보고 있는 방 화면을 다시 그린다.
+    // OP.GG 를 기다릴 수 있어서 다음 지문 확인을 막지 않게 뒤에서 한다
+    if (people && me) {
+      const before = new Set(memoDone.keys());
+      warmRooms().then(() => {
+        const added = [...memoDone.keys()].filter(k => !before.has(k) && k.startsWith("/api/rooms"));
+        if (added.length && me) repaint(added);
+      }, () => {});
+    }
   } catch {} finally {
     checking = false;
   }
@@ -750,9 +786,15 @@ function champDetail(c, bracket) {
     </div>`;
 }
 
+// 티어표를 받는 주소. 나면 내 티어표 주소를 써서 받아 둔 것을 같이 쓴다
+const isMe = riotId => !riotId || riotId.toLowerCase().replace(/\s/g, "") === me.riot_id.toLowerCase().replace(/\s/g, "");
+function tierPath(riotId) {
+  return isMe(riotId) ? "/api/tierlist" : "/api/tierlist?" + new URLSearchParams({ riot_id: riotId });
+}
+
 async function renderTier(riotId, fresh = false, target = view, inModal = false) {
-  const mine = !riotId || riotId.toLowerCase().replace(/\s/g, "") === me.riot_id.toLowerCase().replace(/\s/g, "");
-  const path = mine ? "/api/tierlist" : "/api/tierlist?" + new URLSearchParams({ riot_id: riotId });
+  const mine = isMe(riotId);
+  const path = tierPath(riotId);
   const seq = routeSeq;
   // 기다리는 사이 다른 화면으로 갔으면 그리지 않는다(팝업은 제 자리에 그리니 상관없다)
   const left = () => target === view && seq !== routeSeq;
