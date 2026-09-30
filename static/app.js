@@ -400,12 +400,17 @@ function showBusy(title, quips) {
 
 // ── 길 찾기 ─────────────────────────────────────────────
 
+// 화면을 옮길 때마다 늘린다. 받는 사이 다른 화면으로 갔으면 늦게 온 대답으로 화면을 덮지 않는다
+let routeSeq = 0;
+
 async function route() {
+  const seq = ++routeSeq;
   const hash = location.hash || "#/tier";
   const [, page, arg] = hash.match(/^#\/([^/]*)\/?(.*)$/) || [];
 
   if (!me && getToken()) {
     try { me = (await api("/api/me")).user; } catch { me = null; }
+    if (seq !== routeSeq) return;
   }
   if (!me) {
     showTop(false);
@@ -748,15 +753,20 @@ function champDetail(c, bracket) {
 async function renderTier(riotId, fresh = false, target = view, inModal = false) {
   const mine = !riotId || riotId.toLowerCase().replace(/\s/g, "") === me.riot_id.toLowerCase().replace(/\s/g, "");
   const path = mine ? "/api/tierlist" : "/api/tierlist?" + new URLSearchParams({ riot_id: riotId });
+  const seq = routeSeq;
+  // 기다리는 사이 다른 화면으로 갔으면 그리지 않는다(팝업은 제 자리에 그리니 상관없다)
+  const left = () => target === view && seq !== routeSeq;
   // 받아 둔 게 있으면 로딩 화면 없이 바로 그린다
   if (fresh || !known(path)) loading("OP.GG 에서 전적과 챔피언 통계를 모으는 중이에요. 처음 만드는 티어표는 조금 걸려요.", target);
   let data;
   try {
     data = await load(path, fresh);
   } catch (ex) {
+    if (left()) return;
     if (mine && ex.data && ex.data.renamed) return renamedNotice(target);
     return failed(ex.message, () => renderTier(riotId, fresh, target, inModal), target);
   }
+  if (left()) return;
 
   const p = data.player;
   const all = [data.op, ...Object.values(data.tiers).flat()].filter(Boolean);
@@ -858,8 +868,10 @@ async function renderRooms(target) {
   if (ROOM_TABS.includes(roomId)) { tab = roomId; roomId = lastRoomId; }
   if (ROOM_TABS.includes(tab)) roomTab = tab;
   let rooms;
+  const seq = routeSeq;
   try { rooms = await loadRooms(); }
-  catch (ex) { return failed(ex.message, () => renderRooms(target)); }
+  catch (ex) { return seq === routeSeq && failed(ex.message, () => renderRooms(target)); }
+  if (seq !== routeSeq) return;
 
   if (!roomId && rooms.length) roomId = String(rooms[0].id);
 
