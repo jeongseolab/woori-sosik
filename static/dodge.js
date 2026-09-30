@@ -23,7 +23,8 @@
 // 오른쪽 아래 미니맵, 머리 위 체력바, 안내 문구(환영·연속 회피·처치당함), 죽으면 회색 화면.
 //
 // 조작: 우클릭(누른 채 끌면 계속 따라감) 또는 WASD·방향키. 휴대폰은 화면을 누르면 이동.
-// 소환사 주문: 점멸 F(커서 쪽으로 400), 유체화 E(잠깐 빨라짐). WASD 의 D 와 겹쳐서 롤 기본(D/F) 대신 E/F.
+// 시작 전에 이동 방식(마우스 클릭 / WASD) 과 소환사 주문 배치를 고른다.
+// 주문 키는 마우스면 롤 기본 D/F, WASD 면 D 가 이동이라 V/F. 점멸을 두 키 중 어디에 둘지도 고른다.
 // WASD 는 e.code 로 읽는다. 한글 입력 상태에서도 ㅈㅁㄴㅇ 이 아니라 WASD 로 잡힌다.
 
 (function () {
@@ -38,9 +39,25 @@
   // 점멸 거리 400·유체화 이속(+24~48%) 은 롤 위키. 쿨타임과 유체화 지속 시간은 이 게임에 맞게 줄였다
   const ICONS = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/data/spells/icons2d/";
   const SPELLS = [
-    { id: "flash", key: "KeyF", label: "F", name: "점멸", cd: 15, range: 400, icon: ICONS + "summoner_flash.png" },
-    { id: "ghost", key: "KeyE", label: "E", name: "유체화", cd: 20, last: 3, bonus: 0.4, icon: ICONS + "summoner_haste.png" },
+    { id: "flash", name: "점멸", cd: 15, range: 400, icon: ICONS + "summoner_flash.png" },
+    { id: "ghost", name: "유체화", cd: 20, last: 3, bonus: 0.4, icon: ICONS + "summoner_haste.png" },
   ];
+
+  // 조작 설정: 이동 방식(mouse | wasd) 과 점멸을 두 키 중 앞 키에 둘지(flashFirst). 브라우저에 기억한다
+  const CONTROL_KEY = "tiergg-dodge-controls";
+  function loadControls() {
+    try {
+      const c = JSON.parse(localStorage.getItem(CONTROL_KEY) || "{}");
+      return { move: c.move === "wasd" ? "wasd" : "mouse", flashFirst: !!c.flashFirst };
+    } catch { return { move: "mouse", flashFirst: false }; }
+  }
+  function saveControls(c) { try { localStorage.setItem(CONTROL_KEY, JSON.stringify(c)); } catch {} }
+  // 이동 방식에 따른 주문 두 키
+  function keyPair(move) { return move === "wasd" ? ["V", "F"] : ["D", "F"]; }
+  function spellKeys(c) {
+    const [a, b] = keyPair(c.move);
+    return c.flashFirst ? { flash: a, ghost: b } : { flash: b, ghost: a };
+  }
   const HP_MAX = 1500;            // 체력(한 번 맞을 때마다 HP_MAX / LIVES)
   // 연속으로 피한 수에 따라 롤 안내 문구
   const SPREES = [[20, "학살 중입니다!"], [40, "도저히 막을 수 없습니다!"], [60, "미쳐 날뛰고 있습니다!"], [80, "전설의 출현!"]];
@@ -186,8 +203,8 @@
             <div class="lol-main">
               <div class="lol-spells">
                 ${SPELLS.map(sp => `
-                  <button type="button" class="lol-spell" data-spell="${sp.id}" title="${sp.name} (${sp.label})">
-                    <img src="${sp.icon}" alt="${sp.name}"><i></i><b></b><kbd>${sp.label}</kbd>
+                  <button type="button" class="lol-spell" data-spell="${sp.id}" title="${sp.name}">
+                    <img src="${sp.icon}" alt="${sp.name}"><i></i><b></b><kbd></kbd>
                   </button>`).join("")}
               </div>
               <div class="lol-hp"><i data-hud="hpfill"></i><span data-hud="hptext"></span></div>
@@ -215,6 +232,8 @@
     let fx, parts, shake, hurt;          // 그림 효과(판정과 상관없음)
     let cds, ghostLeft, cursor, facing, level, pops, lastSpree, lastMark;
     let bannerTimer = 0, overTimer = 0;
+    let controls = loadControls();
+    const keyOf = id => spellKeys(controls)[id];
     const keys = new Set();
     let holding = false;
 
@@ -1503,6 +1522,7 @@
         <div data-extra></div>
         <div class="dodge-actions">
           <button type="button" data-start>다시 하기 <small>Space</small></button>
+          <button type="button" data-setup>조작 바꾸기</button>
           ${opts.links || ""}
         </div>`), 1300);
       if (opts.onEnd) {
@@ -1520,6 +1540,8 @@
       over.hidden = false;
       const b = over.querySelector("[data-start]");
       if (b) b.onclick = start;
+      const setup = over.querySelector("[data-setup]");
+      if (setup) setup.onclick = () => showIntro();
     }
 
     function esc(s) {
@@ -1529,8 +1551,10 @@
     // ── 입력 ──
     function onPointerDown(e) {
       if (state !== "play") return;
-      // 우클릭이 기본. 왼쪽 클릭·터치도 받아 준다(트랙패드·휴대폰)
       e.preventDefault();
+      // WASD 방식이면 마우스 클릭으로는 움직이지 않는다(커서는 점멸 방향으로만). 터치는 늘 움직인다
+      if (controls.move === "wasd" && e.pointerType === "mouse") { cursor = toArena(e); return; }
+      // 우클릭이 기본. 왼쪽 클릭·터치도 받아 준다(트랙패드·휴대폰)
       holding = true;
       target = toArena(e);
       canvas.setPointerCapture?.(e.pointerId);
@@ -1543,11 +1567,11 @@
     const MOVE_KEYS = ["KeyW", "KeyA", "KeyS", "KeyD", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"];
     function onKeyDown(e) {
       if (e.target.closest && e.target.closest("input, textarea, select")) return;
-      const sp = SPELLS.find(x => x.key === e.code);
+      const sp = SPELLS.find(x => "Key" + keyOf(x.id) === e.code);
       if (sp && state === "play") {
         e.preventDefault();
         if (!e.repeat) useSpell(sp.id);
-      } else if (MOVE_KEYS.includes(e.code)) {
+      } else if (controls.move === "wasd" && MOVE_KEYS.includes(e.code)) {
         e.preventDefault();
         if (state === "play") keys.add(e.code);
       } else if ((e.code === "Space" || e.code === "Enter") && state !== "play") {
@@ -1585,9 +1609,35 @@
     reset();
     fit();
     hudUpdate();
-    showOver(`
+    // HUD 주문 칸의 키 글자
+    function paintKeys() {
+      for (const sp of SPELLS) {
+        const b = root.querySelector('[data-spell="' + sp.id + '"]');
+        b.querySelector("kbd").textContent = keyOf(sp.id);
+        b.title = sp.name + " (" + keyOf(sp.id) + ")";
+      }
+    }
+
+    // 시작 창. 이동 방식과 주문 배치를 고르면 바로 다시 그린다
+    function showIntro() {
+      const [a, b] = keyPair(controls.move);
+      const k = spellKeys(controls);
+      const on = v => (v ? "true" : "false");
+      showOver(`
       <h2>스킬샷 피하기</h2>
       <p>사방에서 날아오는 스킬을 피해 오래 버티세요. ${LIVES}번 맞으면 처치당해요. 맞은 뒤 ${SAFE_AFTER_HIT}초는 무적이에요.</p>
+      <div class="dodge-setup">
+        <div><span>이동 방식</span>
+          <div class="seg dodge-seg" role="group" aria-label="이동 방식">
+            <button type="button" data-move="mouse" aria-selected="${on(controls.move === "mouse")}">마우스 클릭</button>
+            <button type="button" data-move="wasd" aria-selected="${on(controls.move === "wasd")}">WASD</button>
+          </div></div>
+        <div><span>소환사 주문</span>
+          <div class="seg dodge-seg" role="group" aria-label="소환사 주문 배치">
+            <button type="button" data-order="first" aria-selected="${on(controls.flashFirst)}">점멸 ${a} · 유체화 ${b}</button>
+            <button type="button" data-order="second" aria-selected="${on(!controls.flashFirst)}">유체화 ${a} · 점멸 ${b}</button>
+          </div></div>
+      </div>
       <ul class="dodge-keys">
         <li><b>투사체</b> 바닥 그림자가 실제 판정이에요. 옆으로 갈라지는 것도 있어요</li>
         <li><b>장판</b> 바닥 원이 다 차면 터져요</li>
@@ -1595,13 +1645,30 @@
         <li><b>감옥</b> 창살에 닿으면 맞아요. 안에 갇히면 닿지 않게 버티세요</li>
       </ul>
       <ul class="dodge-keys">
-        <li><b>우클릭</b> 찍은 곳으로 이동 (누른 채 끌면 계속 따라가요)</li>
-        <li><b>WASD</b> 누른 쪽으로 바로 이동 (방향키도 돼요)</li>
-        <li><b>휴대폰</b> 화면을 누른 곳으로 이동</li>
-        <li><b>F · E</b> 점멸(커서 쪽 400) · 유체화. 쿨타임 ${SPELLS.map(sp => sp.cd + "초").join(" · ")} (휴대폰은 아래 칸을 눌러요)</li>
+        ${controls.move === "mouse"
+          ? `<li><b>우클릭</b> 찍은 곳으로 이동 (누른 채 끌면 계속 따라가요)</li>`
+          : `<li><b>WASD</b> 누른 쪽으로 이동 (방향키도 돼요). 마우스는 점멸 방향만 정해요</li>`}
+        <li><b>${k.flash} · ${k.ghost}</b> 점멸(커서 쪽 400) · 유체화. 쿨타임 ${SPELLS.map(sp => sp.cd + "초").join(" · ")}</li>
+        <li><b>휴대폰</b> 화면을 누른 곳으로 이동, 주문은 아래 칸을 눌러요</li>
       </ul>
       <p class="note">이동 속도 ${CHAMP.speed}. 스킬 수치는 롤 클라이언트 데이터 그대로예요.</p>
       <div class="dodge-actions"><button type="button" data-start>시작 <small>Space</small></button>${opts.links || ""}</div>`);
+      over.querySelectorAll("[data-move]").forEach(btn => btn.onclick = () => {
+        controls.move = btn.dataset.move;
+        saveControls(controls);
+        keys.clear();
+        paintKeys();
+        showIntro();
+      });
+      over.querySelectorAll("[data-order]").forEach(btn => btn.onclick = () => {
+        controls.flashFirst = btn.dataset.order === "first";
+        saveControls(controls);
+        paintKeys();
+        showIntro();
+      });
+    }
+    paintKeys();
+    showIntro();
 
     function setBest(text) { hud("best").innerHTML = text || ""; }
 

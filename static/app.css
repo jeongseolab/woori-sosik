@@ -734,6 +734,13 @@ table.dodge-table { min-width: 0; }
 .dodge-stage .dodge-card h2 { font-family: Georgia, "Times New Roman", serif; color: #f0e6d2; letter-spacing: .02em; }
 .dodge-stage .dodge-score { color: #c8aa6e !important; }
 .dodge-stage .dodge-keys b { color: #c8aa6e; }
+/* 시작 창의 조작 고르기 */
+.dodge-setup { display: grid; gap: 8px; margin: 4px 0 12px; text-align: left; }
+.dodge-setup > div { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.dodge-setup > div > span { min-width: 72px; color: #c8aa6e; font-size: 13px; font-weight: 700; }
+.dodge-seg { margin: 0; background: #010a13; border-color: #785a28; border-radius: 3px; }
+.dodge-seg button { padding: 6px 12px; font-size: 13px; border-radius: 2px; color: #a09b8c; }
+.dodge-seg button[aria-selected="true"] { background: #1e2328; color: #f0e6d2; box-shadow: inset 0 0 0 1px #c8aa6e; }
 .dodge-stage .dodge-actions button, .dodge-stage .dodge-actions .btn {
   border-radius: 2px; font-family: Georgia, "Times New Roman", serif; letter-spacing: .04em;
   background: #1e2328; color: #cdbe91; border: 1px solid #c8aa6e;
