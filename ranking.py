@@ -31,6 +31,9 @@ RUN_MAX_SEC = 60 * 60
 RUN_SLACK_SEC = 2.0
 # 1초도 못 버틴 판은 저장하지 않는다
 RUN_MIN_MS = 1000
+# 스킬샷 피하기 규칙 버전. static/dodge.js 의 VERSION 과 같아야 한다.
+# 스킬이 바뀌면 예전 기록과 견줄 수 없으니 이 버전의 기록끼리만 순위를 매긴다
+DODGE_VERSION = 2
 # 주간 순위에 들려면 이번 주에 이만큼은 해야 한다(1판 운으로 1등이 되지 않게)
 WEEK_MIN_GAMES = 3
 # 주간 종합 점수의 비중. 합은 1
@@ -63,8 +66,11 @@ def start_run(account_id: int) -> str:
     return token
 
 
-def finish_run(account_id: int, token: str, ms: int, dodged: int):
+def finish_run(account_id: int, token: str, ms: int, dodged: int, ver: int = 1):
     """기록을 확인하고 저장한다. 믿을 수 없는 기록이면 ValueError."""
+    if ver != DODGE_VERSION:
+        # 예전 dodge.js 를 들고 있는 브라우저. 규칙이 달라서 같은 순위에 넣을 수 없다
+        raise ValueError("게임이 새 버전으로 바뀌었어요. 새로고침한 뒤 다시 해 주세요")
     with _runs_lock:
         got = _runs.pop(token or "", None)
     if got is None or got[0] != account_id:
@@ -76,8 +82,8 @@ def finish_run(account_id: int, token: str, ms: int, dodged: int):
     before = my_dodge(account_id)
     if ms >= RUN_MIN_MS:
         conn = get_conn()
-        conn.execute("INSERT INTO dodge_runs (account_id, ms, dodged, played_at) VALUES (?, ?, ?, ?)",
-                     (account_id, ms, max(0, int(dodged or 0)), time.time()))
+        conn.execute("INSERT INTO dodge_runs (account_id, ms, dodged, played_at, ver) VALUES (?, ?, ?, ?, ?)",
+                     (account_id, ms, max(0, int(dodged or 0)), time.time(), DODGE_VERSION))
         conn.commit()
         conn.close()
     after = my_dodge(account_id)
@@ -87,12 +93,13 @@ def finish_run(account_id: int, token: str, ms: int, dodged: int):
 
 
 def _dodge_stats(account_ids, since=None):
-    """{account_id: (최고 ms, 판수)}. since 를 주면 그 뒤의 판만."""
+    """{account_id: (최고 ms, 판수)}. 지금 버전의 판만. since 를 주면 그 뒤의 판만."""
     if not account_ids:
         return {}
     marks = ",".join("?" * len(account_ids))
-    sql = "SELECT account_id, MAX(ms) AS best, COUNT(*) AS n FROM dodge_runs WHERE account_id IN (%s)" % marks
-    params = list(account_ids)
+    sql = ("SELECT account_id, MAX(ms) AS best, COUNT(*) AS n FROM dodge_runs"
+           " WHERE ver = ? AND account_id IN (%s)" % marks)
+    params = [DODGE_VERSION] + list(account_ids)
     if since is not None:
         sql += " AND played_at >= ?"
         params.append(since)

@@ -1081,11 +1081,11 @@ function renderDodge(roomArg) {
       runPromise = api("/api/dodge/start", { method: "POST" }).then(r => r.run);
       runPromise.catch(() => {});
     },
-    async onEnd({ ms, dodged }) {
+    async onEnd({ ms, dodged, ver }) {
       let r;
       try {
         const run = await runPromise;
-        r = await api("/api/dodge/finish", { method: "POST", body: JSON.stringify({ run, ms, dodged }) });
+        r = await api("/api/dodge/finish", { method: "POST", body: JSON.stringify({ run, ms, dodged, ver }) });
       } catch (ex) {
         return `<p class="note">기록을 저장하지 못했어요 (${esc(ex.message)})</p>`;
       }
