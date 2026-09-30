@@ -7,6 +7,10 @@
 //     스킬 하나는 한 번만 때린다(맞힌 투사체는 사라지고, 감옥은 한 번 스턴하면 끝)
 // 빠른 투사체(초당 3300)가 한 프레임에 나를 뛰어넘지 않게, 1/240초씩 잘게 나눠 움직인다.
 //
+// 화면은 유사 3D 다. 판정과 움직임은 모두 바닥(2D) 에서 하고, 그릴 때만 롤 기본 카메라처럼
+// 비스듬히 내려다보는 원근으로 옮긴다(proj). 우클릭한 화면 위치는 거꾸로 바닥 좌표로 되돌린다(unproj).
+// 투사체는 공중에 떠서 날아가지만 바닥에 보이는 그림자 원이 실제 판정이다.
+//
 // 스킬 값의 출처(SKILLS 표의 src):
 //   file  롤 클라이언트의 챔피언 데이터 파일(CommunityDragon 이 푼 characters/*.bin.json, 16.19)
 //         속도 = missileSpeed(mMissileSpec), 반지름 = mLineWidth, 사거리 = castRange,
@@ -127,9 +131,9 @@
     let t = 0, dodged = 0, acc = 0, last = 0, nextCast = 0, raf = 0;
     let player, target, casters, missiles, zones, flashes;
     let lives, hits, safe, lastHit, dead;
+    let fx, parts, shake, hurt;          // 그림 효과(판정과 상관없음)
     const keys = new Set();
     let holding = false;
-    let scale = 1;
 
     function reset() {
       player = { x: ARENA.w / 2, y: ARENA.h / 2, vx: 0, vy: 0 };
@@ -138,6 +142,10 @@
       missiles = [];     // 날아가는 투사체
       zones = [];        // 바닥 장판·감옥
       flashes = [];      // 레이저가 지나간 자리(그림만)
+      fx = [];           // 빛기둥·퍼지는 고리
+      parts = [];        // 튀는 파편
+      shake = 0;         // 화면 흔들림 남은 시간
+      hurt = 0;          // 맞았을 때 붉은 테두리 남은 시간
       lives = LIVES;
       hits = [];         // 맞은 스킬 이름(끝 화면에 보여 준다)
       safe = 0;          // 남은 무적 시간
@@ -147,26 +155,67 @@
       nextCast = 0.8;          // 시작하고 잠깐은 숨 돌릴 틈
     }
 
+    // ── 유사 3D 시점 ──
+    // 카메라는 경기장 가운데를 PITCH 만큼 내려다본다. 판정에는 쓰지 않고 그릴 때만 쓴다
+    const PITCH = 56 * Math.PI / 180;
+    const CAM_D = 2300, FOCAL = 1500;
+    const COS = Math.cos(PITCH), SIN = Math.sin(PITCH);
+    let S = 1, OX = 0, OY = 0, VW = 0, VH = 0, DPR = 1;   // 배율·원점·화면 크기(CSS 픽셀)
+
+    // 바닥 좌표(x, y) 와 높이 z -> 화면 좌표. k: 그 깊이에서 1유닛이 몇 픽셀인지
+    function proj(x, y, z = 0) {
+      const dy = (y - ARENA.h / 2) - CAM_D * COS, dz = z - CAM_D * SIN;
+      const yc = -dy * SIN + dz * COS;
+      const zc = -dy * COS - dz * SIN;
+      const k = FOCAL / zc * S;
+      return { x: OX + (x - ARENA.w / 2) * k, y: OY - yc * k, k };
+    }
+
+    // 서 있는 것(캐릭터·초상화·투사체) 은 롤처럼 화면에서 똑바로 세운다.
+    // 그냥 proj 로 높이를 올리면 원근 때문에 화면 가장자리에서 가운데 쪽으로 기울어 보인다
+    function upright(x, y, h) {
+      const b = proj(x, y, 0);
+      return { x: b.x, y: b.y - h * COS * b.k, k: b.k };
+    }
+
+    // 화면 좌표 -> 바닥 좌표. 카메라에서 그 점으로 뻗은 선이 바닥과 만나는 곳
+    function unproj(sx, sy) {
+      const vx = (sx - OX) / S, vy = (sy - OY) / S;
+      const tt = CAM_D * SIN / (vy * COS + FOCAL * SIN);
+      return { x: ARENA.w / 2 + vx * tt, y: ARENA.h / 2 + CAM_D * COS + tt * (vy * SIN - FOCAL * COS) };
+    }
+
     // ── 화면 크기 ──
     function fit() {
       // 가로는 칸에 꽉 차게, 단 세로가 창 안에 다 들어오게 줄인다(게임 중에 스크롤하면 안 되니까)
       const stage = canvas.parentElement;
-      const room = window.innerHeight - Math.max(0, stage.getBoundingClientRect().top + window.scrollY) - 16;
-      const w = Math.floor(Math.min(stage.clientWidth, Math.max(240, room) * ARENA.w / ARENA.h));
-      const h = w * ARENA.h / ARENA.w;
-      const dpr = window.devicePixelRatio || 1;
-      canvas.style.width = w + "px";
-      canvas.style.height = h + "px";
-      canvas.width = Math.round(w * dpr);
-      canvas.height = Math.round(h * dpr);
-      scale = w / ARENA.w;
-      ctx.setTransform(dpr * scale, 0, 0, dpr * scale, 0, 0);
-      draw();
+      const room = Math.max(220, window.innerHeight - Math.max(0, stage.getBoundingClientRect().top + window.scrollY) - 16);
+      // 배율 1 로 경기장 네 귀퉁이(와 먼 쪽 위로 선 것들) 가 화면 어디에 오는지 본다
+      S = 1; OX = 0; OY = 0;
+      const side = 70;
+      const pts = [[0, 0, 0], [ARENA.w, 0, 0], [-side, ARENA.h, 0], [ARENA.w + side, ARENA.h, 0], [-side, 0, 240], [ARENA.w + side, 0, 240]]
+        .map(([x, y, z]) => proj(x, y, z));
+      const minX = Math.min(...pts.map(p => p.x)), maxX = Math.max(...pts.map(p => p.x));
+      const minY = Math.min(...pts.map(p => p.y)), maxY = Math.max(...pts.map(p => p.y));
+      const pad = 12;
+      S = Math.min((stage.clientWidth - pad * 2) / (maxX - minX), (room - pad * 2) / (maxY - minY));
+      VW = Math.floor(Math.min(stage.clientWidth, (maxX - minX) * S + pad * 2));
+      VH = Math.floor((maxY - minY) * S + pad * 2);
+      OX = VW / 2 - (minX + maxX) / 2 * S;
+      OY = pad - minY * S;
+      DPR = window.devicePixelRatio || 1;
+      canvas.style.width = VW + "px";
+      canvas.style.height = VH + "px";
+      canvas.width = Math.round(VW * DPR);
+      canvas.height = Math.round(VH * DPR);
+      draw(0);
     }
 
     function toArena(e) {
       const r = canvas.getBoundingClientRect();
-      return { x: (e.clientX - r.left) / scale, y: (e.clientY - r.top) / scale };
+      const p = unproj(e.clientX - r.left, e.clientY - r.top);
+      // 경기장 밖을 찍으면 가장자리까지만 간다
+      return { x: Math.min(ARENA.w, Math.max(0, p.x)), y: Math.min(ARENA.h, Math.max(0, p.y)) };
     }
 
     // ── 스킬 고르기 ──
@@ -252,6 +301,9 @@
       hits.push(s.name);
       lastHit = s;
       safe = SAFE_AFTER_HIT;
+      shake = 0.25;
+      hurt = 0.4;
+      burst(player.x, player.y, 90, s.color, 26, 420);
       if (lives <= 0) dead = true;
       return true;
     }
@@ -263,6 +315,7 @@
       for (const side of [1, -1]) {
         missiles.push({ skill: piece, x: m.x, y: m.y, dx: -m.dy * side, dy: m.dx * side, speed: sp.speed, left: sp.range, flown: 0 });
       }
+      burst(m.x, m.y, MISSILE_Z, m.skill.color, 14, 300);
     }
 
     // 장판을 찍을 자리. 수치(반지름·지연 시간)는 그대로 두고 찍는 자리만 사람처럼 한다.
@@ -301,7 +354,7 @@
       } else if (s.kind === "beam") {
         const a = { x: c.x, y: c.y }, b = { x: c.x + c.dx * s.range, y: c.y + c.dy * s.range };
         if (!(segDist(player, a, b) < CHAMP.radius + s.radius && hit(s))) dodged += 1;
-        flashes.push({ skill: s, a, b, left: 0.25 });
+        flashes.push({ skill: s, a, b, left: 0.35 });
       }
     }
 
@@ -405,6 +458,7 @@
           if (s.kind === "circle") {
             // 터지는 순간 원 안에 몸이 조금이라도 걸치면 맞는다
             z.done = 0.3;          // 터진 자리를 잠깐 보여 준다
+            boom(z.x, z.y, s.radius, s.color);
             if (d < s.radius + CHAMP.radius && hit(s)) { if (dead) return; }
             else dodged += 1;
             continue;
@@ -412,6 +466,7 @@
         }
         if (s.kind === "cage") {
           // 테두리에 몸이 닿으면 맞는다. 안에 갇혔으면 테두리에 닿지 않게 버텨야 한다
+          if (!z.formed) { z.formed = true; fx.push({ kind: "ring", x: z.x, y: z.y, r: s.radius, color: s.color, life: 0.4, max: 0.4 }); }
           if (!z.struck && Math.abs(d - s.radius) < CHAMP.radius && hit(s)) {
             z.struck = true;        // 감옥은 한 번만 스턴한다
             if (dead) return;
@@ -427,122 +482,417 @@
     }
 
     // ── 그리기 ──
-    function circle(x, y, r) { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); }
+    const MISSILE_Z = 90;          // 투사체가 떠서 나는 높이
+    const BODY_H = 190;            // 내 캐릭터 키
+    const PORTRAIT_Z = 150;        // 적 초상화 높이
 
-    function draw() {
-      ctx.clearRect(0, 0, ARENA.w, ARENA.h);
-      ctx.fillStyle = "#0b1528";
-      ctx.fillRect(0, 0, ARENA.w, ARENA.h);
-      ctx.strokeStyle = "rgba(154,171,201,.08)";
+    // 파편 n 개를 (x, y, z) 에서 사방으로
+    function burst(x, y, z, color, n, speed) {
+      for (let i = 0; i < n; i++) {
+        const a = Math.random() * Math.PI * 2, v = speed * (0.4 + Math.random() * 0.6);
+        parts.push({ x, y, z, vx: Math.cos(a) * v, vy: Math.sin(a) * v, vz: 150 + Math.random() * 350,
+                     life: 0.45 + Math.random() * 0.3, max: 0.75, color, size: 6 + Math.random() * 8 });
+      }
+    }
+
+    // 장판이 터짐: 빛기둥 + 퍼지는 고리 + 파편
+    function boom(x, y, r, color) {
+      fx.push({ kind: "pillar", x, y, r, color, life: 0.4, max: 0.4 });
+      fx.push({ kind: "ring", x, y, r, color, life: 0.35, max: 0.35 });
+      burst(x, y, 20, color, Math.round(r / 8), r * 1.6);
+    }
+
+    // 바닥에 누운 원(투영한 다각형). 원근 때문에 앞쪽이 크게 보인다
+    function groundCircle(x, y, r, z = 0, n = 56) {
+      ctx.beginPath();
+      for (let i = 0; i <= n; i++) {
+        const a = i / n * Math.PI * 2;
+        const p = proj(x + Math.cos(a) * r, y + Math.sin(a) * r, z);
+        if (i) ctx.lineTo(p.x, p.y); else ctx.moveTo(p.x, p.y);
+      }
+      ctx.closePath();
+    }
+
+    // 바닥에 누운 띠(레이저, 갈라짐 예고). a -> b, 반쪽 폭 r
+    function groundBand(a, b, r) {
+      const dx = b.x - a.x, dy = b.y - a.y, n = Math.hypot(dx, dy) || 1;
+      const nx = -dy / n * r, ny = dx / n * r;
+      const q = [proj(a.x + nx, a.y + ny), proj(b.x + nx, b.y + ny), proj(b.x - nx, b.y - ny), proj(a.x - nx, a.y - ny)];
+      ctx.beginPath();
+      q.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+      ctx.closePath();
+    }
+
+    function arenaPath() {
+      const q = [proj(0, 0), proj(ARENA.w, 0), proj(ARENA.w, ARENA.h), proj(0, ARENA.h)];
+      ctx.beginPath();
+      q.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+      ctx.closePath();
+    }
+
+    function glow(color, blur) { ctx.shadowColor = color; ctx.shadowBlur = blur; }
+    function noGlow() { ctx.shadowBlur = 0; }
+
+    // 그림 효과만 흘러간다(실제 시간). 게임이 끝나도 파편은 마저 떨어진다
+    function tickFx(dt) {
+      for (const f of fx) f.life -= dt;
+      fx = fx.filter(f => f.life > 0);
+      for (const p of parts) {
+        p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
+        p.vz -= 1400 * dt;
+        if (p.z < 0) { p.z = 0; p.vz *= -0.3; p.vx *= 0.6; p.vy *= 0.6; }
+        p.life -= dt;
+      }
+      parts = parts.filter(p => p.life > 0);
+      shake = Math.max(0, shake - dt);
+      hurt = Math.max(0, hurt - dt);
+    }
+
+    // ── 바닥 ──
+    function drawGround() {
+      const bg = ctx.createLinearGradient(0, 0, 0, VH);
+      bg.addColorStop(0, "#050a14");
+      bg.addColorStop(1, "#0a1424");
+      ctx.fillStyle = bg;
+      ctx.fillRect(0, 0, VW, VH);
+
+      // 협곡 바닥 느낌: 가운데가 밝고 가장자리가 어두운 청록
+      const c = proj(ARENA.w / 2, ARENA.h / 2);
+      const g = ctx.createRadialGradient(c.x, c.y, 10, c.x, c.y, VW * 0.6);
+      g.addColorStop(0, "#1b3a3f");
+      g.addColorStop(1, "#0c1a24");
+      arenaPath();
+      ctx.fillStyle = g;
+      ctx.fill();
+
+      ctx.strokeStyle = "rgba(160, 200, 190, .07)";
+      ctx.lineWidth = 1;
+      for (let x = 100; x < ARENA.w; x += 100) {
+        const a = proj(x, 0), b = proj(x, ARENA.h);
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+      }
+      for (let y = 100; y < ARENA.h; y += 100) {
+        const a = proj(0, y), b = proj(ARENA.w, y);
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+      }
+      arenaPath();
+      ctx.strokeStyle = "rgba(240, 180, 41, .35)";
       ctx.lineWidth = 2;
-      for (let x = 100; x < ARENA.w; x += 100) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, ARENA.h); ctx.stroke(); }
-      for (let y = 100; y < ARENA.h; y += 100) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(ARENA.w, y); ctx.stroke(); }
-      if (!player) return;
+      ctx.stroke();
+    }
 
-      // 바닥 장판(아래에 깔리게 먼저)
+    // ── 바닥에 깔리는 표시들(경기장 밖으로 삐져나가지 않게 잘라서) ──
+    function drawDecals() {
+      ctx.save();
+      arenaPath();
+      ctx.clip();
+
       for (const z of zones) {
         const s = z.skill;
         if (s.kind === "circle") {
-          if (z.done != null) {
-            ctx.globalAlpha = Math.max(0, z.done / 0.3);
-            ctx.fillStyle = s.color;
-            circle(z.x, z.y, s.radius); ctx.fill();
-            ctx.globalAlpha = 1;
-            continue;
-          }
-          // 테두리는 처음부터, 안쪽은 터질 때가 다가올수록 차오른다
+          if (z.done != null) continue;          // 터진 뒤는 빛기둥·고리가 대신한다
+          const p = 1 - Math.max(0, z.wait) / z.total;
+          // 안쪽이 터질 때까지 차오르고, 테두리는 처음부터 또렷하게
+          groundCircle(z.x, z.y, s.radius);
+          ctx.fillStyle = s.color + "22";
+          ctx.fill();
+          groundCircle(z.x, z.y, s.radius * p);
+          ctx.fillStyle = s.color + "55";
+          ctx.fill();
+          groundCircle(z.x, z.y, s.radius);
+          glow(s.color, 12);
           ctx.strokeStyle = s.color;
-          ctx.lineWidth = 6;
-          circle(z.x, z.y, s.radius); ctx.stroke();
-          ctx.fillStyle = s.color + "40";
-          circle(z.x, z.y, s.radius * (1 - Math.max(0, z.wait) / z.total)); ctx.fill();
+          ctx.lineWidth = 3;
+          ctx.stroke();
+          noGlow();
         } else if (s.kind === "cage") {
           const forming = z.wait > 0;
           ctx.globalAlpha = z.done != null ? Math.max(0, z.done / 0.3) : 1;
-          ctx.strokeStyle = s.color;
-          ctx.setLineDash(forming ? [18, 18] : []);
-          ctx.lineWidth = forming ? 6 : 16;
-          circle(z.x, z.y, s.radius); ctx.stroke();
-          ctx.setLineDash([]);
-          if (!forming) { ctx.fillStyle = s.color + "18"; circle(z.x, z.y, s.radius); ctx.fill(); }
+          groundCircle(z.x, z.y, s.radius);
+          if (forming) {
+            ctx.setLineDash([10, 10]);
+            ctx.strokeStyle = s.color;
+            ctx.lineWidth = 3;
+            ctx.stroke();
+            ctx.setLineDash([]);
+          } else {
+            ctx.fillStyle = s.color + "1c";
+            ctx.fill();
+          }
           ctx.globalAlpha = 1;
         }
       }
 
-      // 레이저: 시전 중에는 가는 경고선, 쏜 뒤에는 굵은 띠
+      // 레이저 경고선: 시전하는 동안 가늘게 깜빡인다
       for (const c of casters) {
         if (c.skill.kind !== "beam" || c.wind <= 0) continue;
-        ctx.strokeStyle = c.skill.color + "99";
-        ctx.lineWidth = 4;
-        ctx.beginPath(); ctx.moveTo(c.x, c.y); ctx.lineTo(c.x + c.dx * FAR, c.y + c.dy * FAR); ctx.stroke();
-      }
-      for (const f of flashes) {
-        ctx.globalAlpha = Math.max(0, f.left / 0.25);
-        ctx.strokeStyle = f.skill.color;
-        ctx.lineWidth = f.skill.radius * 2;
-        ctx.lineCap = "butt";
-        ctx.beginPath(); ctx.moveTo(f.a.x, f.a.y); ctx.lineTo(f.b.x, f.b.y); ctx.stroke();
-        ctx.globalAlpha = 1;
+        const a = { x: c.x, y: c.y }, b = { x: c.x + c.dx * FAR, y: c.y + c.dy * FAR };
+        groundBand(a, b, c.skill.radius);
+        ctx.fillStyle = c.skill.color + "18";
+        ctx.fill();
+        groundBand(a, b, 6);
+        ctx.fillStyle = c.skill.color + (Math.floor(t * 12) % 2 ? "cc" : "77");
+        ctx.fill();
       }
 
-      // 찍은 곳 표시(롤의 초록 클릭 표시)
-      if (target && state === "play") {
-        ctx.strokeStyle = "#69db7c";
-        ctx.lineWidth = 5;
-        circle(target.x, target.y, 22); ctx.stroke();
-      }
-
-      // 벨코즈 Q 가 곧 갈라지면, 갈라질 자리에서 양옆으로 가는 선을 미리 보여 준다
+      // 갈라짐 예고
       for (const m of missiles) {
         if (m.splitIn == null) continue;
         const sp = m.skill.split;
         const ahead = m.speed * Math.max(0, m.splitIn);
         const px = m.x + m.dx * ahead, py = m.y + m.dy * ahead;
-        ctx.strokeStyle = m.skill.color + "99";
-        ctx.lineWidth = 4;
-        ctx.beginPath();
-        ctx.moveTo(px - m.dy * sp.range, py + m.dx * sp.range);
-        ctx.lineTo(px + m.dy * sp.range, py - m.dx * sp.range);
+        groundBand({ x: px - m.dy * sp.range, y: py + m.dx * sp.range }, { x: px + m.dy * sp.range, y: py - m.dx * sp.range }, 5);
+        ctx.fillStyle = m.skill.color + "aa";
+        ctx.fill();
+      }
+
+      // 투사체의 바닥 그림자 = 실제 판정 원
+      for (const m of missiles) {
+        groundCircle(m.x, m.y, m.skill.radius, 0, 28);
+        ctx.fillStyle = "rgba(0, 0, 0, .35)";
+        ctx.fill();
+        ctx.strokeStyle = m.skill.color + "88";
+        ctx.lineWidth = 1.5;
         ctx.stroke();
       }
 
-      for (const m of missiles) {
-        const s = m.skill;
-        const tail = Math.min(m.flown, s.radius * 4);
-        ctx.strokeStyle = s.color + "55";
-        ctx.lineWidth = s.radius * 1.2;
-        ctx.lineCap = "round";
-        ctx.beginPath(); ctx.moveTo(m.x - m.dx * tail, m.y - m.dy * tail); ctx.lineTo(m.x, m.y); ctx.stroke();
-        ctx.fillStyle = s.color;
-        circle(m.x, m.y, s.radius); ctx.fill();
+      // 레이저가 지나간 자리
+      for (const f of flashes) {
+        const a = Math.max(0, f.left / 0.35);
+        ctx.globalCompositeOperation = "lighter";
+        groundBand(f.a, f.b, f.skill.radius * (1 + (1 - a) * 0.4));
+        ctx.fillStyle = f.skill.color + Math.round(a * 200).toString(16).padStart(2, "0");
+        glow(f.skill.color, 30);
+        ctx.fill();
+        groundBand(f.a, f.b, f.skill.radius * 0.35);
+        ctx.fillStyle = "#ffffff" + Math.round(a * 230).toString(16).padStart(2, "0");
+        ctx.fill();
+        noGlow();
+        ctx.globalCompositeOperation = "source-over";
       }
 
-      for (const c of casters) {
-        const r = 48;
-        ctx.globalAlpha = c.wind > 0 ? 1 : Math.max(0, c.fade / 0.5);
-        const img = champImage(c.skill.champ);
-        ctx.save();
-        circle(c.x, c.y, r); ctx.clip();
-        if (img.complete && img.naturalWidth) ctx.drawImage(img, c.x - r, c.y - r, r * 2, r * 2);
-        else { ctx.fillStyle = "#2b4270"; ctx.fillRect(c.x - r, c.y - r, r * 2, r * 2); }
-        ctx.restore();
-        // 시전 중이면 테두리가 차오른다
-        ctx.strokeStyle = c.skill.color;
-        ctx.lineWidth = 8;
-        const p = c.wind > 0 && c.skill.cast > 0 ? 1 - c.wind / c.skill.cast : 1;
-        ctx.beginPath(); ctx.arc(c.x, c.y, r + 6, -Math.PI / 2, -Math.PI / 2 + p * Math.PI * 2); ctx.stroke();
+      // 퍼지는 고리
+      for (const f of fx) {
+        if (f.kind !== "ring") continue;
+        const a = f.life / f.max;
+        groundCircle(f.x, f.y, f.r * (1 + (1 - a) * 0.25));
+        ctx.strokeStyle = f.color;
+        ctx.globalAlpha = a;
+        ctx.lineWidth = 2 + 6 * a;
+        glow(f.color, 16);
+        ctx.stroke();
+        noGlow();
         ctx.globalAlpha = 1;
       }
 
-      // 나
-      // 맞은 뒤 무적인 동안은 깜빡인다
+      // 내 발밑 초록 링, 적 발밑 빨간 링(롤처럼)
+      groundCircle(player.x, player.y, CHAMP.radius);
+      ctx.strokeStyle = safe > 0 ? "#ffa8a8" : "#51cf66";
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+      for (const c of casters) {
+        ctx.globalAlpha = c.wind > 0 ? 1 : Math.max(0, c.fade / 0.5);
+        groundCircle(c.x, c.y, 60, 0, 32);
+        ctx.strokeStyle = "#ff4d4f";
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
+
+      // 찍은 곳(초록 클릭 표시): 찍은 순간 크게 떴다 줄어든다
+      if (target && state === "play") {
+        groundCircle(target.x, target.y, 26, 0, 24);
+        ctx.strokeStyle = "#69db7c";
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    // ── 서 있는 것들 ──
+    function drawShadow(x, y, r) {
+      groundCircle(x, y, r, 0, 24);
+      ctx.fillStyle = "rgba(0, 0, 0, .4)";
+      ctx.fill();
+    }
+
+    function drawPlayer() {
+      // 원기둥 몸통 + 둥근 머리. 높이는 실제로 z 를 올려서 원근에 맞게 줄어든다
+      const base = proj(player.x, player.y, 0);
+      const neck = upright(player.x, player.y, BODY_H * 0.7);
+      const head = upright(player.x, player.y, BODY_H * 0.86);
+      const w = 22 * base.k, wn = 17 * neck.k, hr = 20 * head.k;
       ctx.globalAlpha = safe > 0 && Math.floor(safe * 10) % 2 ? 0.35 : 1;
-      ctx.fillStyle = dead ? "#ff6b6b" : safe > 0 ? "#ffa8a8" : "#f0b429";
-      circle(player.x, player.y, CHAMP.radius); ctx.fill();
+      const main = dead ? "#ff6b6b" : "#f0b429";
+      const body = ctx.createLinearGradient(base.x - w, 0, base.x + w, 0);
+      body.addColorStop(0, "#7a4d00");
+      body.addColorStop(0.45, main);
+      body.addColorStop(1, "#7a4d00");
+      ctx.fillStyle = body;
+      ctx.beginPath();
+      ctx.moveTo(base.x - w, base.y);
+      ctx.lineTo(neck.x - wn, neck.y);
+      ctx.ellipse(neck.x, neck.y, wn, wn * 0.4, 0, Math.PI, 0, false);
+      ctx.lineTo(base.x + w, base.y);
+      ctx.ellipse(base.x, base.y, w, w * 0.4, 0, 0, Math.PI, false);
+      ctx.closePath();
+      ctx.fill();
+      const hg = ctx.createRadialGradient(head.x - hr * 0.35, head.y - hr * 0.35, hr * 0.1, head.x, head.y, hr);
+      hg.addColorStop(0, "#fff3bf");
+      hg.addColorStop(1, main);
+      ctx.fillStyle = hg;
+      ctx.beginPath(); ctx.arc(head.x, head.y, hr, 0, Math.PI * 2); ctx.fill();
       ctx.globalAlpha = 1;
-      ctx.strokeStyle = "#0f1b33";
-      ctx.lineWidth = 6;
-      circle(player.x, player.y, CHAMP.radius - 14); ctx.stroke();
+    }
+
+    function drawCaster(c) {
+      const alpha = c.wind > 0 ? 1 : Math.max(0, c.fade / 0.5);
+      const base = proj(c.x, c.y, 0), head = upright(c.x, c.y, PORTRAIT_Z);
+      const r = 44 * head.k;
+      ctx.globalAlpha = alpha;
+      // 받침대
+      ctx.strokeStyle = "rgba(255, 77, 79, .7)";
+      ctx.lineWidth = Math.max(1, 6 * base.k);
+      ctx.beginPath(); ctx.moveTo(base.x, base.y); ctx.lineTo(head.x, head.y + r); ctx.stroke();
+      // 초상화
+      const img = champImage(c.skill.champ);
+      ctx.save();
+      ctx.beginPath(); ctx.arc(head.x, head.y, r, 0, Math.PI * 2); ctx.clip();
+      if (img.complete && img.naturalWidth) ctx.drawImage(img, head.x - r, head.y - r, r * 2, r * 2);
+      else { ctx.fillStyle = "#2b4270"; ctx.fillRect(head.x - r, head.y - r, r * 2, r * 2); }
+      ctx.restore();
+      ctx.strokeStyle = "#ff4d4f";
+      ctx.lineWidth = Math.max(1.5, 4 * head.k);
+      ctx.beginPath(); ctx.arc(head.x, head.y, r, 0, Math.PI * 2); ctx.stroke();
+      // 시전 중: 테두리가 스킬 색으로 차오르고 빛난다
+      if (c.wind > 0 && c.skill.cast > 0) {
+        const p = 1 - c.wind / c.skill.cast;
+        glow(c.skill.color, 14);
+        ctx.strokeStyle = c.skill.color;
+        ctx.lineWidth = Math.max(2, 7 * head.k);
+        ctx.beginPath(); ctx.arc(head.x, head.y, r + 5 * head.k, -Math.PI / 2, -Math.PI / 2 + p * Math.PI * 2); ctx.stroke();
+        noGlow();
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    function drawMissile(m) {
+      const s = m.skill;
+      // 꼬리: 지나온 길에 점점 옅어지는 빛 알갱이
+      ctx.globalCompositeOperation = "lighter";
+      const tail = Math.min(m.flown, s.radius * 5);
+      for (let i = 5; i >= 1; i--) {
+        const back = tail * i / 5;
+        const q = upright(m.x - m.dx * back, m.y - m.dy * back, MISSILE_Z);
+        ctx.globalAlpha = 0.28 * (1 - i / 6);
+        ctx.fillStyle = s.color;
+        ctx.beginPath(); ctx.arc(q.x, q.y, s.radius * q.k * (1 - i / 8), 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+      // 몸통: 가운데가 하얗게 빛나는 구슬
+      const p = upright(m.x, m.y, MISSILE_Z);
+      const r = s.radius * p.k * 1.15;
+      const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
+      g.addColorStop(0, "#ffffff");
+      g.addColorStop(0.35, s.color);
+      g.addColorStop(1, s.color + "00");
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.fill();
+      ctx.globalCompositeOperation = "source-over";
+    }
+
+    // 감옥 창살. 뒤쪽(먼 쪽) 과 앞쪽을 나눠 그려서 안에 선 사람이 창살 사이로 보이게 한다
+    function drawCageBars(front) {
+      for (const z of zones) {
+        if (z.skill.kind !== "cage" || z.wait > 0) continue;
+        const s = z.skill, n = 28, hgt = 170;
+        const a = z.done != null ? Math.max(0, z.done / 0.3) : 1;
+        ctx.globalAlpha = a;
+        glow(s.color, 10);
+        ctx.strokeStyle = s.color;
+        for (let i = 0; i < n; i++) {
+          const ang = i / n * Math.PI * 2;
+          if ((Math.sin(ang) > 0) !== front) continue;
+          const x = z.x + Math.cos(ang) * s.radius, y = z.y + Math.sin(ang) * s.radius;
+          const b = proj(x, y, 0), tp = proj(x, y, hgt);
+          ctx.lineWidth = Math.max(1.5, 7 * b.k);
+          ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(tp.x, tp.y); ctx.stroke();
+        }
+        // 위 테두리
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        for (let i = 0; i <= 56; i++) {
+          const ang = i / 56 * Math.PI;
+          const start = front ? 0 : Math.PI;
+          const q = proj(z.x + Math.cos(start + ang) * s.radius, z.y + Math.sin(start + ang) * s.radius, hgt);
+          if (i) ctx.lineTo(q.x, q.y); else ctx.moveTo(q.x, q.y);
+        }
+        ctx.stroke();
+        noGlow();
+        ctx.globalAlpha = 1;
+      }
+    }
+
+    function drawEffects() {
+      ctx.globalCompositeOperation = "lighter";
+      for (const f of fx) {
+        if (f.kind !== "pillar") continue;
+        const a = f.life / f.max;
+        const b = proj(f.x, f.y, 0), tp = proj(f.x, f.y, 420 * (1.2 - a));
+        const w = f.r * b.k * (0.6 + 0.4 * a);
+        const g = ctx.createLinearGradient(0, b.y, 0, tp.y);
+        g.addColorStop(0, f.color + "cc");
+        g.addColorStop(1, f.color + "00");
+        ctx.globalAlpha = a;
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.moveTo(b.x - w, b.y); ctx.lineTo(tp.x - w * 0.5, tp.y); ctx.lineTo(tp.x + w * 0.5, tp.y); ctx.lineTo(b.x + w, b.y);
+        ctx.closePath();
+        ctx.fill();
+      }
+      for (const p of parts) {
+        const q = proj(p.x, p.y, p.z);
+        ctx.globalAlpha = Math.max(0, p.life / p.max);
+        ctx.fillStyle = p.color;
+        ctx.beginPath(); ctx.arc(q.x, q.y, p.size * q.k, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = "source-over";
+    }
+
+    function draw(fdt) {
+      if (fdt) tickFx(fdt);
+      ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+      ctx.clearRect(0, 0, VW, VH);
+      ctx.save();
+      if (shake > 0) {
+        const m = 10 * shake / 0.25;
+        ctx.translate((Math.random() - 0.5) * m, (Math.random() - 0.5) * m);
+      }
+      drawGround();
+      if (player) {
+        drawDecals();
+        drawCageBars(false);
+        // 먼 것(y 가 작은 것) 부터 그려야 앞의 것이 뒤의 것을 가린다
+        const actors = [
+          ...casters.map(c => ({ y: c.y, draw: () => drawCaster(c) })),
+          ...missiles.map(m => ({ y: m.y, draw: () => drawMissile(m) })),
+          { y: player.y, draw: () => { drawShadow(player.x, player.y, 45); drawPlayer(); } },
+        ].sort((a, b) => a.y - b.y);
+        actors.forEach(a => a.draw());
+        drawCageBars(true);
+        drawEffects();
+      }
+      ctx.restore();
+
+      // 맞았을 때 화면 가장자리가 붉게
+      if (hurt > 0) {
+        const g = ctx.createRadialGradient(VW / 2, VH / 2, Math.min(VW, VH) * 0.35, VW / 2, VH / 2, Math.max(VW, VH) * 0.7);
+        g.addColorStop(0, "rgba(255, 40, 40, 0)");
+        g.addColorStop(1, "rgba(255, 40, 40, " + (0.55 * hurt / 0.4).toFixed(3) + ")");
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, VW, VH);
+      }
     }
 
     function hudUpdate() {
@@ -556,14 +906,15 @@
       raf = requestAnimationFrame(loop);
       // 다른 탭에 갔다 오면 한꺼번에 흐르지 않게 한 번에 최대 0.1초만 진행.
       // 시작 직후 첫 프레임은 시각이 시작 시각보다 조금 앞설 수 있어서 0 아래로는 안 간다
-      acc += Math.max(0, Math.min(0.1, (now - last) / 1000));
+      const fdt = Math.max(0, Math.min(0.1, (now - last) / 1000));
+      acc += fdt;
       last = now;
       while (acc >= STEP && state === "play") {
         acc -= STEP;
         step(STEP);
         if (dead) { end(); break; }
       }
-      draw();
+      draw(fdt);
       hudUpdate();
     }
 
@@ -650,21 +1001,22 @@
 
     reset();
     fit();
+    hudUpdate();
     showOver(`
       <h2>스킬샷 피하기</h2>
-      <p>사방에서 날아오는 스킬을 피해 오래 버티세요. 목숨은 ${LIVES}개, ${LIVES}번 맞으면 끝이에요. 맞은 뒤 ${SAFE_AFTER_HIT}초는 무적이에요.</p>
+      <p>사방에서 날아오는 스킬을 피해 오래 버티세요. 목숨 ${LIVES}개, 맞은 뒤 ${SAFE_AFTER_HIT}초는 무적이에요.</p>
       <ul class="dodge-keys">
-        <li><b>투사체</b> 날아오는 스킬. 쏘는 순간 방향이 정해져요. 벨코즈 Q 는 옆으로 갈라져요</li>
+        <li><b>투사체</b> 바닥 그림자가 실제 판정이에요. 옆으로 갈라지는 것도 있어요</li>
         <li><b>장판</b> 바닥 원이 다 차면 터져요</li>
-        <li><b>레이저</b> 가는 선이 보이면 곧 그 선 전체를 쳐요</li>
-        <li><b>감옥</b> 베이가 E. 테두리에 닿으면 끝, 안에 갇히면 버티기</li>
+        <li><b>레이저</b> 깜빡이는 선이 보이면 곧 그 선 전체를 쳐요</li>
+        <li><b>감옥</b> 창살에 닿으면 맞아요. 안에 갇히면 닿지 않게 버티세요</li>
       </ul>
       <ul class="dodge-keys">
         <li><b>우클릭</b> 찍은 곳으로 이동 (누른 채 끌면 계속 따라가요)</li>
         <li><b>WASD</b> 누른 쪽으로 바로 이동 (방향키도 돼요)</li>
         <li><b>휴대폰</b> 화면을 누른 곳으로 이동</li>
       </ul>
-      <p class="note">이동 속도 ${CHAMP.speed}, 판정 반지름 ${CHAMP.radius}. 스킬 ${SKILLS.length}개의 속도·폭·사거리·시전 시간은 롤 클라이언트 데이터(16.19)에서, 데이터에 없는 장판 지연 시간 몇 개는 롤 위키에서 가져왔어요.</p>
+      <p class="note">이동 속도 ${CHAMP.speed}. 스킬 수치는 롤 클라이언트 데이터 그대로예요.</p>
       <div class="dodge-actions"><button type="button" data-start>시작 <small>Space</small></button>${opts.links || ""}</div>`);
 
     function setBest(text) { hud("best").innerHTML = text || ""; }
