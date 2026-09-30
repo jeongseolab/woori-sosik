@@ -788,9 +788,11 @@ async function renderTier(riotId, fresh = false, target = view, inModal = false)
     <section class="board">
       <article class="op reveal">
         <p class="op-mark">OP</p>
-        ${data.op.image ? `<img src="${esc(data.op.image)}" alt="" width="148" height="148">` : ""}
+        ${data.op.image ? `<img src="${esc(data.op.image)}" alt="" width="148" height="148" data-open-op>` : ""}
         <p class="cname">${esc(data.op.name)}</p>
         <p class="why">${esc(data.op.reason)}</p>
+        <button type="button" class="ghost op-more" data-id="${data.op.id}" aria-expanded="false"
+                aria-label="${esc(data.op.name)} 세부 지표">세부 지표 보기</button>
       </article>
       <div>
         <div class="rows">
@@ -813,16 +815,28 @@ async function renderTier(riotId, fresh = false, target = view, inModal = false)
 
   target.querySelector(".refresh").onclick = () => renderTier(riotId, true, target, inModal);
   const slot = target.querySelector(".detail-slot");
-  target.querySelectorAll(".champ").forEach(btn => {
+  // 챔피언(OP 포함) 을 누르면 아래 칸에 세부 지표. 한 번 더 누르면 닫는다
+  const pickers = target.querySelectorAll(".champ, .op-more");
+  const opMore = target.querySelector(".op-more");
+  pickers.forEach(btn => {
     btn.onclick = () => {
       const open = btn.getAttribute("aria-expanded") === "true";
-      target.querySelectorAll(".champ").forEach(b => b.setAttribute("aria-expanded", "false"));
+      pickers.forEach(b => b.setAttribute("aria-expanded", "false"));
+      if (opMore) opMore.textContent = "세부 지표 보기";
       if (open) { slot.innerHTML = ""; return; }
       btn.setAttribute("aria-expanded", "true");
       const c = all.find(x => String(x.id) === btn.dataset.id);
       slot.innerHTML = champDetail(c, data.bracket);
+      if (btn === opMore) {
+        opMore.textContent = "세부 지표 닫기";
+        // 좁은 화면에서는 세부 지표 칸이 OP 아래 멀리 있어서 보이는 곳까지 내린다
+        slot.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      }
     };
   });
+  // OP 초상화를 눌러도 연다
+  const opPic = target.querySelector("[data-open-op]");
+  if (opPic && opMore) opPic.onclick = () => opMore.click();
 }
 
 // ── 그룹방 ──────────────────────────────────────────────
