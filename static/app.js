@@ -985,7 +985,7 @@ function rankBy(rows, key) {
   return rows.map(m => ({ m, rank: rows.findIndex(o => o[key] === m[key]) + 1 }));
 }
 
-// 주간 순위표 한 장. detail: 이름 밑에 작게 적을 내용
+// 순위표 한 장. detail: 이름 밑에 작게 적을 내용
 function weekBoard(title, icon, ranked, show, detail, me, colorOf, empty) {
   return `
     <section class="award">
@@ -1008,18 +1008,15 @@ function weeklyView(data, colorOf, waiting) {
   const pctW = k => Math.round(w[k] * 100) + "%";
   const total = rankBy(data.members, "score");
   const short = data.members.filter(m => m.score == null && m.games > 0);
-  const dodge = rankBy(data.members.filter(m => m.dodge_best > 0), "dodge_best");
   const end = new Date(new Date(data.until).getTime() - 1);
 
   return `
     <h2 class="sub-h">이번 주 <small>${shortDate(data.since)}(월) ~ ${shortDate(end)}(일) · 한국 시각</small></h2>
     ${waiting ? `<p class="note">아직 ${waiting}명의 전적을 불러오는 중이에요. 다 오면 순위를 다시 매겨요.</p>` : ""}
-    <div class="awards two">
+    <div class="awards one">
       ${weekBoard("종합 순위", "👑", total, m => num(m.score) + "점",
         m => `플레이 ${m.play ?? "-"} · 승률 ${pct(m.win_rate)} · KDA ${num(m.kda, 2)} · ${m.games}판`,
         data.me, colorOf, "이번 주 " + data.min_games + "판 이상 한 사람이 없어요")}
-      ${weekBoard("스킬샷 피하기", "💨", dodge, m => DodgeGame.fmt(m.dodge_best / 1000), null,
-        data.me, colorOf, "이번 주 기록이 아직 없어요")}
     </div>
     ${short.length ? `<p class="note">${data.min_games}판이 안 돼서 종합 순위에서 빠진 사람: ${short.map(m => esc(m.game_name) + " " + m.games + "판").join(", ")}</p>` : ""}
     <p class="note">종합 점수 = 플레이 점수 ${pctW("play")} + 승률 ${pctW("win_rate")} + KDA ${pctW("kda")}.

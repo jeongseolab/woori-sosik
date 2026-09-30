@@ -1,4 +1,4 @@
-"""그룹방 순위: 스킬샷 피하기 기록과 주간 랭킹.
+"""그룹방 순위: 스킬샷 피하기 기록과 주간 랭킹(종합 순위).
 
 둘 다 OP.GG 를 부르지 않는다. 이미 쌓아 둔 것(dodge_runs, match_rows) 만 읽어서 빠르다.
 
@@ -174,11 +174,8 @@ def _week_score(rows, play, win_rate, kda):
 
 
 def weekly(accounts):
-    """이번 주 방 사람들의 성적. 순위를 매기는 건 화면이 한다(항목마다 기준이 달라서)."""
+    """이번 주 방 사람들의 성적과 종합 점수. 줄 세우기는 화면이 한다."""
     since = week_start()
     lines = [_week_line(a, since) for a in accounts]
-    dodge = _dodge_stats([a["id"] for a in accounts], since.timestamp())
-    for line in lines:
-        line["dodge_best"] = dodge.get(line["account_id"], (None, 0))[0]
     return {"since": since.isoformat(), "until": (since + timedelta(days=7)).isoformat(),
             "min_games": WEEK_MIN_GAMES, "weights": WEEK_WEIGHTS, "members": lines}
