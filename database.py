@@ -305,6 +305,10 @@ def init_db():
         )
     """)
 
+    # ver: 게임 규칙 버전(static/dodge.js 의 VERSION). 예전 판은 비어 있다
+    if "ver" not in _columns(conn, "dodge_runs"):
+        conn.execute("ALTER TABLE dodge_runs ADD COLUMN ver INTEGER")
+
     # 예전에 만든 표에는 없는 칸을 채워 넣는다
     columns = _columns(conn, "match_rows")
     for name, kind in MATCH_EXTRA_COLUMNS.items():

@@ -441,6 +441,7 @@ class DodgeEnd(BaseModel):
     run: str
     ms: int
     dodged: int = 0
+    ver: int = 1      # 게임 규칙 버전. 예전 화면은 보내지 않는다(= 1)
 
 
 @app.post("/api/dodge/start")
@@ -454,7 +455,7 @@ def dodge_start(authorization: str = Header(None)):
 def dodge_finish(body: DodgeEnd, authorization: str = Header(None)):
     user = _need_login(authorization)
     try:
-        return ranking.finish_run(user["id"], body.run, body.ms, body.dodged)
+        return ranking.finish_run(user["id"], body.run, body.ms, body.dodged, body.ver)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
