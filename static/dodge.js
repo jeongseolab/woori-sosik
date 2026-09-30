@@ -19,7 +19,7 @@
 
 (function () {
   // 게임 규칙이 바뀌면 올린다. 서버는 같은 버전의 기록끼리만 순위를 매긴다
-  const VERSION = 3;
+  const VERSION = 4;
 
   const ARENA = { w: 1400, h: 900 };
   const CHAMP = { radius: 65, speed: 345 };
@@ -27,6 +27,9 @@
   const FAR = 4000;            // 경기장보다 긴 사거리(레이저 등)
   const LIVES = 3;
   const SAFE_AFTER_HIT = 1.0;
+  // 바닥 표시를 보고 움직이기 시작하기까지 걸리는 시간(사람의 반응 시간).
+  // 장판은 표시가 뜬 뒤 이만큼 늦게 움직여도 빠져나갈 수 있는 자리로 찍는다
+  const REACT = 0.25;
 
   // kind: line(투사체) circle(지연 장판) beam(지연 레이저) cage(감옥)
   // from: 몇 초부터 나오는지. rare: 가끔만
@@ -262,14 +265,37 @@
       }
     }
 
+    // 장판을 찍을 자리. 수치(반지름·지연 시간)는 그대로 두고 찍는 자리만 사람처럼 한다.
+    // 정중앙에 찍으면 브랜드 W(반지름 240, 0.627초) 같은 건 표시를 보자마자 달려도 못 나간다
+    // (305 유닛을 가야 하는데 0.627초에 216 유닛). 그래서 표시가 뜬 뒤 REACT 초 늦게 움직여도
+    // 딱 빠져나갈 만큼만 내 자리에서 비껴 찍는다. 원은 여전히 내 몸에 걸쳐서 움직이지 않으면 맞는다
+    function fairSpot(aim, s, delay, c) {
+      const need = s.radius + CHAMP.radius - CHAMP.speed * Math.max(0, delay - REACT);
+      const d = dist(aim, player);
+      if (d >= need) return aim;
+      let ux, uy;
+      if (d > 1) { ux = (aim.x - player.x) / d; uy = (aim.y - player.y) / d; }
+      else { const a = Math.random() * Math.PI * 2; ux = Math.cos(a); uy = Math.sin(a); }
+      const spot = { x: player.x + ux * need, y: player.y + uy * need };
+      // 사거리 밖이면 쏘는 사람 쪽으로 당긴다(롤도 사거리 끝으로 당겨진다)
+      const r = dist(spot, c);
+      if (r > s.range) {
+        spot.x = c.x + (spot.x - c.x) / r * s.range;
+        spot.y = c.y + (spot.y - c.y) / r * s.range;
+      }
+      return spot;
+    }
+
     // 시전이 끝난 순간
     function release(c) {
       const s = c.skill;
       if (s.kind === "line") {
         missiles.push({ skill: s, x: c.x, y: c.y, dx: c.dx, dy: c.dy, speed: s.speed, left: s.range, flown: 0 });
       } else if (s.kind === "circle") {
-        const delay = s.delayFar ? s.delay + (s.delayFar - s.delay) * Math.min(1, dist(c, c.aim) / s.range) : s.delay;
-        zones.push({ skill: s, x: c.aim.x, y: c.aim.y, wait: delay, total: delay });
+        // 벨코즈 E 처럼 멀리 던질수록 늦는 건, 가장 짧은 지연으로 자리를 잡고(더 넉넉한 쪽) 지연은 그 자리로 다시 잰다
+        const at = fairSpot(c.aim, s, s.delay, c);
+        const delay = s.delayFar ? s.delay + (s.delayFar - s.delay) * Math.min(1, dist(c, at) / s.range) : s.delay;
+        zones.push({ skill: s, x: at.x, y: at.y, wait: delay, total: delay });
       } else if (s.kind === "cage") {
         zones.push({ skill: s, x: c.aim.x, y: c.aim.y, wait: s.delay, total: s.delay, up: 0 });
       } else if (s.kind === "beam") {
