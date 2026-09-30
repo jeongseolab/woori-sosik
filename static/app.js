@@ -39,6 +39,8 @@ async function api(path, options = {}) {
   if (res.status === 401 && !path.startsWith("/api/login")) {
     setToken(null);
     me = null;
+    forgetAll();
+    warmed = false;
     location.hash = "#/login";
   }
   if (!res.ok) {
@@ -50,6 +52,63 @@ async function api(path, options = {}) {
     throw err;
   }
   return data;
+}
+
+// ── 한 번 받은 것은 기억해 둔다 ─────────────────────────
+// 화면을 옮길 때마다 다시 받지 않는다. 새로 받는 건 새로고침(또는 "최신 전적으로" 버튼) 때뿐.
+// 받는 중인 것도 기억해서, 그 화면을 떠났다 돌아와도 같은 요청을 이어서 기다린다.
+const memo = new Map();   // 주소 -> Promise
+const memoDone = new Map();   // 주소 -> 다 받은 값. 있으면 로딩 화면 없이 바로 그린다
+
+// fresh 면 OP.GG 에서 새로 받게 하고, 받은 것으로 기억을 바꾼다
+function load(path, fresh = false) {
+  if (!fresh && memo.has(path)) return memo.get(path);
+  const url = fresh ? path + (path.includes("?") ? "&" : "?") + "fresh=1" : path;
+  const p = api(url);
+  memo.set(path, p);
+  p.then(d => { if (memo.get(path) === p) memoDone.set(path, d); },
+         () => { if (memo.get(path) === p) memo.delete(path); });   // 실패는 기억하지 않는다
+  return p;
+}
+
+// 이미 다 받은 값(없으면 undefined)
+function known(path) { return memoDone.get(path); }
+
+// 바뀐 것을 잊는다. test 에 맞는 주소를 모두 지운다
+function forget(test) {
+  for (const k of [...memo.keys()]) {
+    if (typeof test === "string" ? k === test : test.test(k)) { memo.delete(k); memoDone.delete(k); }
+  }
+}
+
+function forgetAll() { memo.clear(); memoDone.clear(); }
+
+// 서버가 돌려준 새 값을 그대로 기억한다(다시 물어볼 필요 없게)
+function remember(path, data) {
+  const p = Promise.resolve(data);
+  memo.set(path, p);
+  memoDone.set(path, data);
+}
+
+// 로그인하면 자주 보는 것들을 뒤에서 미리 받아 둔다.
+// 내 티어표 -> 방 목록 -> 방마다 사람 카드 -> 그 방의 주간 랭킹·무빙 순위
+let warmed = false;
+async function warmUp() {
+  if (warmed) return;
+  warmed = true;
+  const quiet = p => p.catch(() => null);
+  load("/api/dodge/me").catch(() => {});
+  await quiet(load("/api/tierlist"));
+  const rooms = await quiet(loadRooms());
+  for (const r of rooms || []) {
+    const room = await quiet(load("/api/rooms/" + r.id + "?lite=1"));
+    if (!room) continue;
+    // 방 하나의 카드는 한꺼번에(방 화면과 같다). 다 오면 새 판이 쌓였으니 주간 랭킹을 받는다
+    await Promise.all(room.members.map(m => quiet(load("/api/rooms/" + r.id + "/member/" + m.account_id))));
+    load("/api/rooms/" + r.id + "/weekly").catch(() => {});
+    load("/api/rooms/" + r.id + "/dodge").catch(() => {});
+    load("/api/rooms/" + r.id + "/members").catch(() => {});   // 듀오 궁합의 친구 고르기
+  }
 }
 
 function toast(text) {
@@ -260,6 +319,8 @@ async function route() {
     return renderGate();
   }
   showTop(true, page);
+  // 지금 화면이 먼저 받게 한 박자 늦게 시작한다
+  setTimeout(warmUp, 300);
 
   const target = arg ? decodeURIComponent(arg) : "";
   // 다른 화면으로 가면 돌던 게임은 멈춘다
@@ -285,6 +346,9 @@ document.getElementById("logout").onclick = async () => {
   try { await api("/api/logout", { method: "POST" }); } catch {}
   setToken(null);
   me = null;
+  // 다른 계정으로 들어올 수 있으니 받아 둔 것을 모두 버린다
+  forgetAll();
+  warmed = false;
   location.hash = "#/login";
   route();
 };
@@ -412,6 +476,8 @@ function renderGate(mode = "login") {
       return;
     }
     const riot_id = name + "#" + tag;
+    forgetAll();
+    warmed = false;
     const button = form.querySelector("button[type=submit]");
     button.disabled = true;
     button.textContent = signup ? "계정 확인 중…" : "로그인 중…";
@@ -453,7 +519,7 @@ function renderGate(mode = "login") {
         body: JSON.stringify({ riot_id, password, confirm_rename: true }) });
       setToken(data.token);
       // 티어표를 미리 받아 두면 창이 닫히자마자 바로 보인다. 실패해도 티어표 화면이 다시 부른다
-      await api("/api/tierlist").catch(() => {});
+      await load("/api/tierlist").catch(() => {});
       await atLeast;
     } catch (ex) {
       close();
@@ -588,13 +654,12 @@ function champDetail(c, bracket) {
 
 async function renderTier(riotId, fresh = false, target = view, inModal = false) {
   const mine = !riotId || riotId.toLowerCase().replace(/\s/g, "") === me.riot_id.toLowerCase().replace(/\s/g, "");
-  loading("OP.GG 에서 전적과 챔피언 통계를 모으는 중이에요. 처음 만드는 티어표는 조금 걸려요.", target);
+  const path = mine ? "/api/tierlist" : "/api/tierlist?" + new URLSearchParams({ riot_id: riotId });
+  // 받아 둔 게 있으면 로딩 화면 없이 바로 그린다
+  if (fresh || !known(path)) loading("OP.GG 에서 전적과 챔피언 통계를 모으는 중이에요. 처음 만드는 티어표는 조금 걸려요.", target);
   let data;
   try {
-    const q = new URLSearchParams();
-    if (!mine) q.set("riot_id", riotId);
-    if (fresh) q.set("fresh", "1");
-    data = await api("/api/tierlist?" + q);
+    data = await load(path, fresh);
   } catch (ex) {
     if (mine && ex.data && ex.data.renamed) return renamedNotice(target);
     return failed(ex.message, () => renderTier(riotId, fresh, target, inModal), target);
@@ -670,15 +735,20 @@ async function renderTier(riotId, fresh = false, target = view, inModal = false)
 // ── 그룹방 ──────────────────────────────────────────────
 
 async function loadRooms() {
-  lastRooms = (await api("/api/rooms")).rooms;
+  lastRooms = (await load("/api/rooms")).rooms;
   return lastRooms;
 }
+
+// 방 목록이 바뀌었을 때(만들기·들어가기·나가기)
+function forgetRooms() { forget("/api/rooms"); }
 
 // #/rooms/3/dodge 처럼 방 번호 뒤에 탭을 붙이면 그 탭을 바로 연다
 const ROOM_TABS = ["board", "stats", "weekly", "dodge"];
 
 async function renderRooms(target) {
   let [roomId = "", tab] = (target || "").split("/");
+  // #/rooms/dodge 처럼 방 번호 없이 탭만 오면, 마지막으로 본 방(없으면 첫 방)의 그 탭
+  if (ROOM_TABS.includes(roomId)) { tab = roomId; roomId = lastRoomId; }
   if (ROOM_TABS.includes(tab)) roomTab = tab;
   let rooms;
   try { rooms = await loadRooms(); }
@@ -714,6 +784,7 @@ async function renderRooms(target) {
     e.preventDefault();
     try {
       const r = await api("/api/rooms", { method: "POST", body: JSON.stringify({ name: e.target.name.value }) });
+      forgetRooms();
       toast("방을 만들었어요. 코드 " + r.code + " 를 친구에게 알려 주세요");
       location.hash = "#/rooms/" + r.id;
     } catch (ex) { toast(ex.message); }
@@ -722,6 +793,9 @@ async function renderRooms(target) {
     e.preventDefault();
     try {
       const r = await api("/api/rooms/join", { method: "POST", body: JSON.stringify({ code: e.target.code.value }) });
+      forgetRooms();
+      // 들어간 방은 사람이 늘었으니 그 방에서 받아 둔 것도 버린다
+      forget(new RegExp("^/api/rooms/" + r.id + "[/?]"));
       toast(r.name + " 방에 들어갔어요");
       location.hash = "#/rooms/" + r.id;
     } catch (ex) { toast(ex.message); }
@@ -844,36 +918,47 @@ function pendingCard(m, color) {
 }
 
 let roomTab = "board";
+// 마지막으로 본 방. 연습장의 "무빙 순위" 버튼이 이 방으로 간다
+let lastRoomId = "";
 // 방을 옮기거나 새로 부르면 앞서 오던 대답은 버린다
 let roomLoadSeq = 0;
 
 async function renderRoom(roomId, fresh = false) {
   const seq = ++roomLoadSeq;
   const body = document.getElementById("room-body");
-  body.innerHTML = funLoader("방 사람들을 부르는 중이에요.");
+  const base = "/api/rooms/" + roomId;
+  lastRoomId = String(roomId);
+  // "모두 최신 전적으로" 면 이 방에서 받아 둔 것을 버리고 새로 받는다(사람이 늘었을 수도 있다)
+  if (fresh) forget(new RegExp("^" + base + "[/?]"));
+  if (!known(base + "?lite=1")) body.innerHTML = funLoader("방 사람들을 부르는 중이에요.");
   let room;
-  try { room = await api("/api/rooms/" + roomId + "?lite=1"); }
+  try { room = await load(base + "?lite=1"); }
   catch (ex) {
     body.innerHTML = `<div class="empty-state"><strong>${esc(ex.message)}</strong></div>`;
     return;
   }
   if (seq !== roomLoadSeq) return;
 
-  // 색은 들어온 순서(서버가 주는 순서)로 고정
-  const members = room.members.map((m, i) => ({ m: { ...m, pending: true }, color: memberColor(i) }));
+  // 색은 들어온 순서(서버가 주는 순서)로 고정. 받아 둔 카드는 바로 채운다
+  const cardPath = m => base + "/member/" + m.account_id;
+  const members = room.members.map((m, i) => ({ m: known(cardPath(m)) || { ...m, pending: true }, color: memberColor(i) }));
   const colorOf = id => (members.find(s => s.m.account_id === id) || {}).color || memberColor(99);
-  let arrived = 0;
+  let arrived = members.filter(s => !s.m.pending).length;
 
-  // 주간 랭킹·스킬샷 순위는 DB 만 읽어서 빠르다. 그 탭을 처음 열 때 받는다.
-  // 주간 랭킹은 카드가 다 오면(= 모두의 새 판이 쌓이면) 한 번 더 받는다
-  const extra = { weekly: null, dodge: null };
-  const loadingExtra = {};
-  function loadExtra(kind) {
-    if (loadingExtra[kind]) return;
+  // 주간 랭킹·무빙 순위는 DB 만 읽어서 빠르다. 받아 둔 게 없으면 그 탭을 처음 열 때 받는다.
+  // 주간 랭킹은 카드를 새로 받으면(= 모두의 새 판이 쌓이면) 한 번 더 받는다
+  const extra = { weekly: known(base + "/weekly") || null, dodge: known(base + "/dodge") || null };
+  // again 이면 받는 중이어도 새로 받는다. 늦게 온 옛 대답이 새 대답을 덮지 않게 순번을 붙인다
+  const loadingExtra = {}, extraTurn = {};
+  function loadExtra(kind, again = false) {
+    if (loadingExtra[kind] && !again) return;
     loadingExtra[kind] = true;
-    api("/api/rooms/" + roomId + "/" + kind)
-      .then(d => { extra[kind] = d; }, ex => { extra[kind] = { error: ex.message }; })
+    const turn = extraTurn[kind] = (extraTurn[kind] || 0) + 1;
+    load(base + "/" + kind)
+      .then(d => { if (turn === extraTurn[kind]) extra[kind] = d; },
+            ex => { if (turn === extraTurn[kind]) extra[kind] = { error: ex.message }; })
       .finally(() => {
+        if (turn !== extraTurn[kind]) return;
         loadingExtra[kind] = false;
         if (seq === roomLoadSeq && body.isConnected) draw();
       });
@@ -920,7 +1005,7 @@ async function renderRoom(roomId, fresh = false) {
         <button type="button" role="tab" data-tab="board" aria-selected="${roomTab === "board"}">OP · 티어표</button>
         <button type="button" role="tab" data-tab="stats" aria-selected="${roomTab === "stats"}">지표 비교</button>
         <button type="button" role="tab" data-tab="weekly" aria-selected="${roomTab === "weekly"}">주간 랭킹</button>
-        <button type="button" role="tab" data-tab="dodge" aria-selected="${roomTab === "dodge"}">스킬샷 순위</button>
+        <button type="button" role="tab" data-tab="dodge" aria-selected="${roomTab === "dodge"}">무빙 순위</button>
       </div>
       ${tabBody(ok, waiting)}
       ${broken.length ? `<p class="note">전적을 못 불러온 사람: ${broken.map(({ m }) => esc(m.riot_id) + " (" + esc(m.error) + ")").join(", ")}</p>` : ""}
@@ -950,6 +1035,9 @@ async function renderRoom(roomId, fresh = false) {
       if (!confirm(room.name + " 방에서 나갈까요?")) return;
       try {
         await api("/api/rooms/" + roomId + "/me", { method: "DELETE" });
+        forgetRooms();
+        forget(new RegExp("^" + base + "[/?]"));
+        if (lastRoomId === String(roomId)) lastRoomId = "";
         toast("방에서 나왔어요");
         location.hash = "#/rooms";
         renderRooms("");
@@ -958,15 +1046,23 @@ async function renderRoom(roomId, fresh = false) {
   }
   draw();
 
-  // 사람마다 따로 받아서, 오는 대로 카드를 채운다
-  members.forEach(slot => {
-    api("/api/rooms/" + roomId + "/member/" + slot.m.account_id + (fresh ? "?fresh=1" : ""))
+  // 아직 없는 카드만 사람마다 따로 받아서, 오는 대로 채운다.
+  // 다른 화면으로 가도 받는 건 계속된다(load 가 기억해 둔다)
+  const missing = members.filter(s => s.m.pending);
+  let left = missing.length;
+  missing.forEach(slot => {
+    load(cardPath(slot.m), fresh)
       .then(card => { slot.m = card; },
             ex => { slot.m = { ...slot.m, pending: false, error: ex.message }; })
       .finally(() => {
         arrived += 1;
-        // 모두 왔으면 새로 쌓인 판으로 주간 랭킹을 다시 받는다
-        if (arrived === members.length && extra.weekly) { extra.weekly = null; if (roomTab === "weekly") loadExtra("weekly"); }
+        left -= 1;
+        // 새로 받은 카드가 다 왔으면 새로 쌓인 판으로 주간 랭킹을 다시 받는다
+        if (left === 0) {
+          forget(base + "/weekly");
+          if (roomTab === "weekly" && seq === roomLoadSeq) loadExtra("weekly", true);
+          else { extra.weekly = null; extraTurn.weekly = (extraTurn.weekly || 0) + 1; loadingExtra.weekly = false; }
+        }
         if (seq === roomLoadSeq && body.isConnected) draw();
       });
   });
@@ -1024,14 +1120,14 @@ function weeklyView(data, colorOf, waiting) {
       협곡 판(솔로·자유·일반) 중 Tier.gg 에서 한 번이라도 불러온 판만 세요. 방을 열 때마다 모두의 새 판이 쌓여요.</p>`;
 }
 
-// ── 스킬샷 순위 (그룹방) ────────────────────────────────
+// ── 무빙 순위 (그룹방) ──────────────────────────────────
 
 function dodgeBoard(data, colorOf, roomId, challenge = true) {
   const fmt = ms => ms == null ? "-" : DodgeGame.fmt(ms / 1000);
   const played = data.members.filter(m => m.best != null);
   return `
     <div class="dodge-board-head">
-      <h2 class="sub-h">스킬샷 피하기 순위 <small>최고 기록 순</small></h2>
+      <h2 class="sub-h">무빙 순위 <small>스킬샷 피하기 최고 기록 순</small></h2>
       ${challenge ? `<a class="btn" href="#/dodge/${roomId}">도전하기</a>` : ""}
     </div>
     ${played.length ? "" : `<p class="note">아직 아무도 기록이 없어요. 첫 기록을 세워 보세요.</p>`}
@@ -1058,13 +1154,16 @@ function stopDodge() {
 }
 
 function renderDodge(roomArg) {
-  const roomId = /^\d+$/.test(roomArg || "") ? roomArg : "";
-  const boardHref = roomId ? "#/rooms/" + roomId + "/dodge" : "#/rooms";
+  // 어느 방의 순위를 보여 줄지: 주소에 온 방 -> 마지막으로 본 방 -> 내 첫 방
+  const roomId = /^\d+$/.test(roomArg || "") ? roomArg
+    : lastRoomId || (lastRooms[0] ? String(lastRooms[0].id) : "");
+  // 누르면 그룹방의 무빙 순위 탭으로 바로 간다
+  const boardHref = roomId ? "#/rooms/" + roomId + "/dodge" : "#/rooms/dodge";
   view.innerHTML = `
     <section class="dodge">
       <div class="dodge-head">
         <h1>스킬샷 피하기</h1>
-        <a class="btn ghost" href="${boardHref}">${roomId ? "방 순위표" : "그룹방 순위표"}</a>
+        <a class="btn ghost" href="${boardHref}">무빙 순위</a>
       </div>
       <div id="dodge-root"></div>
       ${roomId ? `<div id="dodge-mini" class="dodge-mini"></div>` : ""}
@@ -1076,7 +1175,7 @@ function renderDodge(roomArg) {
 
   let runPromise = null;
   dodgeGame = DodgeGame.mount(document.getElementById("dodge-root"), {
-    links: `<a class="btn ghost" href="${boardHref}">순위표 보기</a>`,
+    links: `<a class="btn ghost" href="${boardHref}">무빙 순위 보기</a>`,
     onStart() {
       runPromise = api("/api/dodge/start", { method: "POST" }).then(r => r.run);
       runPromise.catch(() => {});
@@ -1089,6 +1188,9 @@ function renderDodge(roomArg) {
       } catch (ex) {
         return `<p class="note">기록을 저장하지 못했어요 (${esc(ex.message)})</p>`;
       }
+      // 기록이 바뀌었으니 받아 둔 내 기록과 방 순위를 새것으로
+      remember("/api/dodge/me", r);
+      forget(/^\/api\/rooms\/\d+\/dodge$/);
       showBest(r);
       if (roomId) drawMini();
       if (!r.saved) return `<p class="note">1초 넘게 버틴 판부터 기록해요</p>`;
@@ -1098,14 +1200,14 @@ function renderDodge(roomArg) {
     },
   });
 
-  api("/api/dodge/me").then(showBest, () => {});
+  load("/api/dodge/me").then(showBest, () => {});
 
   // 방에서 왔으면 그 방 순위를 게임 아래에 작게
   async function drawMini() {
     const box = document.getElementById("dodge-mini");
     if (!box) return;
     try {
-      const d = await api("/api/rooms/" + roomId + "/dodge");
+      const d = await load("/api/rooms/" + roomId + "/dodge");
       // 색은 방 화면과 같게, 들어온 순서(slot)로
       const colorOf = id => memberColor(d.members.find(m => m.account_id === id).slot);
       box.innerHTML = dodgeBoard(d, colorOf, roomId, false);
@@ -1158,7 +1260,7 @@ async function fillPicks() {
     const seen = new Set([me.riot_id]);
     const names = [];
     for (const r of rooms.slice(0, 3)) {
-      const { members } = await api("/api/rooms/" + r.id + "/members");
+      const { members } = await load("/api/rooms/" + r.id + "/members");
       for (const id of members) {
         if (!seen.has(id)) { seen.add(id); names.push(id); }
       }
@@ -1172,10 +1274,11 @@ async function fillPicks() {
 
 async function drawDuo(partner, fresh) {
   const body = document.getElementById("duo-body");
-  body.innerHTML = funLoader("두 사람의 최근 경기를 맞춰 보는 중이에요.");
+  const path = "/api/duo?" + new URLSearchParams({ partner });
+  if (fresh || !known(path)) body.innerHTML = funLoader("두 사람의 최근 경기를 맞춰 보는 중이에요.");
   let d;
   try {
-    d = await api("/api/duo?" + new URLSearchParams({ partner, ...(fresh ? { fresh: "1" } : {}) }));
+    d = await load(path, fresh);
   } catch (ex) {
     body.innerHTML = `<div class="empty-state"><strong>${esc(ex.message)}</strong></div>`;
     return;
