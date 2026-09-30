@@ -719,6 +719,7 @@ table.dodge-table { min-width: 0; }
 .dodge-head h1 { margin: 0; }
 .dodge-hud { display: flex; flex-wrap: wrap; gap: 6px 20px; margin-bottom: 8px; font-size: 14px; color: var(--muted); }
 .dodge-hud b { color: var(--text); font-variant-numeric: tabular-nums; }
+.dodge-hud .dodge-lives { color: var(--lose); letter-spacing: 2px; }
 .dodge-hud [data-hud="best"] { margin-left: auto; }
 .dodge-stage { position: relative; border-radius: 12px; overflow: hidden; border: 1px solid var(--line); background: #0b1528; }
 .dodge-stage canvas { display: block; margin: 0 auto; touch-action: none; cursor: crosshair; outline: none; }

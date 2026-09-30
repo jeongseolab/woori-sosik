@@ -3,6 +3,8 @@
 // 거리와 속도는 롤의 게임 단위(유닛) 그대로 쓰고, 그릴 때만 화면 크기에 맞춰 줄인다.
 //   - 내 챔피언: 판정 반지름 65(대부분의 챔피언), 이동 속도 345
 //   - 맞았는지: 스킬 판정(투사체 원, 장판 원, 레이저 띠, 감옥 테두리)과 내 판정 원이 겹치면 맞은 것
+//   - 목숨 LIVES 개. 다 잃으면 끝. 맞은 뒤 SAFE_AFTER_HIT 초는 무적(스킬 두 개에 한꺼번에 목숨 둘을 잃지 않게).
+//     스킬 하나는 한 번만 때린다(맞힌 투사체는 사라지고, 감옥은 한 번 스턴하면 끝)
 // 빠른 투사체(초당 3300)가 한 프레임에 나를 뛰어넘지 않게, 1/240초씩 잘게 나눠 움직인다.
 //
 // 스킬 값의 출처(SKILLS 표의 src):
@@ -17,12 +19,14 @@
 
 (function () {
   // 게임 규칙이 바뀌면 올린다. 서버는 같은 버전의 기록끼리만 순위를 매긴다
-  const VERSION = 2;
+  const VERSION = 3;
 
   const ARENA = { w: 1400, h: 900 };
   const CHAMP = { radius: 65, speed: 345 };
   const STEP = 1 / 240;
   const FAR = 4000;            // 경기장보다 긴 사거리(레이저 등)
+  const LIVES = 3;
+  const SAFE_AFTER_HIT = 1.0;
 
   // kind: line(투사체) circle(지연 장판) beam(지연 레이저) cage(감옥)
   // from: 몇 초부터 나오는지. rare: 가끔만
@@ -34,7 +38,10 @@
     { kind: "line", name: "니달리 Q", champ: "Nidalee", cast: 0.25, speed: 1300, radius: 40, range: 1500, color: "#8ce99a", from: 8 },
     { kind: "line", name: "브랜드 Q", champ: "Brand", cast: 0.25, speed: 1600, radius: 60, range: 1100, color: "#ff8787", from: 8 },
     { kind: "line", name: "아리 E", champ: "Ahri", cast: 0.25, speed: 1550, radius: 60, range: 1000, color: "#faa2c1", from: 15 },
-    { kind: "line", name: "벨코즈 Q", champ: "Velkoz", cast: 0.25, speed: 1300, radius: 50, range: 1100, color: "#d0bfff", from: 15 },
+    // 벨코즈 Q 는 내 옆을 지날 때(벨코즈가 다시 눌러서) 또는 사거리 끝에서 양옆 직각으로 갈라진다.
+    // 갈라지기 telegraph 초 전부터 갈라질 방향이 보인다(SplitTelegraphTime). 갈라진 것은 VelkozQMissileSplit
+    { kind: "line", name: "벨코즈 Q", champ: "Velkoz", cast: 0.25, speed: 1300, radius: 50, range: 1100, color: "#d0bfff", from: 15,
+      split: { speed: 2100, radius: 45, range: 1100, telegraph: 0.25 } },
     { kind: "line", name: "제라스 E", champ: "Xerath", cast: 0.25, speed: 1400, radius: 60, range: 1125, color: "#91a7ff", from: 15 },
     { kind: "line", name: "이즈리얼 Q", champ: "Ezreal", cast: 0.25, speed: 2000, radius: 60, range: 1200, color: "#74c0fc", from: 25 },
     { kind: "line", name: "레오나 E", champ: "Leona", cast: 0.25, speed: 2000, radius: 70, range: 900, color: "#ffd43b", from: 25 },
@@ -99,6 +106,7 @@
     root.innerHTML = `
       <div class="dodge-hud">
         <span>버틴 시간 <b data-hud="time">0.00초</b></span>
+        <span>목숨 <b data-hud="lives" class="dodge-lives"></b></span>
         <span>피한 스킬 <b data-hud="dodged">0</b></span>
         <span data-hud="best"></span>
       </div>
@@ -114,7 +122,8 @@
 
     let state = "ready";       // ready | play | over
     let t = 0, dodged = 0, acc = 0, last = 0, nextCast = 0, raf = 0;
-    let player, target, casters, missiles, zones, flashes, hitBy;
+    let player, target, casters, missiles, zones, flashes;
+    let lives, hits, safe, lastHit, dead;
     const keys = new Set();
     let holding = false;
     let scale = 1;
@@ -126,7 +135,11 @@
       missiles = [];     // 날아가는 투사체
       zones = [];        // 바닥 장판·감옥
       flashes = [];      // 레이저가 지나간 자리(그림만)
-      hitBy = null;
+      lives = LIVES;
+      hits = [];         // 맞은 스킬 이름(끝 화면에 보여 준다)
+      safe = 0;          // 남은 무적 시간
+      lastHit = null;
+      dead = false;
       t = 0; dodged = 0; acc = 0;
       nextCast = 0.8;          // 시작하고 잠깐은 숨 돌릴 틈
     }
@@ -229,6 +242,26 @@
       if (c.wind <= 0) release(c);
     }
 
+    // 맞았다. 무적 중이면 없던 일로(false). 목숨을 다 잃으면 끝
+    function hit(s) {
+      if (safe > 0 || dead) return false;
+      lives -= 1;
+      hits.push(s.name);
+      lastHit = s;
+      safe = SAFE_AFTER_HIT;
+      if (lives <= 0) dead = true;
+      return true;
+    }
+
+    // 벨코즈 Q 가 갈라진다: 그 자리에서 양옆 직각으로 하나씩
+    function splitMissile(m) {
+      const sp = m.skill.split;
+      const piece = { ...m.skill, name: m.skill.name + " (갈라짐)", speed: sp.speed, radius: sp.radius, range: sp.range, split: null };
+      for (const side of [1, -1]) {
+        missiles.push({ skill: piece, x: m.x, y: m.y, dx: -m.dy * side, dy: m.dx * side, speed: sp.speed, left: sp.range, flown: 0 });
+      }
+    }
+
     // 시전이 끝난 순간
     function release(c) {
       const s = c.skill;
@@ -241,8 +274,7 @@
         zones.push({ skill: s, x: c.aim.x, y: c.aim.y, wait: s.delay, total: s.delay, up: 0 });
       } else if (s.kind === "beam") {
         const a = { x: c.x, y: c.y }, b = { x: c.x + c.dx * s.range, y: c.y + c.dy * s.range };
-        if (segDist(player, a, b) < CHAMP.radius + s.radius) hitBy = s;
-        else dodged += 1;
+        if (!(segDist(player, a, b) < CHAMP.radius + s.radius && hit(s))) dodged += 1;
         flashes.push({ skill: s, a, b, left: 0.25 });
       }
     }
@@ -250,6 +282,7 @@
     // ── 한 걸음(1/240초) ──
     function step(dt) {
       t += dt;
+      safe = Math.max(0, safe - dt);
 
       // 이동: WASD 가 눌려 있으면 그쪽으로, 아니면 찍은 곳으로
       let mx = 0, my = 0;
@@ -296,20 +329,40 @@
         }
       }
       casters = casters.filter(c => c.wind > 0 || c.fade > 0);
-      if (hitBy) return;
+      if (dead) return;
 
-      // 투사체
-      for (const m of missiles) {
+      // 투사체. 갈라지면 새로 생기는 게 있어서 지금 있는 것만 돈다
+      for (const m of [...missiles]) {
         if (m.skill.accel) m.speed = Math.min(m.skill.maxSpeed, m.speed + m.skill.accel * dt);
         const d = m.speed * dt;
         m.x += m.dx * d; m.y += m.dy * d;
         m.left -= d; m.flown += d;
         const reach = CHAMP.radius + m.skill.radius;
-        if ((m.x - player.x) ** 2 + (m.y - player.y) ** 2 < reach * reach) { hitBy = m.skill; return; }
+        if ((m.x - player.x) ** 2 + (m.y - player.y) ** 2 < reach * reach && hit(m.skill)) {
+          m.gone = true;          // 맞힌 투사체는 사라진다
+          if (dead) return;
+          continue;
+        }
+        const sp = m.skill.split;
+        if (sp) {
+          if (m.splitIn == null) {
+            // along: 내가 이 투사체 길 옆으로 가장 가까워지는 곳까지 남은 거리. 거기서 가르면 갈라진 것이 나를 향한다
+            // side: 그곳에서 나와 투사체 길 사이 거리. 이대로 가도 맞을 거리면 가르지 않는다(벨코즈도 그냥 맞힌다)
+            const along = (player.x - m.x) * m.dx + (player.y - m.y) * m.dy;
+            const side = Math.abs((player.x - m.x) * m.dy - (player.y - m.y) * m.dx);
+            const soon = sp.telegraph * m.speed;
+            const miss = side > CHAMP.radius + m.skill.radius;
+            if ((miss && along >= 0 && along <= soon) || m.left <= soon) m.splitIn = sp.telegraph;
+          } else {
+            m.splitIn -= dt;
+            if (m.splitIn <= 0) { splitMissile(m); m.gone = true; }
+          }
+        }
       }
       const pad = 200;
       const alive = [];
       for (const m of missiles) {
+        if (m.gone) continue;
         const out = m.x < -pad || m.y < -pad || m.x > ARENA.w + pad || m.y > ARENA.h + pad;
         if (m.left <= 0 || out) dodged += 1; else alive.push(m);
       }
@@ -325,17 +378,20 @@
           if (z.wait > 0) continue;
           if (s.kind === "circle") {
             // 터지는 순간 원 안에 몸이 조금이라도 걸치면 맞는다
-            if (d < s.radius + CHAMP.radius) { hitBy = s; return; }
-            dodged += 1;
             z.done = 0.3;          // 터진 자리를 잠깐 보여 준다
+            if (d < s.radius + CHAMP.radius && hit(s)) { if (dead) return; }
+            else dodged += 1;
             continue;
           }
         }
         if (s.kind === "cage") {
           // 테두리에 몸이 닿으면 맞는다. 안에 갇혔으면 테두리에 닿지 않게 버텨야 한다
-          if (Math.abs(d - s.radius) < CHAMP.radius) { hitBy = s; return; }
+          if (!z.struck && Math.abs(d - s.radius) < CHAMP.radius && hit(s)) {
+            z.struck = true;        // 감옥은 한 번만 스턴한다
+            if (dead) return;
+          }
           z.up += dt;
-          if (z.up >= s.last) { z.done = 0.3; dodged += 1; }
+          if (z.up >= s.last) { z.done = 0.3; if (!z.struck) dodged += 1; }
         }
       }
       for (const z of zones) if (z.done != null) z.done -= dt;
@@ -410,6 +466,20 @@
         circle(target.x, target.y, 22); ctx.stroke();
       }
 
+      // 벨코즈 Q 가 곧 갈라지면, 갈라질 자리에서 양옆으로 가는 선을 미리 보여 준다
+      for (const m of missiles) {
+        if (m.splitIn == null) continue;
+        const sp = m.skill.split;
+        const ahead = m.speed * Math.max(0, m.splitIn);
+        const px = m.x + m.dx * ahead, py = m.y + m.dy * ahead;
+        ctx.strokeStyle = m.skill.color + "99";
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(px - m.dy * sp.range, py + m.dx * sp.range);
+        ctx.lineTo(px + m.dy * sp.range, py - m.dx * sp.range);
+        ctx.stroke();
+      }
+
       for (const m of missiles) {
         const s = m.skill;
         const tail = Math.min(m.flown, s.radius * 4);
@@ -439,8 +509,11 @@
       }
 
       // 나
-      ctx.fillStyle = hitBy ? "#ff6b6b" : "#f0b429";
+      // 맞은 뒤 무적인 동안은 깜빡인다
+      ctx.globalAlpha = safe > 0 && Math.floor(safe * 10) % 2 ? 0.35 : 1;
+      ctx.fillStyle = dead ? "#ff6b6b" : safe > 0 ? "#ffa8a8" : "#f0b429";
       circle(player.x, player.y, CHAMP.radius); ctx.fill();
+      ctx.globalAlpha = 1;
       ctx.strokeStyle = "#0f1b33";
       ctx.lineWidth = 6;
       circle(player.x, player.y, CHAMP.radius - 14); ctx.stroke();
@@ -449,6 +522,7 @@
     function hudUpdate() {
       hud("time").textContent = fmt(t);
       hud("dodged").textContent = dodged;
+      hud("lives").textContent = "♥".repeat(Math.max(0, lives)) + "♡".repeat(LIVES - Math.max(0, lives));
     }
 
     // ── 흐름 ──
@@ -461,7 +535,7 @@
       while (acc >= STEP && state === "play") {
         acc -= STEP;
         step(STEP);
-        if (hitBy) { end(); break; }
+        if (dead) { end(); break; }
       }
       draw();
       hudUpdate();
@@ -482,11 +556,11 @@
       state = "over";
       keys.clear();
       holding = false;
-      const result = { ms: Math.round(t * 1000), dodged, by: hitBy.name, ver: VERSION };
+      const result = { ms: Math.round(t * 1000), dodged, by: lastHit.name, ver: VERSION };
       showOver(`
-        <h2>${esc(hitBy.name)}에 맞았어요</h2>
+        <h2>${esc(lastHit.name)}에 마지막 목숨을 잃었어요</h2>
         <p class="dodge-score">${fmt(t)}</p>
-        <p class="note">피한 스킬 ${dodged}개</p>
+        <p class="note">피한 스킬 ${dodged}개 · 맞은 스킬 ${hits.map(esc).join(" → ")}</p>
         <div data-extra></div>
         <div class="dodge-actions">
           <button type="button" data-start>다시 하기 <small>Space</small></button>
@@ -552,9 +626,9 @@
     fit();
     showOver(`
       <h2>스킬샷 피하기</h2>
-      <p>사방에서 날아오는 스킬을 피해 오래 버티세요. 한 번 맞으면 끝이에요.</p>
+      <p>사방에서 날아오는 스킬을 피해 오래 버티세요. 목숨은 ${LIVES}개, ${LIVES}번 맞으면 끝이에요. 맞은 뒤 ${SAFE_AFTER_HIT}초는 무적이에요.</p>
       <ul class="dodge-keys">
-        <li><b>투사체</b> 날아오는 스킬. 쏘는 순간 방향이 정해져요</li>
+        <li><b>투사체</b> 날아오는 스킬. 쏘는 순간 방향이 정해져요. 벨코즈 Q 는 옆으로 갈라져요</li>
         <li><b>장판</b> 바닥 원이 다 차면 터져요</li>
         <li><b>레이저</b> 가는 선이 보이면 곧 그 선 전체를 쳐요</li>
         <li><b>감옥</b> 베이가 E. 테두리에 닿으면 끝, 안에 갇히면 버티기</li>

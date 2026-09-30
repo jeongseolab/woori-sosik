@@ -18,6 +18,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+import changes
 import duo
 import opgg
 import ranking
@@ -200,6 +201,12 @@ def logout(authorization: str = Header(None)):
 @app.get("/api/me")
 def me(authorization: str = Header(None)):
     return {"user": who_is(_token(authorization))}
+
+
+@app.get("/api/stamp")
+def stamp(authorization: str = Header(None)):
+    """바뀐 게 있는지 보는 지문. 화면이 1분마다 부른다(DB 만 읽는다, changes.py)."""
+    return changes.stamp(_need_login(authorization))
 
 
 # ── 티어표 ───────────────────────────────────────────────
