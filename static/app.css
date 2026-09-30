@@ -722,7 +722,11 @@ table.dodge-table { min-width: 0; }
 .dodge-head h1 { margin: 0; }
 .dodge-hud { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 20px; margin-bottom: 8px; font-size: 14px; color: var(--muted); }
 .dodge-hud b { color: var(--text); font-variant-numeric: tabular-nums; }
-.dodge-hud .dodge-sound { margin-left: auto; padding: 4px 10px; font-size: 13px; }
+.dodge-hud .dodge-sound { padding: 4px 10px; font-size: 13px; }
+.dodge-volume { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
+.dodge-volume input { width: 110px; accent-color: #c8aa6e; cursor: pointer; }
+.dodge-volume input:disabled { opacity: .4; cursor: default; }
+.dodge-volume b { min-width: 3.2em; text-align: right; color: var(--text); font-variant-numeric: tabular-nums; }
 .dodge-stage { position: relative; border-radius: 12px; overflow: hidden; border: 1px solid #785a28; background: #010a13; }
 
 /* ── 무빙: 롤 인터페이스 흉내 ── */

@@ -22,6 +22,8 @@
 // 화면은 롤 인터페이스를 흉내 낸다: 아래 가운데 HUD(초상화·체력·소환사 주문), 위 시계·전적,
 // 오른쪽 아래 미니맵, 머리 위 체력바, 안내 문구(환영·연속 회피·처치당함), 죽으면 회색 화면.
 //
+// 그림과 소리는 롤 것을 가져다 쓴다(ART 아래 설명). 못 받으면 직접 그린 그림·합성음으로 돈다.
+//
 // 조작: 우클릭(누른 채 끌면 계속 따라감) 또는 WASD·방향키. 휴대폰은 화면을 누르면 이동.
 // 시작 전에 이동 방식(마우스 클릭 / WASD) 과 소환사 주문 배치를 고른다.
 // 주문 키는 마우스면 롤 기본 D/F, WASD 면 D 가 이동이라 V/F. 점멸을 두 키 중 어디에 둘지도 고른다.
@@ -59,8 +61,9 @@
     return c.flashFirst ? { flash: a, ghost: b } : { flash: b, ghost: a };
   }
   const HP_MAX = 1500;            // 체력(한 번 맞을 때마다 HP_MAX / LIVES)
-  // 연속으로 피한 수에 따라 롤 안내 문구
-  const SPREES = [[20, "학살 중입니다!"], [40, "도저히 막을 수 없습니다!"], [60, "미쳐 날뛰고 있습니다!"], [80, "전설의 출현!"]];
+  // 연속으로 피한 수에 따라 롤 안내 문구와 아나운서 음성(롤의 연속 처치 순서 그대로)
+  const SPREES = [[20, "학살 중입니다!", "spree1"], [40, "미쳐 날뛰고 있습니다!", "spree2"],
+                  [60, "도저히 막을 수 없습니다!", "spree3"], [80, "전설의 출현!", "spree4"]];
 
   // 가끔 스킬(rare: 애쉬 R, 럭스 R) 이 나올 확률(둘을 합쳐서). 나머지는 열린 스킬 중에서 똑같은 확률로 고른다
   const RARE_CHANCE = 0.03;
@@ -119,6 +122,46 @@
     { kind: "cage", name: "베이가 E", champ: "Veigar", cast: 0.25, delay: 0.5, last: 3, radius: 390, range: 700, color: "#845ef7", from: 35, src: "last: wiki" },
   ];
 
+  // ── 스킬 그림 표(롤 텍스처. 그림만이고 판정과는 상관없다) ──
+  // 투사체: 앞쪽이 +x 인 틀에서 그린다. 크기는 판정 반지름의 몇 배인지.
+  //   trail [스프라이트, 색, 꼬리 길이(유닛), 폭(반지름의 몇 배)] 없으면 색 번짐 꼬리
+  //   under/over [스프라이트, 색, 크기, 앞뒤 자리(반지름 배), 도는 방식(spin 빙글 · jitter 매번 · up 똑바로)]
+  //   keep: 직접 그린 모양(창 자루, 주먹, 화살대)도 같이 그린다
+  const MISSILE_ART = {
+    "모르가나 Q": { trail: ["morg_chain", "#b197fc", 320, 0.9], over: [["morg_core", null, 3.2]] },
+    "럭스 Q": { under: [["glow", "#fab005", 2.2]], over: [["lux_shape", "#ffe066", 2.8, -0.4], ["glow", "#ffffff", 1]] },
+    "니달리 Q": { keep: true, under: [["nida_glow", null, 4.2, -1.6]], over: [["nida_tip", "#e9fac8", 2.6, 0.1]] },
+    "브랜드 Q": { under: [["glow", "#ff6b00", 3.6]], over: [["brand_flame", "#ffa94d", 3, 0, "spin"], ["glow", "#fff3bf", 1.3]] },
+    "아리 E": { trail: ["ahri_trail", "#faa2c1", 260, 1.4], over: [["ahri_heart", null, 2.5, 0, "up"]] },
+    "벨코즈 Q": { under: [["glow", "#9775fa", 3.2]], over: [["vel_ring", null, 2.8, 0, "spin"], ["glow", "#ffffff", 1]] },
+    "제라스 E": { trail: ["veig_trail", "#748ffc", 260, 1.2], under: [["glow", "#4c6ef5", 3]], over: [["veig_ball", "#bac8ff", 2.3, 0, "spin"]] },
+    "이즈리얼 Q": { trail: ["ez_trail", null, 320, 0.6], under: [["glow", "#ffd43b", 2.6]], over: [["ez_spark", "#fff3bf", 2.4, 0, "spin"], ["glow", "#ffffff", 1.1]] },
+    "레오나 E": { under: [["glow", "#f59f00", 1.8]], over: [["leo_sword", null, 5.2, -1.2]] },
+    "베이가 Q": { trail: ["veig_trail", "#9775fa", 280, 1.4], under: [["glow", "#7048e8", 3]], over: [["veig_soft", "#d0bfff", 2.2], ["glow", "#ffffff", 0.9]] },
+    "블리츠크랭크 Q": { keep: true, under: [["glow", "#ffa94d", 3]] },
+    "쓰레쉬 Q": { under: [["glow", "#20c997", 2.6]], over: [["thresh_head", "#96f2d7", 2.6]] },
+    "징크스 W": { trail: ["jinx_trail", "#f783ac", 650, 1], over: [["jinx_bolt", "#fcc2d7", 2.6, 0, "jitter"], ["glow", "#ffffff", 1.3]] },
+    "애쉬 R": { keep: true, trail: ["ashe_tr", null, 500, 0.4], over: [["ashe_ice", "#d0ebff", 2.4], ["ashe_shape", "#a5d8ff", 2.6, 0.2]] },
+  };
+  // 장판: 바닥에 눕혀 깐다. [스프라이트, 색, fit(텍스처 안에서 고리가 차지하는 반지름 비율), 도는 빠르기, 진하기]
+  //   ring 테두리(처음부터) · fill 가운데서 차오름 · inner 중심부(s.inner) · late 터지기 직전·그을린 자리
+  //   sky 하늘에서 떨어지는 것(fall) 이나 그 자리에 생기는 구체(rise)
+  const ZONE_ART = {
+    "카서스 Q": { ring: ["kar_ring", null, 0.88], fill: ["kar_burn", null, 0.52], late: ["kar_cracks", "#b2f2bb", 0.54] },
+    "브랜드 W": { ring: ["brand_ring", "#ffa94d", 0.94], fill: ["brand_cracks", null, 0.84], late: ["brand_lava", null, 0.9] },
+    "초가스 Q": { ring: ["cho_crack", null, 0.9], fill: ["glow", "#a9e34b", 0.68] },
+    "베이가 W": { ring: ["veig_floor", "#7950f2", 0.82, 0, 0.55], fill: ["veig_soft", "#9775fa", 0.56, 0, 0.45], sky: ["veig_ball", "#b197fc", "fall"] },
+    "신드라 Q": { ring: ["syn_ring", "#e599f7", 0.85, 1.5], fill: ["glow", "#cc5de8", 0.68], sky: ["syn_orb", "#eebefa", "rise"] },
+    "제라스 W": { ring: ["vel_aoe", "#91a7ff", 0.78], fill: ["glow", "#748ffc", 0.68], inner: ["leo_in", "#bac8ff", 0.58, 1] },
+    "벨코즈 E": { ring: ["vel_aoe", "#e599f7", 0.78], fill: ["vel_cracks", null, 0.72] },
+    "레오나 R": { ring: ["leo_out", "#ffd43b", 0.65, 0.3], fill: ["glow", "#fab005", 0.68], inner: ["leo_in", "#ffe066", 0.58, -0.8] },
+  };
+  // 레이저: tele 시전 중 경고선, fire 쏜 순간. [스프라이트, 색, 폭(판정 반지름의 몇 배), 진하기, 가운데 토막만(mid)]
+  const BEAM_ART = {
+    "진 W": { tele: ["jhin_ind", null, 1, 1], fire: ["jhin_beam", null, 1.8, 1] },
+    "럭스 R": { fire: ["lux_beam", "#fcc419", 1.2, 0.5, true] },   // 경고선은 직접 그린 띠(텍스처는 줄무늬가 진다)
+  };
+
   const IMG = {};
   function champImage(key) {
     if (!IMG[key]) {
@@ -142,18 +185,173 @@
 
   const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 
-  // ── 효과음: 소리 파일 없이 WebAudio 로 짧게 만든다. 끌 수 있고 브라우저에 기억한다 ──
+  // ── 롤 그림·소리 ──
+  // 그림: 롤 클라이언트의 파티클 텍스처(CommunityDragon 이 푼 game/assets/characters/*/skins/base/particles/*.png)
+  //   를 한 장(dodge/fx.webp) 으로 묶었다. 흰 텍스처는 여기서 스킬 색을 곱해 입힌다(spr).
+  //   바닥은 소환사의 협곡 미드 라인 바닥 텍스처(maps/kitpieces/srx/base/textures/terrain_midlane_ground_a.png) 를 잘랐다
+  // 소리: 롤 위키(wiki.leagueoflegends.com) 에 올라온 효과음·아나운서 음성(dodge/sfx/*.ogg).
+  //   위키에 기본 스킨 효과음이 있는 스킬(럭스·베이가·초가스), 점멸·유체화, 아나운서만 진짜 소리고 나머지는 합성음
+  const ART = "dodge/";
+  // 스프라이트 자리 [x, y, 폭, 높이]. 날아가는 것은 앞쪽이 오른쪽(+x) 을 보게 돌려 두었다
+  const FX_MAP = {
+    ahri_heart: [776, 774, 128, 128],
+    ahri_trail: [630, 1292, 256, 86],
+    ashe_ice: [754, 1032, 128, 128],
+    ashe_shape: [0, 1387, 128, 83],
+    ashe_tr: [884, 1032, 128, 128],
+    brand_cracks: [258, 0, 256, 256],
+    brand_flame: [646, 774, 128, 128],
+    brand_lava: [516, 0, 256, 256],
+    brand_ring: [0, 0, 256, 256],
+    cho_crack: [0, 774, 256, 256],
+    cho_spike: [260, 1162, 48, 128],
+    ez_spark: [711, 1387, 64, 64],
+    ez_trail: [453, 1387, 256, 64],
+    glow: [387, 1387, 64, 64],
+    jhin_beam: [258, 1292, 370, 88],
+    jhin_ind: [0, 1538, 512, 31],
+    jinx_bolt: [624, 1032, 128, 128],
+    jinx_trail: [0, 1472, 256, 64],
+    kar_burn: [0, 1162, 128, 128],
+    kar_cracks: [516, 516, 256, 256],
+    kar_ring: [258, 516, 256, 256],
+    kar_shock: [130, 1162, 128, 128],
+    leo_in: [130, 1032, 128, 128],
+    leo_out: [516, 258, 256, 256],
+    leo_sword: [505, 1472, 128, 51],
+    lux_beam: [258, 774, 256, 176],
+    lux_shape: [888, 1292, 128, 85],
+    morg_chain: [514, 1538, 128, 29],
+    morg_core: [516, 774, 128, 128],
+    nida_glow: [257, 1387, 128, 69],
+    nida_tip: [130, 1387, 125, 76],
+    syn_orb: [310, 1162, 128, 128],
+    syn_ring: [440, 1162, 128, 128],
+    thresh_chain: [258, 1472, 245, 57],
+    thresh_head: [520, 1032, 102, 128],
+    veig_ball: [390, 1032, 128, 128],
+    veig_floor: [0, 516, 256, 256],
+    veig_soft: [260, 1032, 128, 128],
+    veig_trail: [570, 1162, 256, 101],
+    veig_wall: [0, 1292, 256, 93],
+    vel_aoe: [0, 258, 256, 256],
+    vel_cracks: [258, 258, 256, 256],
+    vel_ring: [0, 1032, 128, 128],
+  };
+  const fxImg = new Image(), groundImg = new Image();
+  let fxReady = false, groundReady = false;
+  function loadArt() {
+    if (fxImg.src) return;
+    fxImg.onload = () => { fxReady = true; };
+    groundImg.onload = () => { groundReady = true; };
+    fxImg.src = ART + "fx.webp";
+    groundImg.src = ART + "ground.jpg";
+  }
+  // 스프라이트 한 칸을 떼어 둔다. color 를 주면 그 색을 곱해 입힌다(흰 텍스처용). 한 번 만든 건 다시 쓴다
+  const SPR = new Map();
+  function spr(name, color) {
+    const key = name + (color || "");
+    let c = SPR.get(key);
+    if (c) return c;
+    const [x, y, w, h] = FX_MAP[name];
+    c = document.createElement("canvas");
+    c.width = w; c.height = h;
+    const g = c.getContext("2d");
+    g.drawImage(fxImg, x, y, w, h, 0, 0, w, h);
+    if (color) {
+      g.globalCompositeOperation = "multiply";
+      g.fillStyle = color;
+      g.fillRect(0, 0, w, h);
+      g.globalCompositeOperation = "destination-in";
+      g.drawImage(fxImg, x, y, w, h, 0, 0, w, h);
+    }
+    SPR.set(key, c);
+    return c;
+  }
+
+  // ── 효과음: 위키의 진짜 소리를 먼저, 없거나 못 풀면(오프라인·구형 사파리) WebAudio 합성음.
+  // 켜고 끄기와 볼륨(0~100%) 을 브라우저에 기억한다. 모든 소리는 master 하나를 거쳐 나가서 볼륨을 바꾸면 나는 중인 소리도 바로 바뀐다 ──
   const SOUND_KEY = "tiergg-dodge-sound";
-  let audio = null;
+  const VOLUME_KEY = "tiergg-dodge-volume";
+  let audio = null, master = null;
   function soundOn() { try { return localStorage.getItem(SOUND_KEY) !== "off"; } catch { return true; } }
   function setSound(on) { try { localStorage.setItem(SOUND_KEY, on ? "on" : "off"); } catch {} }
-  function sfx(kind) {
-    if (!soundOn()) return;
+  function volume() {
     try {
-      audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+      const v = parseFloat(localStorage.getItem(VOLUME_KEY));
+      return Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0.7;
+    } catch { return 0.7; }
+  }
+  function setVolume(v) {
+    try { localStorage.setItem(VOLUME_KEY, String(v)); } catch {}
+    if (master) master.gain.value = v;
+  }
+  function ensureAudio() {
+    try {
+      if (!audio) {
+        audio = new (window.AudioContext || window.webkitAudioContext)();
+        master = audio.createGain();
+        master.gain.value = volume();
+        master.connect(audio.destination);
+      }
+      if (audio.state === "suspended") audio.resume().catch(() => {});
+    } catch {}
+    return audio;
+  }
+  const SAMPLES = ["flash", "ghost", "welcome", "slain", "spree1", "spree2", "spree3", "spree4",
+                   "lux_q", "lux_q_hit", "lux_r", "lux_r_beam", "veigar_q", "veigar_q_hit", "veigar_w", "veigar_w_hit",
+                   "veigar_e", "veigar_e_form", "cho_q"];
+  const buffers = {};
+  let samplesAsked = false;
+  function loadSamples() {
+    if (samplesAsked || !ensureAudio()) return;
+    samplesAsked = true;
+    for (const name of SAMPLES) {
+      fetch(ART + "sfx/" + name + ".ogg")
+        .then(r => { if (!r.ok) throw new Error(r.status); return r.arrayBuffer(); })
+        .then(b => new Promise((ok, no) => audio.decodeAudioData(b, ok, no)))
+        .then(buf => { buffers[name] = buf; }, () => {});
+    }
+  }
+  // 받아 둔 진짜 소리를 튼다. 없으면 false(부른 쪽이 합성음으로 대신한다)
+  function sample(name, vol = 0.5) {
+    if (!soundOn() || !audio || !buffers[name]) return false;
+    if (volume() <= 0) return true;          // 볼륨 0 이면 조용히(합성음으로 대신하지도 않는다)
+    try {
+      const src = audio.createBufferSource(), g = audio.createGain();
+      src.buffer = buffers[name];
+      g.gain.value = vol;
+      src.connect(g); g.connect(master);
+      src.start();
+      return true;
+    } catch { return false; }
+  }
+  // 스킬별 진짜 소리. cast 누르는 순간, release 날아가거나 장판이 생길 때, land 장판이 터질 때,
+  // form 감옥이 설 때, hit 내가 맞았을 때
+  const SKILL_SFX = {
+    "럭스 Q": { release: "lux_q", hit: "lux_q_hit" },
+    "럭스 R": { cast: "lux_r", release: "lux_r_beam" },
+    "베이가 Q": { release: "veigar_q", hit: "veigar_q_hit" },
+    "베이가 W": { release: "veigar_w", land: "veigar_w_hit" },
+    "베이가 E": { release: "veigar_e", form: "veigar_e_form" },
+    "초가스 Q": { release: "cho_q" },
+  };
+  function skillSound(s, when) {
+    const name = (SKILL_SFX[s.name] || {})[when];
+    if (name && sample(name, 0.4)) return;
+    // 진짜 소리가 없는 스킬: 투사체는 바람 가르는 소리, 장판은 터지는 소리(작게)
+    if (when === "release" && s.kind === "line") sfx("whoosh");
+    else if (when === "land") sfx("thump");
+  }
+
+  function sfx(kind) {
+    if (!soundOn() || volume() <= 0) return;
+    if ((kind === "flash" || kind === "ghost") && sample(kind, 0.5)) return;
+    try {
+      ensureAudio();
       const now = audio.currentTime;
       const out = audio.createGain();
-      out.connect(audio.destination);
+      out.connect(master);
       const tone = (type, f0, f1, dur, vol, delay = 0) => {
         const o = audio.createOscillator(), g = audio.createGain();
         o.type = type;
@@ -164,6 +362,21 @@
         o.connect(g); g.connect(out);
         o.start(now + delay); o.stop(now + delay + dur + 0.02);
       };
+      // 거른 잡음(바람 소리·폭발)
+      const noise = (dur, vol, f0, f1) => {
+        const len = Math.floor(audio.sampleRate * dur), b = audio.createBuffer(1, len, audio.sampleRate);
+        const d = b.getChannelData(0);
+        for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+        const n = audio.createBufferSource(), f = audio.createBiquadFilter(), g = audio.createGain();
+        n.buffer = b;
+        f.type = "bandpass";
+        f.frequency.setValueAtTime(f0, now);
+        f.frequency.exponentialRampToValueAtTime(f1, now + dur);
+        g.gain.setValueAtTime(vol, now);
+        g.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+        n.connect(f); f.connect(g); g.connect(out);
+        n.start(now);
+      };
       if (kind === "hit") { tone("square", 180, 60, 0.18, 0.12); tone("sine", 90, 40, 0.25, 0.2); }
       else if (kind === "flash") { tone("sine", 400, 1400, 0.16, 0.12); tone("triangle", 900, 2400, 0.12, 0.06, 0.03); }
       else if (kind === "ghost") { tone("sine", 300, 700, 0.3, 0.08); }
@@ -171,6 +384,8 @@
       else if (kind === "announce") { tone("sine", 523, 523, 0.25, 0.06); tone("sine", 784, 784, 0.35, 0.05, 0.12); }
       else if (kind === "death") { tone("sawtooth", 300, 70, 0.9, 0.08); tone("sine", 150, 50, 1.1, 0.12); }
       else if (kind === "deny") { tone("square", 160, 150, 0.08, 0.05); }
+      else if (kind === "whoosh") { noise(0.22, 0.05, 2400, 700); }
+      else if (kind === "thump") { noise(0.3, 0.08, 500, 90); tone("sine", 110, 45, 0.3, 0.1); }
     } catch {}
   }
 
@@ -186,6 +401,11 @@
     root.innerHTML = `
       <div class="dodge-hud">
         <span data-hud="best"></span>
+        <label class="dodge-volume" title="효과음 볼륨">
+          <span>볼륨</span>
+          <input type="range" min="0" max="100" step="5" data-volume aria-label="효과음 볼륨">
+          <b data-volume-text></b>
+        </label>
         <button type="button" class="ghost dodge-sound" data-sound aria-pressed="true">효과음 켜짐</button>
       </div>
       <div class="dodge-stage">
@@ -220,10 +440,15 @@
     const mctx = mini.getContext("2d");
     const banner = root.querySelector("[data-banner]");
     const soundBtn = root.querySelector("[data-sound]");
+    const volInput = root.querySelector("[data-volume]");
+    const volText = root.querySelector("[data-volume-text]");
     let face = champImage(opts.champ || "Ezreal");
     const over = root.querySelector("[data-over]");
     const hud = name => root.querySelector(`[data-hud="${name}"]`);
     preload();
+    loadArt();
+    // 연습장에 들어온 것 자체가 클릭이라 소리를 미리 받아 풀어 둔다(첫 판 "환영합니다" 부터 나오게)
+    if (soundOn()) loadSamples();
 
     let state = "ready";       // ready | play | over
     let t = 0, dodged = 0, acc = 0, last = 0, nextCast = 0, raf = 0;
@@ -415,6 +640,7 @@
         c.aim = { x: at0.x + c.dx * r, y: at0.y + c.dy * r };
       }
       casters.push(c);
+      skillSound(skill, "cast");
       if (c.wind <= 0) release(c);
     }
 
@@ -446,12 +672,12 @@
     }
 
     // 화면 가운데 안내 문구(롤의 알림처럼 잠깐 떴다 사라진다)
-    function announce(text, kind = "gold", ms = 1800) {
+    function announce(text, kind = "gold", ms = 1800, voice = "") {
       banner.innerHTML = "<b>" + esc(text) + "</b>";
       banner.className = "lol-banner show " + kind;
       clearTimeout(bannerTimer);
       bannerTimer = setTimeout(() => { banner.className = "lol-banner"; }, ms);
-      if (kind !== "death") sfx("announce");
+      if (kind !== "death" && !(voice && sample(voice, 0.7))) sfx("announce");
     }
 
     // 맞았다. 무적 중이면 없던 일로(false). 목숨을 다 잃으면 끝
@@ -464,9 +690,11 @@
       shake = 0.25;
       hurt = 0.4;
       burst(player.x, player.y, 90, s.color, 26, 420);
+      fx.push({ kind: "spark", x: player.x, y: player.y, color: s.color, life: 0.35, max: 0.35 });
       // 롤처럼 머리 위로 피해 숫자(마법 피해는 보라)
       pops.push({ x: player.x, y: player.y, text: String(Math.round(HP_MAX / LIVES)), life: 1, max: 1 });
       sfx("hit");
+      skillSound(s, "hit");
       if (lives === 1) announce("체력이 낮습니다", "warn");
       if (lives <= 0) dead = true;
       return true;
@@ -506,6 +734,7 @@
     // 시전이 끝난 순간
     function release(c) {
       const s = c.skill;
+      skillSound(s, "release");
       if (s.kind === "line") {
         missiles.push({ skill: s, x: c.x, y: c.y, ox: c.x, oy: c.y, dx: c.dx, dy: c.dy, speed: s.speed, left: s.range, flown: 0 });
       } else if (s.kind === "circle") {
@@ -574,8 +803,8 @@
       }
       // 30초마다 생존 안내, 연속으로 피한 수에 따라 롤 안내 문구
       if (Math.floor(t / 30) > lastMark) { lastMark = Math.floor(t / 30); announce(lastMark * 30 + "초 생존!", "gold"); }
-      for (const [n, text] of SPREES) {
-        if (dodged >= n && lastSpree < n) { lastSpree = n; announce(text, "spree"); }
+      for (const [n, text, voice] of SPREES) {
+        if (dodged >= n && lastSpree < n) { lastSpree = n; announce(text, "spree", 1800, voice); }
       }
 
       // 시전
@@ -645,7 +874,8 @@
           if (s.kind === "circle") {
             // 터지는 순간 원 안에 몸이 조금이라도 걸치면 맞는다
             z.done = 0.3;          // 터진 자리를 잠깐 보여 준다
-            boom(z.x, z.y, s.radius, s.color);
+            boom(z.x, z.y, s.radius, s.color, s);
+            skillSound(s, "land");
             if (d < s.radius + CHAMP.radius && hit(s)) { if (dead) return; }
             else dodged += 1;
             continue;
@@ -653,7 +883,11 @@
         }
         if (s.kind === "cage") {
           // 테두리에 몸이 닿으면 맞는다. 안에 갇혔으면 테두리에 닿지 않게 버텨야 한다
-          if (!z.formed) { z.formed = true; fx.push({ kind: "ring", x: z.x, y: z.y, r: s.radius, color: s.color, life: 0.4, max: 0.4 }); }
+          if (!z.formed) {
+            z.formed = true;
+            fx.push({ kind: "ring", x: z.x, y: z.y, r: s.radius, color: s.color, life: 0.4, max: 0.4 });
+            skillSound(s, "form");
+          }
           if (!z.struck && Math.abs(d - s.radius) < CHAMP.radius && hit(s)) {
             z.struck = true;        // 감옥은 한 번만 스턴한다
             if (dead) return;
@@ -681,10 +915,13 @@
       }
     }
 
-    // 장판이 터짐: 빛기둥 + 퍼지는 고리 + 파편
-    function boom(x, y, r, color) {
+    // 장판이 터짐: 빛기둥 + 퍼지는 고리 + 파편 + 그을린 바닥(초가스 Q 는 가시가 솟는다)
+    function boom(x, y, r, color, s) {
       fx.push({ kind: "pillar", x, y, r, color, life: 0.4, max: 0.4 });
       fx.push({ kind: "ring", x, y, r, color, life: 0.35, max: 0.35 });
+      fx.push({ kind: "shock", x, y, r, color, life: 0.45, max: 0.45 });
+      fx.push({ kind: "scorch", x, y, r, color, art: s && ZONE_ART[s.name], life: 0.9, max: 0.9 });
+      if (s && s.name === "초가스 Q") fx.push({ kind: "spikes", x, y, r, color, life: 0.7, max: 0.7, seed: Math.random() * 6 });
       burst(x, y, 20, color, Math.round(r / 8), r * 1.6);
     }
 
@@ -714,6 +951,59 @@
       ctx.beginPath();
       q.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
       ctx.closePath();
+    }
+
+    // ── 롤 텍스처 깔기 ──
+    // 바닥에 눕힌 스프라이트: 바닥 (x, y) 가운데, 반지름 r(유닛) 인 정사각형을 원근에 맞춰 편다.
+    // 원 하나 크기에서는 원근의 휨이 작아서 평행사변형(아핀 변환) 으로 충분하다
+    function floorSprite(img, x, y, r, rot = 0, alpha = 1) {
+      if (r <= 0 || alpha <= 0) return;
+      const c = proj(x, y), cs = Math.cos(rot) * r, sn = Math.sin(rot) * r;
+      const u = proj(x + cs, y + sn), v = proj(x - sn, y + cs);
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.transform(u.x - c.x, u.y - c.y, v.x - c.x, v.y - c.y, c.x, c.y);
+      ctx.drawImage(img, -1, -1, 2, 2);
+      ctx.restore();
+    }
+    // 바닥에 눕힌 띠(a -> b, 반쪽 폭 hw). 길면 원근 때문에 휘니 150 유닛씩 잘라 편다.
+    // 조각마다 이미지를 그리면 조각 가장자리가 흐려져 이음매에 줄이 진다. 그래서 반복 무늬(pattern) 로 조각 사각형을 칠한다.
+    // mid 면 텍스처의 가운데 토막만 이어 붙인다(길이 방향 양끝이 옅어지는 텍스처가 토막마다 되풀이되지 않게)
+    const PATTERN = new Map();
+    function floorStrip(img, a, b, hw, alpha = 1, mid = false) {
+      let pat = PATTERN.get(img);
+      if (!pat) { pat = ctx.createPattern(img, "repeat"); PATTERN.set(img, pat); }
+      const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy) || 1;
+      const nx = -dy / len * hw, ny = dx / len * hw;
+      const n = Math.max(1, Math.ceil(len / 150)), W = img.width, H = img.height;
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = pat;
+      for (let i = 0; i < n; i++) {
+        const t0 = i / n, t1 = (i + 1) / n;
+        const x0 = a.x + dx * t0, y0 = a.y + dy * t0, x1 = a.x + dx * t1, y1 = a.y + dy * t1;
+        const o = proj(x0 + nx, y0 + ny), e = proj(x1 + nx, y1 + ny), q = proj(x0 - nx, y0 - ny), w = proj(x1 - nx, y1 - ny);
+        // 무늬: 조각 평행사변형(o, e, q) 에 텍스처의 [sx, sx + sw] × [0, H] 가 오게. 칠하는 건 원근 그대로의 네 귀퉁이라
+        // 옆 조각과 모서리가 딱 맞는다(평행사변형 그대로 칠하면 원근 때문에 틈이 벌어진다)
+        const sx = mid ? W * 0.4 : W * t0, sw = mid ? W * 0.2 : W * (t1 - t0);
+        pat.setTransform(new DOMMatrix([e.x - o.x, e.y - o.y, q.x - o.x, q.y - o.y, o.x, o.y]).scale(1 / sw, 1 / H).translate(-sx, 0));
+        ctx.beginPath();
+        ctx.moveTo(o.x, o.y); ctx.lineTo(e.x, e.y); ctx.lineTo(w.x, w.y); ctx.lineTo(q.x, q.y);
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+    // 화면에 세운 스프라이트(가운데 x, y, 폭 w). 높이는 텍스처 비율대로
+    function standSprite(img, x, y, w, alpha = 1, rot = 0) {
+      if (w <= 0 || alpha <= 0) return;
+      const h = w * img.height / img.width;
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.translate(x, y);
+      if (rot) ctx.rotate(rot);
+      ctx.drawImage(img, -w / 2, -h / 2, w, h);
+      ctx.restore();
     }
 
     function glow(color, blur) { ctx.shadowColor = color; ctx.shadowBlur = blur; }
@@ -816,18 +1106,50 @@
       ctx.save();
       arenaPath();
       ctx.clip();
-      const N = 60, th = TEX.height / N;
+      // 협곡 미드 라인 바닥(받기 전이나 못 받으면 직접 그린 바닥)
+      const src = groundReady ? groundImg : TEX;
+      const N = 60, th = src.height / N;
       for (let i = 0; i < N; i++) {
         const y0 = ARENA.h * i / N, y1 = ARENA.h * (i + 1) / N;
         const a = proj(0, y0), b = proj(ARENA.w, y0), c = proj(0, y1), d = proj(ARENA.w, y1);
         const left = Math.min(a.x, c.x), right = Math.max(b.x, d.x);
-        ctx.drawImage(TEX, 0, i * th, TEX.width, th + 0.5, left, a.y, right - left, c.y - a.y + 0.8);
+        ctx.drawImage(src, 0, i * th, src.width, th + 0.5, left, a.y, right - left, c.y - a.y + 0.8);
+      }
+      if (groundReady) {
+        // 스킬 빛이 잘 보이게 바닥을 조금 어둡게, 가장자리는 더(롤 화면 가장자리의 그늘처럼)
+        const m = proj(ARENA.w / 2, ARENA.h / 2);
+        const v = ctx.createRadialGradient(m.x, m.y, VW * 0.15, m.x, m.y, VW * 0.62);
+        v.addColorStop(0, "rgba(1, 10, 19, .12)");
+        v.addColorStop(1, "rgba(1, 10, 19, .5)");
+        ctx.fillStyle = v;
+        ctx.fillRect(0, 0, VW, VH);
       }
       ctx.restore();
 
       arenaPath();
       ctx.strokeStyle = "rgba(200, 170, 110, .55)";
       ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+
+    // 롤 텍스처로 그린 장판(ZONE_ART). 텍스처의 고리가 실제 판정 원에 맞게 크기를 맞추고(fit),
+    // 판정 원은 가는 선으로 한 번 더 긋는다
+    function drawZoneArt(z, s, p, art) {
+      const now = performance.now() / 1000;
+      const lay = (spec, r, alpha) => {
+        if (!spec) return;
+        const [name, color, fit, spin = 0, k = 1] = spec;
+        floorSprite(spr(name, color), z.x, z.y, r / fit, spin * now, alpha * k);
+      };
+      ctx.globalCompositeOperation = "lighter";
+      lay(art.fill, s.radius * Math.max(0.05, p), 0.35 + 0.55 * p);
+      lay(art.ring, s.radius, 0.6 + 0.4 * p);
+      if (s.inner) lay(art.inner, s.inner, 0.5 + 0.5 * p);
+      lay(art.late, s.radius, Math.max(0, p * 2 - 1));
+      ctx.globalCompositeOperation = "source-over";
+      groundCircle(z.x, z.y, s.radius);
+      ctx.strokeStyle = s.color + "99";
+      ctx.lineWidth = 1.5;
       ctx.stroke();
     }
 
@@ -842,6 +1164,8 @@
         if (s.kind === "circle") {
           if (z.done != null) continue;          // 터진 뒤는 빛기둥·고리가 대신한다
           const p = 1 - Math.max(0, z.wait) / z.total;
+          const art = fxReady && ZONE_ART[s.name];
+          if (art) { drawZoneArt(z, s, p, art); continue; }
           // 안쪽이 터질 때까지 차오르고, 테두리는 처음부터 또렷하게
           groundCircle(z.x, z.y, s.radius);
           ctx.fillStyle = s.color + "22";
@@ -870,6 +1194,12 @@
           const forming = z.wait > 0;
           ctx.globalAlpha = z.done != null ? Math.max(0, z.done / 0.3) : 1;
           groundCircle(z.x, z.y, s.radius);
+          if (!forming && fxReady) {
+            // 베이가 E: 감옥 안 바닥이 보랏빛으로 물든다
+            ctx.globalCompositeOperation = "lighter";
+            floorSprite(spr("veig_floor", "#845ef7"), z.x, z.y, s.radius / 0.82, 0, ctx.globalAlpha * 0.6);
+            ctx.globalCompositeOperation = "source-over";
+          }
           if (forming) {
             ctx.setLineDash([10, 10]);
             ctx.strokeStyle = s.color;
@@ -888,6 +1218,14 @@
       for (const c of casters) {
         if (c.skill.kind !== "beam" || c.wind <= 0) continue;
         const a = { x: c.x, y: c.y }, b = { x: c.x + c.dx * FAR, y: c.y + c.dy * FAR };
+        const art = fxReady && BEAM_ART[c.skill.name];
+        if (art && art.tele) {
+          const [name, color, wide, k, mid] = art.tele;
+          ctx.globalCompositeOperation = "lighter";
+          floorStrip(spr(name, color), a, b, c.skill.radius * wide, k * (Math.floor(t * 12) % 2 ? 0.95 : 0.55), mid);
+          ctx.globalCompositeOperation = "source-over";
+          continue;
+        }
         groundBand(a, b, c.skill.radius);
         ctx.fillStyle = c.skill.color + "18";
         ctx.fill();
@@ -944,14 +1282,36 @@
       for (const f of flashes) {
         const a = Math.max(0, f.left / 0.35);
         ctx.globalCompositeOperation = "lighter";
-        groundBand(f.a, f.b, f.skill.radius * (1 + (1 - a) * 0.4));
-        ctx.fillStyle = f.skill.color + Math.round(a * 200).toString(16).padStart(2, "0");
-        glow(f.skill.color, 30);
-        ctx.fill();
+        const art = fxReady && BEAM_ART[f.skill.name];
+        if (art) {
+          const [name, color, wide, k, mid] = art.fire;
+          floorStrip(spr(name, color), f.a, f.b, f.skill.radius * wide * (1 + (1 - a) * 0.3), a * k, mid);
+        }
+        else {
+          groundBand(f.a, f.b, f.skill.radius * (1 + (1 - a) * 0.4));
+          ctx.fillStyle = f.skill.color + Math.round(a * 200).toString(16).padStart(2, "0");
+          glow(f.skill.color, 30);
+          ctx.fill();
+        }
         groundBand(f.a, f.b, f.skill.radius * 0.35);
         ctx.fillStyle = "#ffffff" + Math.round(a * 230).toString(16).padStart(2, "0");
         ctx.fill();
         noGlow();
+        ctx.globalCompositeOperation = "source-over";
+      }
+
+      // 장판이 터진 자리: 퍼지는 충격파와 잠깐 남는 그을린 바닥
+      if (fxReady) {
+        ctx.globalCompositeOperation = "lighter";
+        for (const f of fx) {
+          const a = f.life / f.max;
+          if (f.kind === "shock") floorSprite(spr("kar_shock", f.color), f.x, f.y, f.r * (0.9 + (1 - a) * 0.6) / 0.6, 0, a);
+          if (f.kind === "scorch") {
+            const late = f.art && f.art.late;
+            if (late) floorSprite(spr(late[0], late[1]), f.x, f.y, f.r / late[2], 0, a * 0.8);
+            else floorSprite(spr("kar_cracks", f.color), f.x, f.y, f.r * 0.9 / 0.54, 0, a * 0.7);
+          }
+        }
         ctx.globalCompositeOperation = "source-over";
       }
 
@@ -1116,14 +1476,24 @@
       const fw = Math.hypot(q.x - p.x, q.y - p.y) / 100;
       const r = s.radius * p.k;
 
-      // 사슬: 쏜 사람에서 갈고리까지
+      // 사슬: 쏜 사람에서 갈고리까지. 쓰레쉬는 초록 빛 사슬(롤 텍스처)
       if (look === "hook") {
         const o = upright(m.ox, m.oy, zh);
-        ctx.strokeStyle = "#adb5bd";
-        ctx.lineWidth = Math.max(1.5, 6 * p.k);
-        ctx.setLineDash([Math.max(3, 14 * p.k), Math.max(2, 8 * p.k)]);
-        ctx.beginPath(); ctx.moveTo(o.x, o.y); ctx.lineTo(p.x, p.y); ctx.stroke();
-        ctx.setLineDash([]);
+        if (fxReady && s.champ === "Thresh") {
+          const L = Math.hypot(p.x - o.x, p.y - o.y), W = Math.max(6, 30 * p.k);
+          ctx.save();
+          ctx.translate(o.x, o.y);
+          ctx.rotate(Math.atan2(p.y - o.y, p.x - o.x));
+          ctx.globalCompositeOperation = "lighter";
+          ctx.drawImage(spr("thresh_chain"), 0, -W / 2, L, W);
+          ctx.restore();
+        } else {
+          ctx.strokeStyle = "#adb5bd";
+          ctx.lineWidth = Math.max(1.5, 6 * p.k);
+          ctx.setLineDash([Math.max(3, 14 * p.k), Math.max(2, 8 * p.k)]);
+          ctx.beginPath(); ctx.moveTo(o.x, o.y); ctx.lineTo(p.x, p.y); ctx.stroke();
+          ctx.setLineDash([]);
+        }
       }
 
       ctx.save();
@@ -1158,143 +1528,185 @@
         ctx.globalAlpha = 1;
       };
 
-      if (look === "orb") {
-        trail(Math.min(m.flown, s.radius * 5), r * 0.8, s.color);
+      // 직접 그린 모양(텍스처를 못 받았을 때, 또는 keep 인 스킬의 몸통)
+      const drawLook = () => {
+        if (look === "orb") {
+          trail(Math.min(m.flown, s.radius * 5), r * 0.8, s.color);
+          // 벨코즈 Q: 갈라지기 직전 부풀며 번쩍인다(경로는 안 보여 준다)
+          let rad = r;
+          if (m.splitIn != null) {
+            const tt = 1 - Math.max(0, m.splitIn) / s.split.telegraph;
+            rad = r * (1 + 0.45 * tt);
+            ctx.globalAlpha = 0.5 + 0.5 * Math.abs(Math.sin(tt * Math.PI * 3));
+            ctx.fillStyle = "#ffffff";
+            ctx.beginPath(); ctx.arc(0, 0, rad * 1.25, 0, Math.PI * 2); ctx.fill();
+            ctx.globalAlpha = 1;
+          }
+          core(rad, "#ffffff", s.color);
+        } else if (look === "fire") {
+          trail(Math.min(m.flown, s.radius * 6), r * 0.9, "#ff922b", 0.5);
+          const flick = 1 + (Math.random() - 0.5) * 0.12;
+          core(r * flick, "#fff3bf", "#ff6b00", 1.7);
+        } else if (look === "bolt") {
+          // 짧고 굵은 광탄: 머리의 원이 판정, 뒤로 길게 빛이 끌린다
+          trail(Math.min(m.flown, 260), r * 0.7, s.color, 0.6);
+          core(r, "#ffffff", s.color, 1.3);
+        } else if (look === "heart") {
+          trail(Math.min(m.flown, s.radius * 4), r * 0.6, s.color, 0.3);
+          ctx.rotate(-ang);                        // 하트는 늘 똑바로 선다
+          const hs = r * 1.05;
+          ctx.fillStyle = s.color;
+          ctx.beginPath();
+          ctx.moveTo(0, hs * 0.75);
+          ctx.bezierCurveTo(-hs * 1.3, -hs * 0.1, -hs * 0.6, -hs * 1.05, 0, -hs * 0.45);
+          ctx.bezierCurveTo(hs * 0.6, -hs * 1.05, hs * 1.3, -hs * 0.1, 0, hs * 0.75);
+          ctx.fill();
+          ctx.globalAlpha = 0.6;
+          ctx.fillStyle = "#ffffff";
+          ctx.beginPath(); ctx.arc(-hs * 0.3, -hs * 0.45, hs * 0.18, 0, Math.PI * 2); ctx.fill();
+          ctx.globalAlpha = 1;
+        } else if (look === "spear") {
+          // 니달리 Q: 긴 자루와 창날. 판정 원(작다) 은 창끝에 있다
+          ctx.globalCompositeOperation = "source-over";
+          ctx.strokeStyle = "#a9754f";
+          ctx.lineWidth = Math.max(2, 9 * p.k);
+          ctx.beginPath(); ctx.moveTo(-190 * fw, 0); ctx.lineTo(0, 0); ctx.stroke();
+          ctx.fillStyle = "#e9ecef";
+          ctx.beginPath(); ctx.moveTo(r * 1.1, 0); ctx.lineTo(-r * 0.8, -r * 0.7); ctx.lineTo(-r * 0.8, r * 0.7); ctx.closePath(); ctx.fill();
+          ctx.globalCompositeOperation = "lighter";
+          core(r, "#ffffff", s.color, 1.2, 0.3);
+        } else if (look === "blade") {
+          // 레오나 E: 앞으로 날아가는 해의 칼날
+          trail(Math.min(m.flown, 220), r * 0.8, s.color, 0.45);
+          const g = ctx.createLinearGradient(-r, 0, r, 0);
+          g.addColorStop(0, s.color + "00");
+          g.addColorStop(0.7, s.color);
+          g.addColorStop(1, "#ffffff");
+          ctx.fillStyle = g;
+          ctx.beginPath();
+          ctx.moveTo(r * 1.1, 0);
+          ctx.quadraticCurveTo(r * 0.2, -r * 1.3, -r * 1.2, -r * 0.9);
+          ctx.quadraticCurveTo(-r * 0.2, 0, -r * 1.2, r * 0.9);
+          ctx.quadraticCurveTo(r * 0.2, r * 1.3, r * 1.1, 0);
+          ctx.fill();
+        } else if (look === "hook") {
+          // 블리츠는 금빛 주먹, 쓰레쉬는 초록 낫
+          ctx.globalCompositeOperation = "source-over";
+          if (s.champ === "Blitzcrank") {
+            ctx.fillStyle = "#e8a33d";
+            ctx.beginPath(); ctx.arc(0, 0, r * 0.9, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = "#ffd8a8";
+            for (let i = -1; i <= 1; i++) { ctx.beginPath(); ctx.arc(r * 0.7, i * r * 0.45, r * 0.28, 0, Math.PI * 2); ctx.fill(); }
+          } else {
+            ctx.strokeStyle = s.color;
+            ctx.lineWidth = Math.max(2, r * 0.3);
+            ctx.beginPath(); ctx.arc(-r * 0.2, 0, r * 0.85, -Math.PI * 0.75, Math.PI * 0.35); ctx.stroke();
+          }
+          ctx.globalCompositeOperation = "lighter";
+          core(r, "#ffffff", s.color, 1.2, 0.2);
+        } else if (look === "zap") {
+          // 징크스 W: 아주 빠른 가는 전격. 뒤로 길게 번개가 남는다
+          const len = Math.min(m.flown, 700);
+          const bolt = () => {
+            ctx.beginPath(); ctx.moveTo(-len * fw, 0);
+            for (let x = -len * fw; x < 0; x += 16) ctx.lineTo(x, (Math.random() - 0.5) * r * 0.5);
+            ctx.lineTo(0, 0);
+          };
+          ctx.globalAlpha = 0.7;
+          ctx.strokeStyle = s.color;
+          ctx.lineWidth = Math.max(1.5, r * 0.28);
+          glow(s.color, 12);
+          bolt(); ctx.stroke();
+          noGlow();
+          ctx.globalAlpha = 1;
+          ctx.strokeStyle = "#fff0f6";
+          ctx.lineWidth = Math.max(1, r * 0.08);
+          bolt(); ctx.stroke();
+          core(r * 0.9, "#ffffff", s.color, 1.2);
+        } else if (look === "arrow") {
+          // 애쉬 R: 거대한 얼음 화살. 판정 원(큰 원) 은 화살촉 쪽에 있다
+          trail(Math.min(m.flown, 500), r * 0.5, "#d0ebff", 0.3);
+          ctx.globalCompositeOperation = "source-over";
+          // 자루
+          const shaft = ctx.createLinearGradient(-r * 4.5 * fw, 0, -r * 0.4, 0);
+          shaft.addColorStop(0, "#74c0fc00");
+          shaft.addColorStop(1, "#a5d8ff");
+          ctx.fillStyle = shaft;
+          ctx.beginPath();
+          ctx.moveTo(-r * 0.4, -r * 0.12); ctx.lineTo(-r * 4.5 * fw, -r * 0.05);
+          ctx.lineTo(-r * 4.5 * fw, r * 0.05); ctx.lineTo(-r * 0.4, r * 0.12);
+          ctx.closePath(); ctx.fill();
+          // 깃: 자루 끝 양옆
+          ctx.fillStyle = "#4dabf7";
+          for (const side of [-1, 1]) {
+            ctx.beginPath();
+            ctx.moveTo(-r * 2.6 * fw, 0); ctx.lineTo(-r * 3.4 * fw, side * r * 0.45); ctx.lineTo(-r * 3.1 * fw, 0);
+            ctx.closePath(); ctx.fill();
+          }
+          // 촉: 얼음 결정
+          const head = ctx.createLinearGradient(-r * 0.7, 0, r * 1.1, 0);
+          head.addColorStop(0, "#339af0");
+          head.addColorStop(0.6, "#a5d8ff");
+          head.addColorStop(1, "#e7f5ff");
+          ctx.fillStyle = head;
+          ctx.beginPath();
+          ctx.moveTo(r * 1.1, 0); ctx.lineTo(-r * 0.2, -r * 0.5); ctx.lineTo(-r * 0.7, 0); ctx.lineTo(-r * 0.2, r * 0.5);
+          ctx.closePath(); ctx.fill();
+          ctx.strokeStyle = "#e7f5ff";
+          ctx.lineWidth = Math.max(1, r * 0.04);
+          ctx.stroke();
+          ctx.globalCompositeOperation = "lighter";
+          core(r, "#ffffff", s.color, 1.2, 0.18);
+        } else if (look === "vines") {
+          // 덩굴 끝의 꽃봉오리(바닥 가까이)
+          ctx.globalCompositeOperation = "source-over";
+          ctx.fillStyle = "#2f9e44";
+          for (let i = 0; i < 5; i++) {
+            const a = i / 5 * Math.PI * 2;
+            ctx.beginPath(); ctx.ellipse(Math.cos(a) * r * 0.45, Math.sin(a) * r * 0.45, r * 0.5, r * 0.25, a, 0, Math.PI * 2); ctx.fill();
+          }
+          ctx.fillStyle = "#f783ac";
+          ctx.beginPath(); ctx.arc(0, 0, r * 0.3, 0, Math.PI * 2); ctx.fill();
+        }
+      };
+
+      // 롤 텍스처로 그린 모양(MISSILE_ART)
+      const art = fxReady && MISSILE_ART[s.name.replace(" (갈라짐)", "")];
+      if (art) {
         // 벨코즈 Q: 갈라지기 직전 부풀며 번쩍인다(경로는 안 보여 준다)
-        let rad = r;
+        let k = 1;
         if (m.splitIn != null) {
           const tt = 1 - Math.max(0, m.splitIn) / s.split.telegraph;
-          rad = r * (1 + 0.45 * tt);
+          k = 1 + 0.45 * tt;
           ctx.globalAlpha = 0.5 + 0.5 * Math.abs(Math.sin(tt * Math.PI * 3));
           ctx.fillStyle = "#ffffff";
-          ctx.beginPath(); ctx.arc(0, 0, rad * 1.25, 0, Math.PI * 2); ctx.fill();
+          ctx.beginPath(); ctx.arc(0, 0, r * k * 1.25, 0, Math.PI * 2); ctx.fill();
           ctx.globalAlpha = 1;
         }
-        core(rad, "#ffffff", s.color);
-      } else if (look === "fire") {
-        trail(Math.min(m.flown, s.radius * 6), r * 0.9, "#ff922b", 0.5);
-        const flick = 1 + (Math.random() - 0.5) * 0.12;
-        core(r * flick, "#fff3bf", "#ff6b00", 1.7);
-      } else if (look === "bolt") {
-        // 짧고 굵은 광탄: 머리의 원이 판정, 뒤로 길게 빛이 끌린다
-        trail(Math.min(m.flown, 260), r * 0.7, s.color, 0.6);
-        core(r, "#ffffff", s.color, 1.3);
-      } else if (look === "heart") {
-        trail(Math.min(m.flown, s.radius * 4), r * 0.6, s.color, 0.3);
-        ctx.rotate(-ang);                        // 하트는 늘 똑바로 선다
-        const hs = r * 1.05;
-        ctx.fillStyle = s.color;
-        ctx.beginPath();
-        ctx.moveTo(0, hs * 0.75);
-        ctx.bezierCurveTo(-hs * 1.3, -hs * 0.1, -hs * 0.6, -hs * 1.05, 0, -hs * 0.45);
-        ctx.bezierCurveTo(hs * 0.6, -hs * 1.05, hs * 1.3, -hs * 0.1, 0, hs * 0.75);
-        ctx.fill();
-        ctx.globalAlpha = 0.6;
-        ctx.fillStyle = "#ffffff";
-        ctx.beginPath(); ctx.arc(-hs * 0.3, -hs * 0.45, hs * 0.18, 0, Math.PI * 2); ctx.fill();
-        ctx.globalAlpha = 1;
-      } else if (look === "spear") {
-        // 니달리 Q: 긴 자루와 창날. 판정 원(작다) 은 창끝에 있다
-        ctx.globalCompositeOperation = "source-over";
-        ctx.strokeStyle = "#a9754f";
-        ctx.lineWidth = Math.max(2, 9 * p.k);
-        ctx.beginPath(); ctx.moveTo(-190 * fw, 0); ctx.lineTo(0, 0); ctx.stroke();
-        ctx.fillStyle = "#e9ecef";
-        ctx.beginPath(); ctx.moveTo(r * 1.1, 0); ctx.lineTo(-r * 0.8, -r * 0.7); ctx.lineTo(-r * 0.8, r * 0.7); ctx.closePath(); ctx.fill();
-        ctx.globalCompositeOperation = "lighter";
-        core(r, "#ffffff", s.color, 1.2, 0.3);
-      } else if (look === "blade") {
-        // 레오나 E: 앞으로 날아가는 해의 칼날
-        trail(Math.min(m.flown, 220), r * 0.8, s.color, 0.45);
-        const g = ctx.createLinearGradient(-r, 0, r, 0);
-        g.addColorStop(0, s.color + "00");
-        g.addColorStop(0.7, s.color);
-        g.addColorStop(1, "#ffffff");
-        ctx.fillStyle = g;
-        ctx.beginPath();
-        ctx.moveTo(r * 1.1, 0);
-        ctx.quadraticCurveTo(r * 0.2, -r * 1.3, -r * 1.2, -r * 0.9);
-        ctx.quadraticCurveTo(-r * 0.2, 0, -r * 1.2, r * 0.9);
-        ctx.quadraticCurveTo(r * 0.2, r * 1.3, r * 1.1, 0);
-        ctx.fill();
-      } else if (look === "hook") {
-        // 블리츠는 금빛 주먹, 쓰레쉬는 초록 낫
-        ctx.globalCompositeOperation = "source-over";
-        if (s.champ === "Blitzcrank") {
-          ctx.fillStyle = "#e8a33d";
-          ctx.beginPath(); ctx.arc(0, 0, r * 0.9, 0, Math.PI * 2); ctx.fill();
-          ctx.fillStyle = "#ffd8a8";
-          for (let i = -1; i <= 1; i++) { ctx.beginPath(); ctx.arc(r * 0.7, i * r * 0.45, r * 0.28, 0, Math.PI * 2); ctx.fill(); }
+        if (art.trail) {
+          const [name, color, len, wide] = art.trail;
+          const L = Math.min(m.flown, len) * fw, H = r * wide * 2, img = spr(name, color), W = img.width;
+          // 머리에서 멀어질수록 옅게(네 토막)
+          for (let i = 0; i < 4 && L > 1; i++) {
+            ctx.globalAlpha = 1 - i * 0.25;
+            ctx.drawImage(img, W * (3 - i) / 4, 0, W / 4, img.height, -L * (i + 1) / 4, -H / 2, L / 4 + 0.5, H);
+          }
+          ctx.globalAlpha = 1;
         } else {
-          ctx.strokeStyle = s.color;
-          ctx.lineWidth = Math.max(2, r * 0.3);
-          ctx.beginPath(); ctx.arc(-r * 0.2, 0, r * 0.85, -Math.PI * 0.75, Math.PI * 0.35); ctx.stroke();
+          trail(Math.min(m.flown, s.radius * 5), r * 0.8, s.color);
         }
+        const now = performance.now() / 1000;
+        const put = list => (list || []).forEach(([name, color, size, dx = 0, mode = ""]) => {
+          const rot = mode === "spin" ? now * 6 : mode === "jitter" ? Math.random() * Math.PI * 2 : mode === "up" ? -ang : 0;
+          standSprite(spr(name, color), dx * r, 0, r * size * k, 1, rot);
+        });
+        put(art.under);
+        if (art.keep) drawLook();
+        else core(r * k, "#ffffff", s.color, 1.1, 0.3);     // 판정 크기의 옅은 구슬(바닥 그림자가 진짜 판정)
         ctx.globalCompositeOperation = "lighter";
-        core(r, "#ffffff", s.color, 1.2, 0.2);
-      } else if (look === "zap") {
-        // 징크스 W: 아주 빠른 가는 전격. 뒤로 길게 번개가 남는다
-        const len = Math.min(m.flown, 700);
-        const bolt = () => {
-          ctx.beginPath(); ctx.moveTo(-len * fw, 0);
-          for (let x = -len * fw; x < 0; x += 16) ctx.lineTo(x, (Math.random() - 0.5) * r * 0.5);
-          ctx.lineTo(0, 0);
-        };
-        ctx.globalAlpha = 0.7;
-        ctx.strokeStyle = s.color;
-        ctx.lineWidth = Math.max(1.5, r * 0.28);
-        glow(s.color, 12);
-        bolt(); ctx.stroke();
-        noGlow();
-        ctx.globalAlpha = 1;
-        ctx.strokeStyle = "#fff0f6";
-        ctx.lineWidth = Math.max(1, r * 0.08);
-        bolt(); ctx.stroke();
-        core(r * 0.9, "#ffffff", s.color, 1.2);
-      } else if (look === "arrow") {
-        // 애쉬 R: 거대한 얼음 화살. 판정 원(큰 원) 은 화살촉 쪽에 있다
-        trail(Math.min(m.flown, 500), r * 0.5, "#d0ebff", 0.3);
-        ctx.globalCompositeOperation = "source-over";
-        // 자루
-        const shaft = ctx.createLinearGradient(-r * 4.5 * fw, 0, -r * 0.4, 0);
-        shaft.addColorStop(0, "#74c0fc00");
-        shaft.addColorStop(1, "#a5d8ff");
-        ctx.fillStyle = shaft;
-        ctx.beginPath();
-        ctx.moveTo(-r * 0.4, -r * 0.12); ctx.lineTo(-r * 4.5 * fw, -r * 0.05);
-        ctx.lineTo(-r * 4.5 * fw, r * 0.05); ctx.lineTo(-r * 0.4, r * 0.12);
-        ctx.closePath(); ctx.fill();
-        // 깃: 자루 끝 양옆
-        ctx.fillStyle = "#4dabf7";
-        for (const side of [-1, 1]) {
-          ctx.beginPath();
-          ctx.moveTo(-r * 2.6 * fw, 0); ctx.lineTo(-r * 3.4 * fw, side * r * 0.45); ctx.lineTo(-r * 3.1 * fw, 0);
-          ctx.closePath(); ctx.fill();
-        }
-        // 촉: 얼음 결정
-        const head = ctx.createLinearGradient(-r * 0.7, 0, r * 1.1, 0);
-        head.addColorStop(0, "#339af0");
-        head.addColorStop(0.6, "#a5d8ff");
-        head.addColorStop(1, "#e7f5ff");
-        ctx.fillStyle = head;
-        ctx.beginPath();
-        ctx.moveTo(r * 1.1, 0); ctx.lineTo(-r * 0.2, -r * 0.5); ctx.lineTo(-r * 0.7, 0); ctx.lineTo(-r * 0.2, r * 0.5);
-        ctx.closePath(); ctx.fill();
-        ctx.strokeStyle = "#e7f5ff";
-        ctx.lineWidth = Math.max(1, r * 0.04);
-        ctx.stroke();
-        ctx.globalCompositeOperation = "lighter";
-        core(r, "#ffffff", s.color, 1.2, 0.18);
-      } else if (look === "vines") {
-        // 덩굴 끝의 꽃봉오리(바닥 가까이)
-        ctx.globalCompositeOperation = "source-over";
-        ctx.fillStyle = "#2f9e44";
-        for (let i = 0; i < 5; i++) {
-          const a = i / 5 * Math.PI * 2;
-          ctx.beginPath(); ctx.ellipse(Math.cos(a) * r * 0.45, Math.sin(a) * r * 0.45, r * 0.5, r * 0.25, a, 0, Math.PI * 2); ctx.fill();
-        }
-        ctx.fillStyle = "#f783ac";
-        ctx.beginPath(); ctx.arc(0, 0, r * 0.3, 0, Math.PI * 2); ctx.fill();
+        put(art.over);
+      } else {
+        drawLook();
       }
       ctx.restore();
     }
@@ -1305,6 +1717,24 @@
         if (z.skill.kind !== "cage" || z.wait > 0) continue;
         const s = z.skill, n = 28, hgt = 170;
         const a = z.done != null ? Math.max(0, z.done / 0.3) : 1;
+        if (fxReady) {
+          // 테두리를 따라 세운 에너지 벽. 앞쪽 반과 뒤쪽 반을 따로 그린다
+          const img = spr("veig_wall"), W = img.width;
+          ctx.globalCompositeOperation = "lighter";
+          for (let i = 0; i < n; i++) {
+            const a0 = i / n * Math.PI * 2, a1 = (i + 1) / n * Math.PI * 2;
+            if ((Math.sin((a0 + a1) / 2) > 0) !== front) continue;
+            const x0 = z.x + Math.cos(a0) * s.radius, y0 = z.y + Math.sin(a0) * s.radius;
+            const x1 = z.x + Math.cos(a1) * s.radius, y1 = z.y + Math.sin(a1) * s.radius;
+            const o = proj(x0, y0, hgt), e = proj(x1, y1, hgt), q = proj(x0, y0, 0);
+            ctx.save();
+            ctx.globalAlpha = a * 0.9;
+            ctx.transform(e.x - o.x, e.y - o.y, q.x - o.x, q.y - o.y, o.x, o.y);
+            ctx.drawImage(img, (i % 4) * W / 4, 0, W / 4, img.height, 0, 0, 1.03, 1);
+            ctx.restore();
+          }
+          ctx.globalCompositeOperation = "source-over";
+        }
         ctx.globalAlpha = a;
         glow(s.color, 10);
         ctx.strokeStyle = s.color;
@@ -1336,6 +1766,13 @@
       for (const f of fx) {
         if (f.kind !== "pillar") continue;
         const a = f.life / f.max;
+        if (fxReady) {
+          const b = proj(f.x, f.y, 0), w = f.r * 1.5 * b.k * (0.5 + 0.5 * a), h = 520 * b.k * (1.25 - a);
+          ctx.globalAlpha = a * 0.9;
+          ctx.drawImage(spr("glow", f.color), b.x - w / 2, b.y - h, w, h * 1.15);
+          ctx.drawImage(spr("glow", "#ffffff"), b.x - w / 5, b.y - h * 0.9, w / 2.5, h);
+          continue;
+        }
         const b = proj(f.x, f.y, 0), tp = proj(f.x, f.y, 420 * (1.2 - a));
         const w = f.r * b.k * (0.6 + 0.4 * a);
         const g = ctx.createLinearGradient(0, b.y, 0, tp.y);
@@ -1347,6 +1784,43 @@
         ctx.moveTo(b.x - w, b.y); ctx.lineTo(tp.x - w * 0.5, tp.y); ctx.lineTo(tp.x + w * 0.5, tp.y); ctx.lineTo(b.x + w, b.y);
         ctx.closePath();
         ctx.fill();
+      }
+      if (fxReady) {
+        for (const f of fx) {
+          const a = f.life / f.max;
+          if (f.kind === "spark") {
+            // 맞은 자리의 불꽃(이즈리얼 Q 적중 텍스처를 스킬 색으로)
+            const q = upright(f.x, f.y, 100);
+            standSprite(spr("ez_spark", f.color), q.x, q.y, 320 * q.k * (1.3 - 0.5 * a), a, f.x);
+          } else if (f.kind === "spikes") {
+            // 초가스 Q: 땅에서 가시가 솟았다가 가라앉는다
+            ctx.globalCompositeOperation = "source-over";
+            const img = spr("cho_spike", "#d8f5a2");
+            const rise = Math.min(1, (1 - a) * 6) * Math.min(1, a * 2.5);
+            for (let i = 0; i < 9; i++) {
+              const ang = f.seed + i * 2.4, rr = f.r * (0.15 + 0.7 * ((i * 37) % 10) / 10);
+              const b = proj(f.x + Math.cos(ang) * rr, f.y + Math.sin(ang) * rr, 0);
+              const H = 260 * b.k * rise * (0.7 + 0.3 * ((i * 53) % 7) / 7), W = H * img.width / img.height * 1.4;
+              // 텍스처가 옅어서 두 번 겹쳐 진하게
+              if (H > 1) { ctx.drawImage(img, b.x - W / 2, b.y - H, W, H); ctx.drawImage(img, b.x - W / 2, b.y - H, W, H); }
+            }
+            ctx.globalCompositeOperation = "lighter";
+          }
+        }
+        // 하늘에서 떨어지는 암흑 물질(베이가 W), 그 자리에 생기는 구체(신드라 Q)
+        for (const z of zones) {
+          const art = ZONE_ART[z.skill.name];
+          if (!art || !art.sky || z.wait <= 0) continue;
+          const pr = 1 - z.wait / z.total, [name, color, how] = art.sky;
+          if (how === "fall") {
+            const q = upright(z.x, z.y, 40 + 1100 * Math.pow(1 - pr, 1.3));
+            standSprite(spr("glow", color), q.x, q.y, z.skill.radius * 1.4 * q.k, 0.7);
+            standSprite(spr(name, color), q.x, q.y, z.skill.radius * 0.8 * q.k, 1, pr * 8);
+          } else {
+            const q = upright(z.x, z.y, 70);
+            standSprite(spr(name, color), q.x, q.y, z.skill.radius * 0.9 * q.k * pr, pr);
+          }
+        }
       }
       for (const p of parts) {
         const q = proj(p.x, p.y, p.z);
@@ -1379,7 +1853,7 @@
     function drawMinimap() {
       const w = mini.width / DPR, h = mini.height / DPR, k = w / ARENA.w;
       mctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-      mctx.drawImage(TEX, 0, 0, w, h);
+      mctx.drawImage(groundReady ? groundImg : TEX, 0, 0, w, h);
       mctx.fillStyle = "rgba(1, 10, 19, .25)";
       mctx.fillRect(0, 0, w, h);
       for (const z of zones) {
@@ -1497,7 +1971,8 @@
       over.hidden = true;
       clearTimeout(overTimer);
       canvas.classList.remove("dead");
-      announce("소환사의 협곡에 오신 것을 환영합니다", "welcome", 2200);
+      ensureAudio();
+      announce("소환사의 협곡에 오신 것을 환영합니다", "welcome", 2200, "welcome");
       canvas.focus({ preventScroll: true });
       if (opts.onStart) opts.onStart();
       last = performance.now();
@@ -1512,6 +1987,7 @@
       canvas.classList.add("dead");
       announce("처치당했습니다", "death", 1600);
       sfx("death");
+      setTimeout(() => sample("slain", 0.7), 350);   // "당신은 처치당했습니다!"(아나운서)
       const result = { ms: Math.round(t * 1000), dodged, by: lastHit.name, ver: VERSION };
       clearTimeout(overTimer);
       overTimer = setTimeout(() => showOver(`
@@ -1601,8 +2077,14 @@
       const on = soundOn();
       soundBtn.textContent = on ? "효과음 켜짐" : "효과음 꺼짐";
       soundBtn.setAttribute("aria-pressed", String(on));
+      volInput.value = Math.round(volume() * 100);
+      volText.textContent = volInput.value + "%";
+      volInput.disabled = !on;
     };
-    soundBtn.onclick = () => { setSound(!soundOn()); paintSound(); };
+    // 슬라이더를 미는 동안 바로 바뀌고, 놓으면 점멸 소리로 크기를 들려 준다
+    volInput.oninput = () => { setVolume(volInput.value / 100); volText.textContent = volInput.value + "%"; };
+    volInput.onchange = () => { ensureAudio(); loadSamples(); sfx("flash"); };
+    soundBtn.onclick = () => { setSound(!soundOn()); paintSound(); if (soundOn()) loadSamples(); };
     paintSound();
     root.querySelector('[data-hud="face"]').src = face.src;
 
@@ -1651,7 +2133,7 @@
         <li><b>${k.flash} · ${k.ghost}</b> 점멸(커서 쪽 400) · 유체화. 쿨타임 ${SPELLS.map(sp => sp.cd + "초").join(" · ")}</li>
         <li><b>휴대폰</b> 화면을 누른 곳으로 이동, 주문은 아래 칸을 눌러요</li>
       </ul>
-      <p class="note">이동 속도 ${CHAMP.speed}. 스킬 수치는 롤 클라이언트 데이터 그대로예요.</p>
+      <p class="note">이동 속도 ${CHAMP.speed}. 스킬 수치·그림은 롤 클라이언트, 소리는 롤 위키 것이에요.</p>
       <div class="dodge-actions"><button type="button" data-start>시작 <small>Space</small></button>${opts.links || ""}</div>`);
       over.querySelectorAll("[data-move]").forEach(btn => btn.onclick = () => {
         controls.move = btn.dataset.move;
