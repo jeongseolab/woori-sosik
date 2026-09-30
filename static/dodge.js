@@ -36,28 +36,33 @@
   const REACT = 0.25;
 
   // kind: line(투사체) circle(지연 장판) beam(지연 레이저) cage(감옥)
+  // look: 투사체 생김새(그림만). 판정은 모두 앞쪽 원(반지름 radius) 하나다
+  //   orb 구슬(기본) · vines 바닥을 기는 덩굴 · spear 창 · fire 화염구 · heart 하트 · bolt 짧은 광탄
+  //   blade 칼날 · hook 사슬 달린 갈고리 · zap 가늘고 긴 전격 · arrow 거대한 화살
+  // inner: 장판 중심부 반지름(file castRadius). 그림으로만 구분한다(맞는 건 바깥 원 기준 그대로)
   // from: 몇 초부터 나오는지. rare: 가끔만
   const SKILLS = [
     // ── 투사체 (전부 file) ──
     { kind: "line", name: "모르가나 Q", champ: "Morgana", cast: 0.25, speed: 1200, radius: 70, range: 1300, color: "#b197fc", from: 0 },
     { kind: "line", name: "럭스 Q", champ: "Lux", cast: 0.25, speed: 1200, radius: 70, range: 1300, color: "#ffe066", from: 0 },
-    { kind: "line", name: "자이라 E", champ: "Zyra", cast: 0.25, speed: 1150, radius: 70, range: 1150, color: "#69db7c", from: 0 },
-    { kind: "line", name: "니달리 Q", champ: "Nidalee", cast: 0.25, speed: 1300, radius: 40, range: 1500, color: "#8ce99a", from: 8 },
-    { kind: "line", name: "브랜드 Q", champ: "Brand", cast: 0.25, speed: 1600, radius: 60, range: 1100, color: "#ff8787", from: 8 },
-    { kind: "line", name: "아리 E", champ: "Ahri", cast: 0.25, speed: 1550, radius: 60, range: 1000, color: "#faa2c1", from: 15 },
+    { kind: "line", name: "자이라 E", champ: "Zyra", cast: 0.25, speed: 1150, radius: 70, range: 1150, color: "#69db7c", from: 0, look: "vines" },
+    { kind: "line", name: "니달리 Q", champ: "Nidalee", cast: 0.25, speed: 1300, radius: 40, range: 1500, color: "#8ce99a", from: 8, look: "spear" },
+    { kind: "line", name: "브랜드 Q", champ: "Brand", cast: 0.25, speed: 1600, radius: 60, range: 1100, color: "#ff8787", from: 8, look: "fire" },
+    { kind: "line", name: "아리 E", champ: "Ahri", cast: 0.25, speed: 1550, radius: 60, range: 1000, color: "#faa2c1", from: 15, look: "heart" },
     // 벨코즈 Q 는 내 옆을 지날 때(벨코즈가 다시 눌러서) 또는 사거리 끝에서 양옆 직각으로 갈라진다.
-    // 갈라지기 telegraph 초 전부터 갈라질 방향이 보인다(SplitTelegraphTime). 갈라진 것은 VelkozQMissileSplit
+    // 갈라지기 telegraph 초 전부터 구슬이 부풀며 번쩍인다(SplitTelegraphTime). 롤처럼 갈라질 경로는 안 보여 준다.
+    // 갈라진 것은 VelkozQMissileSplit
     { kind: "line", name: "벨코즈 Q", champ: "Velkoz", cast: 0.25, speed: 1300, radius: 50, range: 1100, color: "#d0bfff", from: 15,
       split: { speed: 2100, radius: 45, range: 1100, telegraph: 0.25 } },
     { kind: "line", name: "제라스 E", champ: "Xerath", cast: 0.25, speed: 1400, radius: 60, range: 1125, color: "#91a7ff", from: 15 },
-    { kind: "line", name: "이즈리얼 Q", champ: "Ezreal", cast: 0.25, speed: 2000, radius: 60, range: 1200, color: "#74c0fc", from: 25 },
-    { kind: "line", name: "레오나 E", champ: "Leona", cast: 0.25, speed: 2000, radius: 70, range: 900, color: "#ffd43b", from: 25 },
+    { kind: "line", name: "이즈리얼 Q", champ: "Ezreal", cast: 0.25, speed: 2000, radius: 60, range: 1200, color: "#74c0fc", from: 25, look: "bolt" },
+    { kind: "line", name: "레오나 E", champ: "Leona", cast: 0.25, speed: 2000, radius: 70, range: 900, color: "#ffd43b", from: 25, look: "blade" },
     { kind: "line", name: "베이가 Q", champ: "Veigar", cast: 0.25, speed: 2200, radius: 70, range: 1050, color: "#9775fa", from: 25 },
-    { kind: "line", name: "블리츠크랭크 Q", champ: "Blitzcrank", cast: 0.25, speed: 1800, radius: 70, range: 1080, color: "#ffc078", from: 35 },
-    { kind: "line", name: "쓰레쉬 Q", champ: "Thresh", cast: 0.5, speed: 1900, radius: 70, range: 1100, color: "#63e6be", from: 35 },
-    { kind: "line", name: "징크스 W", champ: "Jinx", cast: 0.6, speed: 3300, radius: 60, range: 1500, color: "#f783ac", from: 50 },
+    { kind: "line", name: "블리츠크랭크 Q", champ: "Blitzcrank", cast: 0.25, speed: 1800, radius: 70, range: 1080, color: "#ffc078", from: 35, look: "hook" },
+    { kind: "line", name: "쓰레쉬 Q", champ: "Thresh", cast: 0.5, speed: 1900, radius: 70, range: 1100, color: "#63e6be", from: 35, look: "hook" },
+    { kind: "line", name: "징크스 W", champ: "Jinx", cast: 0.6, speed: 3300, radius: 60, range: 1500, color: "#f783ac", from: 50, look: "zap" },
     // 애쉬 R 은 1500 에서 시작해 초당 200 씩 빨라져 2100 까지(AcceleratingMovement)
-    { kind: "line", name: "애쉬 R", champ: "Ashe", cast: 0.25, speed: 1500, accel: 200, maxSpeed: 2100, radius: 130, range: FAR, color: "#a5d8ff", from: 50, rare: true },
+    { kind: "line", name: "애쉬 R", champ: "Ashe", cast: 0.25, speed: 1500, accel: 200, maxSpeed: 2100, radius: 130, range: FAR, color: "#a5d8ff", from: 50, rare: true, look: "arrow" },
 
     // ── 지연 장판: 시전 → 바닥에 표시 → delay 초 뒤 터짐 ──
     { kind: "circle", name: "카서스 Q", champ: "Karthus", cast: 0.25, delay: 0.528, radius: 160, range: 875, color: "#b2f2bb", from: 0, src: "delay: wiki" },
@@ -65,10 +70,10 @@
     { kind: "circle", name: "초가스 Q", champ: "Chogath", cast: 0.5, delay: 0.627, radius: 230, range: 950, color: "#a9e34b", from: 8, src: "cast, delay: wiki" },
     { kind: "circle", name: "베이가 W", champ: "Veigar", cast: 0.25, delay: 1.2, radius: 225, range: 950, color: "#7950f2", from: 8 },
     { kind: "circle", name: "신드라 Q", champ: "Syndra", cast: 0, delay: 0.6, radius: 180, range: 800, color: "#e599f7", from: 15, src: "cast(없음), delay: wiki" },
-    { kind: "circle", name: "제라스 W", champ: "Xerath", cast: 0.25, delay: 0.5, radius: 250, range: 1000, color: "#748ffc", from: 15 },
+    { kind: "circle", name: "제라스 W", champ: "Xerath", cast: 0.25, delay: 0.5, radius: 250, inner: 100, range: 1000, color: "#748ffc", from: 15 },
     // 벨코즈 E 는 멀리 던질수록 늦게 떨어진다: 0.25초(가까이) ~ 0.55초(사거리 끝)
     { kind: "circle", name: "벨코즈 E", champ: "Velkoz", cast: 0.25, delay: 0.25, delayFar: 0.55, radius: 225, range: 800, color: "#cc5de8", from: 25 },
-    { kind: "circle", name: "레오나 R", champ: "Leona", cast: 0.25, delay: 0.625, radius: 300, range: 1200, color: "#fab005", from: 25, src: "delay: wiki" },
+    { kind: "circle", name: "레오나 R", champ: "Leona", cast: 0.25, delay: 0.625, radius: 300, inner: 120, range: 1200, color: "#fab005", from: 25, src: "delay: wiki" },
 
     // ── 지연 레이저: 시전하는 동안 가는 선이 보이고, 끝나는 순간 선 전체를 친다 ──
     { kind: "beam", name: "진 W", champ: "Jhin", cast: 0.75, radius: 40, range: FAR, color: "#ff6b6b", from: 35 },
@@ -313,7 +318,7 @@
       const sp = m.skill.split;
       const piece = { ...m.skill, name: m.skill.name + " (갈라짐)", speed: sp.speed, radius: sp.radius, range: sp.range, split: null };
       for (const side of [1, -1]) {
-        missiles.push({ skill: piece, x: m.x, y: m.y, dx: -m.dy * side, dy: m.dx * side, speed: sp.speed, left: sp.range, flown: 0 });
+        missiles.push({ skill: piece, x: m.x, y: m.y, ox: m.x, oy: m.y, dx: -m.dy * side, dy: m.dx * side, speed: sp.speed, left: sp.range, flown: 0 });
       }
       burst(m.x, m.y, MISSILE_Z, m.skill.color, 14, 300);
     }
@@ -343,7 +348,7 @@
     function release(c) {
       const s = c.skill;
       if (s.kind === "line") {
-        missiles.push({ skill: s, x: c.x, y: c.y, dx: c.dx, dy: c.dy, speed: s.speed, left: s.range, flown: 0 });
+        missiles.push({ skill: s, x: c.x, y: c.y, ox: c.x, oy: c.y, dx: c.dx, dy: c.dy, speed: s.speed, left: s.range, flown: 0 });
       } else if (s.kind === "circle") {
         // 벨코즈 E 처럼 멀리 던질수록 늦는 건, 가장 짧은 지연으로 자리를 잡고(더 넉넉한 쪽) 지연은 그 자리로 다시 잰다
         const at = fairSpot(c.aim, s, s.delay, c);
@@ -513,7 +518,7 @@
       ctx.closePath();
     }
 
-    // 바닥에 누운 띠(레이저, 갈라짐 예고). a -> b, 반쪽 폭 r
+    // 바닥에 누운 띠(레이저, 덩굴). a -> b, 반쪽 폭 r
     function groundBand(a, b, r) {
       const dx = b.x - a.x, dy = b.y - a.y, n = Math.hypot(dx, dy) || 1;
       const nx = -dy / n * r, ny = dx / n * r;
@@ -544,6 +549,14 @@
         p.life -= dt;
       }
       parts = parts.filter(p => p.life > 0);
+      // 브랜드 Q 는 날아가며 불티를 흘린다
+      if (state === "play") {
+        for (const m of missiles) {
+          if (m.skill.look !== "fire" || Math.random() > dt * 40) continue;
+          parts.push({ x: m.x - m.dx * 20, y: m.y - m.dy * 20, z: MISSILE_Z, vx: (Math.random() - 0.5) * 120, vy: (Math.random() - 0.5) * 120,
+                       vz: 80 + Math.random() * 120, life: 0.35, max: 0.35, color: Math.random() < 0.5 ? "#ffa94d" : "#ffe066", size: 7 + Math.random() * 6 });
+        }
+      }
       shake = Math.max(0, shake - dt);
       hurt = Math.max(0, hurt - dt);
     }
@@ -605,6 +618,17 @@
           ctx.lineWidth = 3;
           ctx.stroke();
           noGlow();
+          if (s.inner) {
+            // 중심부(제라스 W·레오나 R 은 가운데가 더 세다). 맞는 범위는 바깥 원 그대로
+            groundCircle(z.x, z.y, s.inner, 0, 36);
+            ctx.fillStyle = s.color + "33";
+            ctx.fill();
+            ctx.setLineDash([8, 6]);
+            ctx.strokeStyle = s.color;
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            ctx.setLineDash([]);
+          }
         } else if (s.kind === "cage") {
           const forming = z.wait > 0;
           ctx.globalAlpha = z.done != null ? Math.max(0, z.done / 0.3) : 1;
@@ -635,24 +659,35 @@
         ctx.fill();
       }
 
-      // 갈라짐 예고
+      // 자이라 E: 지나온 길에 덩굴이 자란다(바닥에 붙어 있다)
       for (const m of missiles) {
-        if (m.splitIn == null) continue;
-        const sp = m.skill.split;
-        const ahead = m.speed * Math.max(0, m.splitIn);
-        const px = m.x + m.dx * ahead, py = m.y + m.dy * ahead;
-        groundBand({ x: px - m.dy * sp.range, y: py + m.dx * sp.range }, { x: px + m.dy * sp.range, y: py - m.dx * sp.range }, 5);
-        ctx.fillStyle = m.skill.color + "aa";
+        if (m.skill.look !== "vines") continue;
+        const o = { x: m.ox, y: m.oy };
+        groundBand(o, m, m.skill.radius * 0.35);
+        ctx.fillStyle = "#2b8a3e";
         ctx.fill();
+        groundBand(o, m, m.skill.radius * 0.12);
+        ctx.fillStyle = "#8ce99a";
+        ctx.fill();
+        // 가시 달린 잎: 길 양옆으로 번갈아
+        const len = Math.hypot(m.x - o.x, m.y - o.y);
+        for (let d = 40, i = 0; d < len; d += 55, i++) {
+          const side = i % 2 ? 1 : -1;
+          const lx = o.x + m.dx * d - m.dy * side * m.skill.radius * 0.45;
+          const ly = o.y + m.dy * d + m.dx * side * m.skill.radius * 0.45;
+          groundCircle(lx, ly, 16, 0, 10);
+          ctx.fillStyle = "#40c057";
+          ctx.fill();
+        }
       }
 
-      // 투사체의 바닥 그림자 = 실제 판정 원
+      // 투사체의 바닥 그림자 = 실제 판정 원. 내 발밑 초록 링(65) 과 이 원이 겹치면 맞는다
       for (const m of missiles) {
         groundCircle(m.x, m.y, m.skill.radius, 0, 28);
-        ctx.fillStyle = "rgba(0, 0, 0, .35)";
+        ctx.fillStyle = "rgba(0, 0, 0, .4)";
         ctx.fill();
-        ctx.strokeStyle = m.skill.color + "88";
-        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = m.skill.color + "cc";
+        ctx.lineWidth = 2;
         ctx.stroke();
       }
 
@@ -721,7 +756,7 @@
       const base = proj(player.x, player.y, 0);
       const neck = upright(player.x, player.y, BODY_H * 0.7);
       const head = upright(player.x, player.y, BODY_H * 0.86);
-      const w = 22 * base.k, wn = 17 * neck.k, hr = 20 * head.k;
+      const w = 30 * base.k, wn = 22 * neck.k, hr = 24 * head.k;
       ctx.globalAlpha = safe > 0 && Math.floor(safe * 10) % 2 ? 0.35 : 1;
       const main = dead ? "#ff6b6b" : "#f0b429";
       const body = ctx.createLinearGradient(base.x - w, 0, base.x + w, 0);
@@ -776,29 +811,199 @@
       ctx.globalAlpha = 1;
     }
 
+    // 투사체 생김새. 판정은 모두 앞쪽 원(반지름 s.radius) 하나고, 이건 그림일 뿐이다.
+    // 밝게 꽉 찬 부분이 판정 크기와 같고, 그 바깥 빛번짐은 옅게만 둔다
     function drawMissile(m) {
-      const s = m.skill;
-      // 꼬리: 지나온 길에 점점 옅어지는 빛 알갱이
-      ctx.globalCompositeOperation = "lighter";
-      const tail = Math.min(m.flown, s.radius * 5);
-      for (let i = 5; i >= 1; i--) {
-        const back = tail * i / 5;
-        const q = upright(m.x - m.dx * back, m.y - m.dy * back, MISSILE_Z);
-        ctx.globalAlpha = 0.28 * (1 - i / 6);
-        ctx.fillStyle = s.color;
-        ctx.beginPath(); ctx.arc(q.x, q.y, s.radius * q.k * (1 - i / 8), 0, Math.PI * 2); ctx.fill();
+      const s = m.skill, look = s.look || "orb";
+      const zh = look === "vines" ? 18 : MISSILE_Z;
+      const p = upright(m.x, m.y, zh);
+      // 화면에서 날아가는 방향과, 그 방향으로 1유닛이 몇 픽셀인지(원근 때문에 바닥 방향과 조금 다르다)
+      const q = upright(m.x + m.dx * 100, m.y + m.dy * 100, zh);
+      const ang = Math.atan2(q.y - p.y, q.x - p.x);
+      const fw = Math.hypot(q.x - p.x, q.y - p.y) / 100;
+      const r = s.radius * p.k;
+
+      // 사슬: 쏜 사람에서 갈고리까지
+      if (look === "hook") {
+        const o = upright(m.ox, m.oy, zh);
+        ctx.strokeStyle = "#adb5bd";
+        ctx.lineWidth = Math.max(1.5, 6 * p.k);
+        ctx.setLineDash([Math.max(3, 14 * p.k), Math.max(2, 8 * p.k)]);
+        ctx.beginPath(); ctx.moveTo(o.x, o.y); ctx.lineTo(p.x, p.y); ctx.stroke();
+        ctx.setLineDash([]);
       }
-      ctx.globalAlpha = 1;
-      // 몸통: 가운데가 하얗게 빛나는 구슬
-      const p = upright(m.x, m.y, MISSILE_Z);
-      const r = s.radius * p.k * 1.15;
-      const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
-      g.addColorStop(0, "#ffffff");
-      g.addColorStop(0.35, s.color);
-      g.addColorStop(1, s.color + "00");
-      ctx.fillStyle = g;
-      ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.fill();
-      ctx.globalCompositeOperation = "source-over";
+
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(ang);
+      ctx.globalCompositeOperation = "lighter";
+
+      // 판정 크기의 빛 구슬(여러 모양의 머리에 공통으로 쓴다). a: 전체 진하기
+      const core = (rad, c1, c2, halo = 1.5, a = 1) => {
+        ctx.globalAlpha = 0.22 * a;
+        ctx.fillStyle = c2;
+        ctx.beginPath(); ctx.arc(0, 0, rad * halo, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = a;
+        const g = ctx.createRadialGradient(0, 0, 0, 0, 0, rad);
+        g.addColorStop(0, c1);
+        g.addColorStop(0.55, c2);
+        g.addColorStop(1, c2 + "cc");
+        ctx.fillStyle = g;
+        ctx.beginPath(); ctx.arc(0, 0, rad, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = 1;
+      };
+      // 지나온 길의 옅은 꼬리
+      const trail = (len, width, color, alpha = 0.35) => {
+        const g = ctx.createLinearGradient(-len * fw, 0, 0, 0);
+        g.addColorStop(0, color + "00");
+        g.addColorStop(1, color);
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.moveTo(-len * fw, 0); ctx.lineTo(0, -width); ctx.lineTo(0, width);
+        ctx.closePath(); ctx.fill();
+        ctx.globalAlpha = 1;
+      };
+
+      if (look === "orb") {
+        trail(Math.min(m.flown, s.radius * 5), r * 0.8, s.color);
+        // 벨코즈 Q: 갈라지기 직전 부풀며 번쩍인다(경로는 안 보여 준다)
+        let rad = r;
+        if (m.splitIn != null) {
+          const tt = 1 - Math.max(0, m.splitIn) / s.split.telegraph;
+          rad = r * (1 + 0.45 * tt);
+          ctx.globalAlpha = 0.5 + 0.5 * Math.abs(Math.sin(tt * Math.PI * 3));
+          ctx.fillStyle = "#ffffff";
+          ctx.beginPath(); ctx.arc(0, 0, rad * 1.25, 0, Math.PI * 2); ctx.fill();
+          ctx.globalAlpha = 1;
+        }
+        core(rad, "#ffffff", s.color);
+      } else if (look === "fire") {
+        trail(Math.min(m.flown, s.radius * 6), r * 0.9, "#ff922b", 0.5);
+        const flick = 1 + (Math.random() - 0.5) * 0.12;
+        core(r * flick, "#fff3bf", "#ff6b00", 1.7);
+      } else if (look === "bolt") {
+        // 짧고 굵은 광탄: 머리의 원이 판정, 뒤로 길게 빛이 끌린다
+        trail(Math.min(m.flown, 260), r * 0.7, s.color, 0.6);
+        core(r, "#ffffff", s.color, 1.3);
+      } else if (look === "heart") {
+        trail(Math.min(m.flown, s.radius * 4), r * 0.6, s.color, 0.3);
+        ctx.rotate(-ang);                        // 하트는 늘 똑바로 선다
+        const hs = r * 1.05;
+        ctx.fillStyle = s.color;
+        ctx.beginPath();
+        ctx.moveTo(0, hs * 0.75);
+        ctx.bezierCurveTo(-hs * 1.3, -hs * 0.1, -hs * 0.6, -hs * 1.05, 0, -hs * 0.45);
+        ctx.bezierCurveTo(hs * 0.6, -hs * 1.05, hs * 1.3, -hs * 0.1, 0, hs * 0.75);
+        ctx.fill();
+        ctx.globalAlpha = 0.6;
+        ctx.fillStyle = "#ffffff";
+        ctx.beginPath(); ctx.arc(-hs * 0.3, -hs * 0.45, hs * 0.18, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = 1;
+      } else if (look === "spear") {
+        // 니달리 Q: 긴 자루와 창날. 판정 원(작다) 은 창끝에 있다
+        ctx.globalCompositeOperation = "source-over";
+        ctx.strokeStyle = "#a9754f";
+        ctx.lineWidth = Math.max(2, 9 * p.k);
+        ctx.beginPath(); ctx.moveTo(-190 * fw, 0); ctx.lineTo(0, 0); ctx.stroke();
+        ctx.fillStyle = "#e9ecef";
+        ctx.beginPath(); ctx.moveTo(r * 1.1, 0); ctx.lineTo(-r * 0.8, -r * 0.7); ctx.lineTo(-r * 0.8, r * 0.7); ctx.closePath(); ctx.fill();
+        ctx.globalCompositeOperation = "lighter";
+        core(r, "#ffffff", s.color, 1.2, 0.3);
+      } else if (look === "blade") {
+        // 레오나 E: 앞으로 날아가는 해의 칼날
+        trail(Math.min(m.flown, 220), r * 0.8, s.color, 0.45);
+        const g = ctx.createLinearGradient(-r, 0, r, 0);
+        g.addColorStop(0, s.color + "00");
+        g.addColorStop(0.7, s.color);
+        g.addColorStop(1, "#ffffff");
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.moveTo(r * 1.1, 0);
+        ctx.quadraticCurveTo(r * 0.2, -r * 1.3, -r * 1.2, -r * 0.9);
+        ctx.quadraticCurveTo(-r * 0.2, 0, -r * 1.2, r * 0.9);
+        ctx.quadraticCurveTo(r * 0.2, r * 1.3, r * 1.1, 0);
+        ctx.fill();
+      } else if (look === "hook") {
+        // 블리츠는 금빛 주먹, 쓰레쉬는 초록 낫
+        ctx.globalCompositeOperation = "source-over";
+        if (s.champ === "Blitzcrank") {
+          ctx.fillStyle = "#e8a33d";
+          ctx.beginPath(); ctx.arc(0, 0, r * 0.9, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = "#ffd8a8";
+          for (let i = -1; i <= 1; i++) { ctx.beginPath(); ctx.arc(r * 0.7, i * r * 0.45, r * 0.28, 0, Math.PI * 2); ctx.fill(); }
+        } else {
+          ctx.strokeStyle = s.color;
+          ctx.lineWidth = Math.max(2, r * 0.3);
+          ctx.beginPath(); ctx.arc(-r * 0.2, 0, r * 0.85, -Math.PI * 0.75, Math.PI * 0.35); ctx.stroke();
+        }
+        ctx.globalCompositeOperation = "lighter";
+        core(r, "#ffffff", s.color, 1.2, 0.2);
+      } else if (look === "zap") {
+        // 징크스 W: 아주 빠른 가는 전격. 뒤로 길게 번개가 남는다
+        const len = Math.min(m.flown, 700);
+        const bolt = () => {
+          ctx.beginPath(); ctx.moveTo(-len * fw, 0);
+          for (let x = -len * fw; x < 0; x += 16) ctx.lineTo(x, (Math.random() - 0.5) * r * 0.5);
+          ctx.lineTo(0, 0);
+        };
+        ctx.globalAlpha = 0.7;
+        ctx.strokeStyle = s.color;
+        ctx.lineWidth = Math.max(1.5, r * 0.28);
+        glow(s.color, 12);
+        bolt(); ctx.stroke();
+        noGlow();
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = "#fff0f6";
+        ctx.lineWidth = Math.max(1, r * 0.08);
+        bolt(); ctx.stroke();
+        core(r * 0.9, "#ffffff", s.color, 1.2);
+      } else if (look === "arrow") {
+        // 애쉬 R: 거대한 얼음 화살. 판정 원(큰 원) 은 화살촉 쪽에 있다
+        trail(Math.min(m.flown, 500), r * 0.5, "#d0ebff", 0.3);
+        ctx.globalCompositeOperation = "source-over";
+        // 자루
+        const shaft = ctx.createLinearGradient(-r * 4.5 * fw, 0, -r * 0.4, 0);
+        shaft.addColorStop(0, "#74c0fc00");
+        shaft.addColorStop(1, "#a5d8ff");
+        ctx.fillStyle = shaft;
+        ctx.beginPath();
+        ctx.moveTo(-r * 0.4, -r * 0.12); ctx.lineTo(-r * 4.5 * fw, -r * 0.05);
+        ctx.lineTo(-r * 4.5 * fw, r * 0.05); ctx.lineTo(-r * 0.4, r * 0.12);
+        ctx.closePath(); ctx.fill();
+        // 깃: 자루 끝 양옆
+        ctx.fillStyle = "#4dabf7";
+        for (const side of [-1, 1]) {
+          ctx.beginPath();
+          ctx.moveTo(-r * 2.6 * fw, 0); ctx.lineTo(-r * 3.4 * fw, side * r * 0.45); ctx.lineTo(-r * 3.1 * fw, 0);
+          ctx.closePath(); ctx.fill();
+        }
+        // 촉: 얼음 결정
+        const head = ctx.createLinearGradient(-r * 0.7, 0, r * 1.1, 0);
+        head.addColorStop(0, "#339af0");
+        head.addColorStop(0.6, "#a5d8ff");
+        head.addColorStop(1, "#e7f5ff");
+        ctx.fillStyle = head;
+        ctx.beginPath();
+        ctx.moveTo(r * 1.1, 0); ctx.lineTo(-r * 0.2, -r * 0.5); ctx.lineTo(-r * 0.7, 0); ctx.lineTo(-r * 0.2, r * 0.5);
+        ctx.closePath(); ctx.fill();
+        ctx.strokeStyle = "#e7f5ff";
+        ctx.lineWidth = Math.max(1, r * 0.04);
+        ctx.stroke();
+        ctx.globalCompositeOperation = "lighter";
+        core(r, "#ffffff", s.color, 1.2, 0.18);
+      } else if (look === "vines") {
+        // 덩굴 끝의 꽃봉오리(바닥 가까이)
+        ctx.globalCompositeOperation = "source-over";
+        ctx.fillStyle = "#2f9e44";
+        for (let i = 0; i < 5; i++) {
+          const a = i / 5 * Math.PI * 2;
+          ctx.beginPath(); ctx.ellipse(Math.cos(a) * r * 0.45, Math.sin(a) * r * 0.45, r * 0.5, r * 0.25, a, 0, Math.PI * 2); ctx.fill();
+        }
+        ctx.fillStyle = "#f783ac";
+        ctx.beginPath(); ctx.arc(0, 0, r * 0.3, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.restore();
     }
 
     // 감옥 창살. 뒤쪽(먼 쪽) 과 앞쪽을 나눠 그려서 안에 선 사람이 창살 사이로 보이게 한다
