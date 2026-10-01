@@ -1133,7 +1133,7 @@ async function renderRoom(roomId, fresh = false) {
         <button type="button" class="ghost" id="leave">방 나가기</button>
       </div>`;
 
-    body.querySelectorAll(".seg button").forEach(b => b.onclick = () => {
+    body.querySelectorAll(".room-tabs button").forEach(b => b.onclick = () => {
       roomTab = b.dataset.tab;
       // 새로고침해도 같은 탭이 열리게 주소만 바꾼다(화면을 다시 부르지는 않는다)
       history.replaceState(null, "", "#/rooms/" + roomId + "/" + roomTab);
@@ -1241,27 +1241,49 @@ function weeklyView(data, colorOf, waiting) {
 
 // ── 무빙 순위 (그룹방) ──────────────────────────────────
 
+// 노멀과 하드(CC 를 당하는 모드) 는 순위가 따로다. 마지막으로 본 쪽을 기억해 두고 그쪽을 먼저 보여 준다
+let dodgeMode = "normal";
+const DODGE_MODES = [["normal", "노멀"], ["hard", "하드"]];
+
 function dodgeBoard(data, colorOf, roomId, challenge = true) {
   const fmt = ms => ms == null ? "-" : DodgeGame.fmt(ms / 1000);
-  const played = data.members.filter(m => m.best != null);
+  // 예전 서버의 대답에는 hard 가 없다
+  const table = (mode, rows) => `
+    <div data-dodge-board="${mode}" ${mode === dodgeMode ? "" : "hidden"}>
+      ${rows.some(m => m.best != null) ? "" : `<p class="note">아직 아무도 기록이 없어요. 첫 기록을 세워 보세요.</p>`}
+      <div class="table-wrap"><table class="dodge-table">
+        <thead><tr><th scope="col">순위</th><th scope="col">소환사</th><th scope="col">최고 기록</th><th scope="col">이번 주</th><th scope="col">판수</th></tr></thead>
+        <tbody>${rows.map((m, i) => `
+          <tr class="${m.account_id === data.me ? "me" : ""}">
+            <td>${m.best == null ? "-" : i + 1}</td>
+            <td><span class="mwho"><i style="background:${colorOf(m.account_id)}"></i><span>${esc(m.game_name)}</span></span></td>
+            <td><b>${fmt(m.best)}</b></td>
+            <td>${fmt(m.week_best)}</td>
+            <td>${m.runs || 0}</td>
+          </tr>`).join("")}</tbody>
+      </table></div>
+    </div>`;
   return `
     <div class="dodge-board-head">
       <h2 class="sub-h">무빙 순위 <small>스킬샷 피하기 최고 기록 순</small></h2>
+      <div class="seg dodge-mode-seg" role="group" aria-label="모드">
+        ${DODGE_MODES.map(([m, label]) => `<button type="button" data-dodge-mode="${m}" aria-selected="${m === dodgeMode}">${label}</button>`).join("")}
+      </div>
       ${challenge ? `<a class="btn" href="#/dodge/${roomId}">도전하기</a>` : ""}
     </div>
-    ${played.length ? "" : `<p class="note">아직 아무도 기록이 없어요. 첫 기록을 세워 보세요.</p>`}
-    <div class="table-wrap"><table class="dodge-table">
-      <thead><tr><th scope="col">순위</th><th scope="col">소환사</th><th scope="col">최고 기록</th><th scope="col">이번 주</th><th scope="col">판수</th></tr></thead>
-      <tbody>${data.members.map((m, i) => `
-        <tr class="${m.account_id === data.me ? "me" : ""}">
-          <td>${m.best == null ? "-" : i + 1}</td>
-          <td><span class="mwho"><i style="background:${colorOf(m.account_id)}"></i><span>${esc(m.game_name)}</span></span></td>
-          <td><b>${fmt(m.best)}</b></td>
-          <td>${fmt(m.week_best)}</td>
-          <td>${m.runs || 0}</td>
-        </tr>`).join("")}</tbody>
-    </table></div>`;
+    ${table("normal", data.members)}
+    ${table("hard", data.hard || [])}`;
 }
+
+// 노멀·하드 버튼: 그 자리의 표만 바꿔 보여 준다(다시 받지 않는다)
+document.addEventListener("click", e => {
+  const b = e.target.closest("[data-dodge-mode]");
+  if (!b) return;
+  dodgeMode = b.dataset.dodgeMode;
+  const box = b.closest(".dodge-board-head").parentElement;
+  box.querySelectorAll("[data-dodge-mode]").forEach(x => x.setAttribute("aria-selected", String(x === b)));
+  box.querySelectorAll("[data-dodge-board]").forEach(x => { x.hidden = x.dataset.dodgeBoard !== dodgeMode; });
+});
 
 // ── 연습장: 스킬샷 피하기 ───────────────────────────────
 // 게임은 dodge.js 가 돌린다. 여기서는 판 시작·끝을 서버에 알리고 순위를 보여 준다.
@@ -1289,8 +1311,16 @@ function renderDodge(roomArg) {
     </section>`;
 
   const fmt = ms => ms == null ? "-" : DodgeGame.fmt(ms / 1000);
-  const showBest = r => dodgeGame && dodgeGame.setBest(
-    r.best == null ? "" : `최고 <b>${fmt(r.best)}</b> · 이번 주 <b>${fmt(r.week_best)}</b>`);
+  // 노멀·하드 최고 기록. 이번 주 기록은 지금 고른 모드 것만
+  const showBest = r => {
+    if (!dodgeGame) return;
+    const hard = r.hard || {}, now = dodgeGame.mode() === "hard" ? hard : r;
+    const parts = [];
+    if (r.best != null) parts.push(`노멀 최고 <b>${fmt(r.best)}</b>`);
+    if (hard.best != null) parts.push(`하드 최고 <b>${fmt(hard.best)}</b>`);
+    if (now.week_best != null) parts.push(`이번 주 <b>${fmt(now.week_best)}</b>`);
+    dodgeGame.setBest(parts.join(" · "));
+  };
 
   let runPromise = null;
   // 내 챔피언은 티어표의 OP 챔피언(받아 둔 게 없으면 이즈리얼)
@@ -1304,26 +1334,35 @@ function renderDodge(roomArg) {
       runPromise = api("/api/dodge/start", { method: "POST" }).then(r => r.run);
       runPromise.catch(() => {});
     },
-    async onEnd({ ms, dodged, ver }) {
+    // 시작 창에서 모드를 바꾸면 아래 방 순위도 그 모드로
+    onMode(mode) {
+      dodgeMode = mode;
+      if (roomId) drawMini();
+      const mine = known("/api/dodge/me");
+      if (mine) showBest(mine);
+    },
+    async onEnd({ ms, dodged, ver, mode }) {
       let r;
       try {
         const run = await runPromise;
-        r = await api("/api/dodge/finish", { method: "POST", body: JSON.stringify({ run, ms, dodged, ver }) });
+        r = await api("/api/dodge/finish", { method: "POST", body: JSON.stringify({ run, ms, dodged, ver, mode }) });
       } catch (ex) {
         return `<p class="note">기록을 저장하지 못했어요 (${esc(ex.message)})</p>`;
       }
       // 기록이 바뀌었으니 받아 둔 내 기록과 방 순위를 새것으로
       remember("/api/dodge/me", r);
       forget(/^\/api\/rooms\/\d+\/dodge$/);
+      dodgeMode = mode;
       showBest(r);
       if (roomId) drawMini();
       if (!r.saved) return `<p class="note">1초 넘게 버틴 판부터 기록해요</p>`;
       if (r.new_best) return `<p class="dodge-new">🎉 최고 기록!</p>`;
       if (r.new_week_best) return `<p class="dodge-new">이번 주 최고 기록!</p>`;
-      return `<p class="note">최고 기록 ${fmt(r.best)}</p>`;
+      return `<p class="note">${mode === "hard" ? "하드 " : ""}최고 기록 ${fmt(mode === "hard" ? (r.hard || {}).best : r.best)}</p>`;
     },
   });
 
+  dodgeMode = dodgeGame.mode();
   load("/api/dodge/me").then(showBest, () => {});
   // 티어표를 아직 못 받았으면 받는 대로 내 챔피언(OP) 을 바꿔 끼운다
   if (!op) load("/api/tierlist").then(d => { if (dodgeGame && d.op) dodgeGame.setChamp(d.op.key); }, () => {});

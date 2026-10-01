@@ -28,6 +28,16 @@
 // 시작 전에 이동 방식(마우스 클릭 / WASD) 과 소환사 주문 배치를 고른다.
 // 주문 키는 마우스면 롤 기본 D/F, WASD 면 D 가 이동이라 V/F. 점멸을 두 키 중 어디에 둘지도 고른다.
 // WASD 는 e.code 로 읽는다. 한글 입력 상태에서도 ㅈㅁㄴㅇ 이 아니라 WASD 로 잡힌다.
+//
+// 모드: 노멀(맞으면 목숨만 준다, 맞은 뒤 1초 무적) · 하드(무적 없이 스킬의 CC 를 예외 없이 당한다).
+// 하드 모드의 CC 는 applyCC 에 스킬마다 적었다. 값은 롤 클라이언트 데이터(16.19 의 DataValues),
+// 데이터에 없는 것은 롤 위키·나무위키. 스킬 레벨은 게임이 흐를수록 오른다(내 레벨 3마다 1, 13레벨에 5).
+// CC 규칙(나무위키 "군중제어기"): 기절·속박·매혹·공중에 뜸 중에는 점멸을 못 쓴다(유체화·정화는 된다).
+// 둔화는 가장 센 것 하나만, 이동 속도는 110 아래로 안 내려간다(매혹의 둔화는 예외).
+// 정화는 공중에 뜸을 뺀 CC 를 풀고 3초 동안 강인함 75%(그 사이 새 CC 의 지속 시간이 1/4).
+// 공중에 뜸은 강인함·정화가 안 통한다.
+//
+// 그림은 dodge-gl.js 의 WebGL 층을 거친다(빛 번짐·충격파 왜곡·노이즈 침식 파티클). 못 쓰면 2D 로 그린다.
 
 (function () {
   // 게임 규칙이 바뀌면 올린다. 서버는 같은 버전의 기록끼리만 순위를 매긴다
@@ -40,25 +50,35 @@
   // 소환사 주문. 아이콘·실제 쿨타임(점멸 300초, 유체화 240초) 은 롤 데이터(summoner-spells.json),
   // 점멸 거리 400·유체화 이속(+24~48%) 은 롤 위키. 쿨타임과 유체화 지속 시간은 이 게임에 맞게 줄였다
   const ICONS = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/data/spells/icons2d/";
+  // 정화: 쿨타임 240초(롤 데이터), 공중에 뜸·제압을 뺀 CC 를 풀고 3초 동안 강인함 75%(14.10 패치, 나무위키).
+  // 쿨타임은 유체화(실제 240초) 와 같게 20초로 줄였다
   const SPELLS = [
     { id: "flash", name: "점멸", cd: 15, range: 400, icon: ICONS + "summoner_flash.png" },
     { id: "ghost", name: "유체화", cd: 20, last: 3, bonus: 0.4, icon: ICONS + "summoner_haste.png" },
+    { id: "cleanse", name: "정화", cd: 20, last: 3, tenacity: 0.75, icon: ICONS + "summoner_boost.png" },
   ];
+  const spellById = id => SPELLS.find(sp => sp.id === id);
 
-  // 조작 설정: 이동 방식(mouse | wasd) 과 점멸을 두 키 중 앞 키에 둘지(flashFirst). 브라우저에 기억한다
+  // 조작 설정: 이동 방식(mouse | wasd), 모드(normal | hard), 하드 모드의 주문 두 개(pair),
+  // 앞 주문을 두 키 중 앞 키에 둘지(flashFirst). 브라우저에 기억한다
   const CONTROL_KEY = "tiergg-dodge-controls";
+  // 하드 모드는 롤처럼 세 주문 중 두 개를 고른다. 노멀은 CC 가 없어서 점멸·유체화 그대로
+  const PAIRS = { "flash-cleanse": ["flash", "cleanse"], "flash-ghost": ["flash", "ghost"], "ghost-cleanse": ["ghost", "cleanse"] };
   function loadControls() {
     try {
       const c = JSON.parse(localStorage.getItem(CONTROL_KEY) || "{}");
-      return { move: c.move === "wasd" ? "wasd" : "mouse", flashFirst: !!c.flashFirst };
-    } catch { return { move: "mouse", flashFirst: false }; }
+      return { move: c.move === "wasd" ? "wasd" : "mouse", flashFirst: !!c.flashFirst,
+               mode: c.mode === "hard" ? "hard" : "normal", pair: PAIRS[c.pair] ? c.pair : "flash-cleanse" };
+    } catch { return { move: "mouse", flashFirst: false, mode: "normal", pair: "flash-cleanse" }; }
   }
   function saveControls(c) { try { localStorage.setItem(CONTROL_KEY, JSON.stringify(c)); } catch {} }
+  // 이번 판의 주문 두 개
+  function spellsOf(c) { return c.mode === "hard" ? PAIRS[c.pair] : ["flash", "ghost"]; }
   // 이동 방식에 따른 주문 두 키
   function keyPair(move) { return move === "wasd" ? ["V", "F"] : ["D", "F"]; }
   function spellKeys(c) {
-    const [a, b] = keyPair(c.move);
-    return c.flashFirst ? { flash: a, ghost: b } : { flash: b, ghost: a };
+    const [a, b] = keyPair(c.move), [s1, s2] = spellsOf(c);
+    return c.flashFirst ? { [s1]: a, [s2]: b } : { [s1]: b, [s2]: a };
   }
   const HP_MAX = 1500;            // 체력(한 번 맞을 때마다 HP_MAX / LIVES)
   // 연속으로 피한 수에 따라 롤 안내 문구와 아나운서 음성(롤의 연속 처치 순서 그대로)
@@ -162,17 +182,106 @@
     "럭스 R": { fire: ["lux_beam", "#fcc419", 1.2, 0.5, true] },   // 경고선은 직접 그린 띠(텍스처는 줄무늬가 진다)
   };
 
-  const IMG = {};
-  function champImage(key) {
-    if (!IMG[key]) {
-      const img = new Image();
-      img.src = "https://opgg-static.akamaized.net/meta/images/lol/latest/champion/" + key + ".png";
-      IMG[key] = img;
-    }
-    return IMG[key];
+  // ── 효과층(dodge-gl.js) 에 그리는 스킬 효과. 그림일 뿐 판정과는 상관없다 ──
+  // Riot 의 VFX 원칙(판정이 먼저 읽혀야 한다, 주·보조 형태, 예고 → 터짐 →흩어짐) 을 따른다.
+  // 투사체: glow 머리 둘레 빛 · core 머리 속 · trail [색, 폭(반지름 배), 길이(초)] 리본 꼬리 ·
+  //   motes 날아가며 흘리는 파티클 [{every 몇 초마다, shape, color→color1, add 빛(1)/연기(0), size [최소, 최대],
+  //   grow 끝 크기 배, life, drift 흩어지는 속도, back 뒤로 밀리는 비율, vz 위로, grav 중력, erode 침식으로 사라짐, stretch 늘어진 불티}]
+  // 장판: zone { rune 마법진, motes 차오르는 동안 솟는 것, boom 터질 때 { pillar 빛기둥 색, h 높이, smoke 연기 색,
+  //   debris 파편 색, sparks 불티 색, rays 햇살, souls 영혼 } }
+  const GFX = {
+    "모르가나 Q": { glow: "#7048e8", core: "#e5dbff", trail: ["#9775fa", 1, 0.3], hit: "#b197fc",
+      motes: [{ every: 0.02, shape: "smoke", color: "#5f3dc4", color1: "#1a0b2e", add: 0, a: 0.5, size: [50, 80], grow: 1.5, life: 0.5, drift: 30, back: 0.1, erode: 1 },
+              { every: 0.03, shape: "dot", color: "#d0bfff", size: [14, 26], life: 0.45, drift: 90 }] },
+    "럭스 Q": { glow: "#fab005", core: "#fffbe6", trail: ["#ffe066", 1.1, 0.25], hit: "#ffe066", flare: 1,
+      motes: [{ every: 0.02, shape: "star", color: "#fff3bf", color1: "#fab005", size: [26, 46], life: 0.5, drift: 60 },
+              { every: 0.012, shape: "dot", color: "#ffe066", size: [12, 22], life: 0.35, drift: 120 }] },
+    "자이라 E": { glow: "#2f9e44", core: "#d3f9d8", hit: "#69db7c",
+      motes: [{ every: 0.03, shape: "leaf", color: "#69db7c", color1: "#2b8a3e", add: 0, size: [18, 30], life: 0.9, drift: 70, vz: 160, grav: 400, spin: 8 },
+              { every: 0.05, shape: "dot", color: "#f783ac", size: [10, 18], life: 0.5, drift: 50, vz: 60 }] },
+    "니달리 Q": { glow: "#8ce99a", core: "#f4fce3", trail: ["#d8f5a2", 0.45, 0.18], hit: "#8ce99a",
+      motes: [{ every: 0.04, shape: "leaf", color: "#94d82d", color1: "#5c940d", add: 0, size: [14, 22], life: 0.6, drift: 40, vz: 80, grav: 200, spin: 10 }] },
+    "브랜드 Q": { glow: "#ff6b00", core: "#fff3bf", trail: ["#ff922b", 1.1, 0.22], hit: "#ff922b",
+      motes: [{ every: 0.008, shape: "flame", color: "#ffe066", color1: "#e03131", size: [40, 70], grow: 0.3, life: 0.35, drift: 50, back: 0.15, vz: 140, erode: 1 },
+              { every: 0.04, shape: "smoke", color: "#3a2a20", color1: "#0d0806", add: 0, a: 0.45, size: [40, 70], grow: 1.6, life: 0.5, drift: 30, vz: 90, erode: 1 },
+              { every: 0.02, shape: "spark", color: "#ffd43b", color1: "#ff6b00", size: [10, 16], life: 0.5, drift: 260, vz: 220, grav: 600, stretch: 0.05 }] },
+    "아리 E": { glow: "#f06595", core: "#fff0f6", trail: ["#faa2c1", 1, 0.25], hit: "#faa2c1",
+      motes: [{ every: 0.045, shape: "heart", color: "#ffdeeb", color1: "#f06595", size: [20, 34], life: 0.7, drift: 50, vz: 120 },
+              { every: 0.02, shape: "dot", color: "#fcc2d7", size: [10, 18], life: 0.4, drift: 90 }] },
+    "벨코즈 Q": { glow: "#9775fa", core: "#f3f0ff", trail: ["#d0bfff", 0.8, 0.2], hit: "#d0bfff", flare: 1,
+      motes: [{ every: 0.015, shape: "dot", color: "#e5dbff", color1: "#7048e8", size: [14, 24], life: 0.4, drift: 110 },
+              { every: 0.06, shape: "ring", color: "#b197fc", size: [40, 50], grow: 2, life: 0.35, drift: 0 }] },
+    "제라스 E": { glow: "#4c6ef5", core: "#edf2ff", trail: ["#91a7ff", 0.9, 0.22], hit: "#91a7ff", flare: 1,
+      motes: [{ every: 0.012, shape: "spark", color: "#dbe4ff", color1: "#4c6ef5", size: [10, 16], life: 0.25, drift: 300, stretch: 0.04 },
+              { every: 0.04, shape: "swirl", color: "#748ffc", size: [50, 70], life: 0.35, drift: 0, spin: 12 }] },
+    "이즈리얼 Q": { glow: "#fab005", core: "#ffffff", trail: ["#ffd43b", 0.6, 0.16], hit: "#ffd43b", flare: 1,
+      motes: [{ every: 0.012, shape: "spark", color: "#fff3bf", color1: "#f59f00", size: [10, 16], life: 0.3, drift: 200, back: 0.2, stretch: 0.05 }] },
+    "레오나 E": { glow: "#f59f00", core: "#fff9db", trail: ["#ffd43b", 1.3, 0.2], hit: "#ffd43b", flare: 1,
+      motes: [{ every: 0.02, shape: "star", color: "#fff3bf", color1: "#f59f00", size: [24, 40], life: 0.4, drift: 70 }] },
+    "베이가 Q": { glow: "#7048e8", core: "#f3f0ff", trail: ["#9775fa", 1.1, 0.25], hit: "#b197fc",
+      motes: [{ every: 0.014, shape: "dot", color: "#d0bfff", color1: "#5f3dc4", size: [16, 28], life: 0.45, drift: 80 },
+              { every: 0.04, shape: "star", color: "#e5dbff", size: [20, 30], life: 0.35, drift: 60 }] },
+    "블리츠크랭크 Q": { glow: "#ff922b", core: "#fff4e6", hit: "#ffc078",
+      motes: [{ every: 0.025, shape: "smoke", color: "#adb5bd", color1: "#495057", add: 0, size: [30, 50], grow: 1.8, life: 0.5, drift: 30, vz: 60, erode: 1 },
+              { every: 0.03, shape: "spark", color: "#ffd8a8", size: [8, 12], life: 0.3, drift: 200, stretch: 0.04 }] },
+    "쓰레쉬 Q": { glow: "#12b886", core: "#e6fcf5", trail: ["#63e6be", 0.7, 0.2], hit: "#63e6be",
+      motes: [{ every: 0.02, shape: "smoke", color: "#38d9a9", color1: "#087f5b", size: [40, 70], grow: 1.5, life: 0.5, drift: 40, vz: 50, erode: 1 }] },
+    "징크스 W": { glow: "#f06595", core: "#ffffff", trail: ["#fcc2d7", 0.5, 0.18], hit: "#f783ac", flare: 1,
+      motes: [{ every: 0.006, shape: "spark", color: "#ffffff", color1: "#f06595", size: [8, 12], life: 0.2, drift: 300, stretch: 0.03 }] },
+    "애쉬 R": { glow: "#4dabf7", core: "#e7f5ff", trail: ["#a5d8ff", 1.2, 0.35], hit: "#a5d8ff",
+      motes: [{ every: 0.012, shape: "shard", color: "#e7f5ff", color1: "#4dabf7", size: [20, 36], life: 0.6, drift: 120, vz: 60, grav: 200, spin: 6 },
+              { every: 0.02, shape: "smoke", color: "#d0ebff", color1: "#74c0fc", size: [60, 100], grow: 1.6, life: 0.7, drift: 30, erode: 1 }] },
+
+    "카서스 Q": { zone: { rune: 1, motes: { shape: "smoke", color: "#b2f2bb", color1: "#2b8a3e", size: [30, 50], life: 0.6, vz: 160, erode: 1 },
+      boom: { pillar: "#8ce99a", h: 380, sparks: "#d3f9d8", souls: "#b2f2bb" } } },
+    "브랜드 W": { zone: { motes: { shape: "flame", color: "#ffd43b", color1: "#e03131", size: [30, 50], life: 0.45, vz: 220, erode: 1 },
+      boom: { pillar: "#ff6b00", h: 620, smoke: "#2b1a10", sparks: "#ffa94d", flames: 1 } } },
+    "초가스 Q": { zone: { motes: { shape: "smoke", color: "#8d6e4a", color1: "#3b2a1a", add: 0, size: [30, 50], life: 0.5, vz: 60, erode: 1 },
+      boom: { smoke: "#5c4630", debris: "#a9e34b", sparks: "#d8f5a2" } } },
+    "베이가 W": { zone: { rune: 1, motes: { shape: "dot", color: "#b197fc", size: [14, 24], life: 0.5, vz: 200 },
+      boom: { pillar: "#7950f2", h: 500, smoke: "#1a0b2e", sparks: "#d0bfff" } } },
+    "신드라 Q": { zone: { rune: 1, motes: { shape: "dot", color: "#eebefa", size: [14, 22], life: 0.4, vz: 120 },
+      boom: { sparks: "#f3d9fa", debris: "#cc5de8" } } },
+    "제라스 W": { zone: { rune: 1, motes: { shape: "spark", color: "#bac8ff", size: [10, 16], life: 0.35, vz: 400, stretch: 0.04 },
+      boom: { pillar: "#748ffc", h: 900, sparks: "#dbe4ff" } } },
+    "벨코즈 E": { zone: { rune: 1, motes: { shape: "dot", color: "#e599f7", size: [14, 22], life: 0.4, vz: 160 },
+      boom: { pillar: "#cc5de8", h: 420, debris: "#e599f7", sparks: "#f3d9fa" } } },
+    "레오나 R": { zone: { rune: 1, motes: { shape: "star", color: "#fff3bf", size: [20, 34], life: 0.5, vz: 90 },
+      boom: { pillar: "#fab005", h: 1100, sparks: "#fff3bf", rays: 1 } } },
+  };
+  const gfxOf = s => GFX[s.name.replace(" (갈라짐)", "")] || {};
+
+  // 캔버스에 그리는 초상화는 CommunityDragon 의 챔피언 아이콘(CORS 허용)을 crossOrigin 으로 받는다.
+  // CORS 없는 그림(OP.GG) 을 캔버스에 그리면 캔버스가 "오염" 돼서 효과층(WebGL) 이 그 캔버스를 못 올린다.
+  // 아이콘은 숫자 ID 로만 있어서 이름 → ID 표(champion-summary.json) 를 한 번 받는다. 받기 전에는 원으로 그린다
+  const CDRAGON = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/";
+  const CHAMP_IDS = {};
+  let idsAsked = false;
+  function loadChampIds() {
+    if (idsAsked) return;
+    idsAsked = true;
+    fetch(CDRAGON + "champion-summary.json")
+      .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then(list => { list.forEach(c => { if (c.id > 0) CHAMP_IDS[String(c.alias).toLowerCase()] = c.id; }); preload(); })
+      .catch(() => { idsAsked = false; });
   }
+  const IMG = {};
+  const NO_IMG = new Image();      // 아직 ID 를 모를 때(그리는 쪽이 원으로 대신한다)
+  function champImage(key) {
+    const id = CHAMP_IDS[String(key).toLowerCase()];
+    if (!id) return NO_IMG;
+    if (!IMG[id]) {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.src = CDRAGON + "champion-icons/" + id + ".png";
+      IMG[id] = img;
+    }
+    return IMG[id];
+  }
+  // HUD(DOM) 초상화는 캔버스가 아니라서 OP.GG 그림을 그대로 쓴다
+  const hudFace = key => "https://opgg-static.akamaized.net/meta/images/lol/latest/champion/" + key + ".png";
   // 게임이 시작되기 전에 미리 받아 둔다. 못 받아도 원으로 그린다
-  function preload() { SKILLS.forEach(s => champImage(s.champ)); }
+  function preload() { loadChampIds(); SKILLS.forEach(s => champImage(s.champ)); }
 
   // 시간이 갈수록 자주, 더 영리하게 쏜다
   function castGap(t) { return Math.max(0.34, 1.25 * Math.pow(0.97, t / 2)); }
@@ -240,9 +349,10 @@
   };
   const fxImg = new Image(), groundImg = new Image();
   let fxReady = false, groundReady = false;
+  const onFx = new Set();     // 그림 한 장을 다 받으면 부를 것(효과층이 텍스처로 올린다)
   function loadArt() {
     if (fxImg.src) return;
-    fxImg.onload = () => { fxReady = true; };
+    fxImg.onload = () => { fxReady = true; onFx.forEach(f => f()); };
     groundImg.onload = () => { groundReady = true; };
     fxImg.src = ART + "fx.webp";
     groundImg.src = ART + "ground.jpg";
@@ -386,6 +496,9 @@
       else if (kind === "deny") { tone("square", 160, 150, 0.08, 0.05); }
       else if (kind === "whoosh") { noise(0.22, 0.05, 2400, 700); }
       else if (kind === "thump") { noise(0.3, 0.08, 500, 90); tone("sine", 110, 45, 0.3, 0.1); }
+      // 정화: 맑게 올라가는 종소리. CC 에 걸림: 둔탁하게 묶이는 소리
+      else if (kind === "cleanse") { tone("sine", 660, 1320, 0.25, 0.09); tone("triangle", 990, 1980, 0.3, 0.06, 0.05); noise(0.3, 0.04, 6000, 2500); }
+      else if (kind === "cc") { tone("square", 220, 110, 0.14, 0.06); noise(0.18, 0.06, 1200, 300); }
     } catch {}
   }
 
@@ -422,9 +535,9 @@
             <div class="lol-face"><img data-hud="face" alt=""><span data-hud="level">1</span></div>
             <div class="lol-main">
               <div class="lol-spells">
-                ${SPELLS.map(sp => `
-                  <button type="button" class="lol-spell" data-spell="${sp.id}" title="${sp.name}">
-                    <img src="${sp.icon}" alt="${sp.name}"><i></i><b></b><kbd></kbd>
+                ${[0, 1].map(i => `
+                  <button type="button" class="lol-spell" data-slot="${i}">
+                    <img alt=""><i></i><b></b><kbd></kbd>
                   </button>`).join("")}
               </div>
               <div class="lol-hp"><i data-hud="hpfill"></i><span data-hud="hptext"></span></div>
@@ -434,7 +547,16 @@
         <div class="dodge-over" data-over></div>
       </div>`;
     const canvas = root.querySelector(".lol-view > canvas");
-    const ctx = canvas.getContext("2d");
+    const mainCtx = canvas.getContext("2d");
+    // 지금 그리는 2D 캔버스. 효과층이 있으면 바닥(bg) 과 선 것들(fg) 두 장에 나눠 그리고 효과층이 합친다
+    let ctx = mainCtx;
+    let fxgl = window.DodgeGL ? DodgeGL.create(canvas) : null;
+    const fx2d = window.DodgeGL ? DodgeGL.canvas2d(fxImg) : null;
+    const bgCv = document.createElement("canvas"), fgCv = document.createElement("canvas");
+    const bgx = bgCv.getContext("2d"), fgx = fgCv.getContext("2d");
+    const atlasUp = () => { if (fxgl) fxgl.setAtlas(fxImg); };
+    if (fxReady) atlasUp();
+    onFx.add(atlasUp);
     const view = root.querySelector(".lol-view");
     const mini = root.querySelector(".lol-minimap");
     const mctx = mini.getContext("2d");
@@ -442,7 +564,7 @@
     const soundBtn = root.querySelector("[data-sound]");
     const volInput = root.querySelector("[data-volume]");
     const volText = root.querySelector("[data-volume-text]");
-    let face = champImage(opts.champ || "Ezreal");
+    let faceKey = opts.champ || "Ezreal";      // 내 챔피언(그릴 때마다 champImage 로 찾는다. ID 표가 늦게 와도 바로 바뀐다)
     const over = root.querySelector("[data-over]");
     const hud = name => root.querySelector(`[data-hud="${name}"]`);
     preload();
@@ -455,7 +577,10 @@
     let player, target, casters, missiles, zones, flashes;
     let lives, hits, safe, lastHit, dead;
     let fx, parts, shake, hurt;          // 그림 효과(판정과 상관없음)
+    let waves, ca, deadFx;               // 효과층: 충격파 왜곡, 색수차, 죽은 뒤 회색이 되는 정도
     let cds, ghostLeft, cursor, facing, level, pops, lastSpree, lastMark;
+    let mode, spells;                    // 이번 판의 모드(normal | hard) 와 주문 두 개
+    let effects, tenacity, ablaze, marked, tethers;   // 하드 모드 CC(applyCC)
     let bannerTimer = 0, overTimer = 0;
     let controls = loadControls();
     const keyOf = id => spellKeys(controls)[id];
@@ -469,8 +594,11 @@
       missiles = [];     // 날아가는 투사체
       zones = [];        // 바닥 장판·감옥
       flashes = [];      // 레이저가 지나간 자리(그림만)
-      fx = [];           // 빛기둥·퍼지는 고리
-      parts = [];        // 튀는 파편
+      fx = [];           // 퍼지는 고리·그을린 자리 등 2D 효과
+      parts = [];        // 파티클(효과층에 그린다. emit)
+      waves = [];        // 충격파 왜곡(바닥 좌표)
+      ca = 0;            // 색수차(맞은 순간 1)
+      deadFx = 0;
       shake = 0;         // 화면 흔들림 남은 시간
       hurt = 0;          // 맞았을 때 붉은 테두리 남은 시간
       lives = LIVES;
@@ -480,7 +608,14 @@
       dead = false;
       t = 0; dodged = 0; acc = 0;
       nextCast = 0.8;          // 시작하고 잠깐은 숨 돌릴 틈
-      cds = { flash: 0, ghost: 0 };   // 소환사 주문 남은 쿨타임
+      mode = controls.mode;
+      spells = spellsOf(controls);
+      cds = { flash: 0, ghost: 0, cleanse: 0 };   // 소환사 주문 남은 쿨타임
+      effects = [];            // 걸린 CC {type: stun | root | charm | air | slow, start, end, skill, ...}
+      tenacity = -1;           // 정화의 강인함이 끝나는 시각
+      ablaze = -1;             // 브랜드 불길이 끝나는 시각(그 안에 브랜드 Q 를 맞으면 기절)
+      marked = -1;             // 진 W 표식이 끝나는 시각(맞은 뒤 4초. 그 안에 진 W 를 맞으면 속박)
+      tethers = [];            // 블리츠·쓰레쉬 사슬 {c, skill, until}
       ghostLeft = 0;           // 유체화 남은 시간
       cursor = null;           // 마우스가 가리키는 바닥(점멸 방향)
       facing = { x: 0, y: -1 };    // 마지막으로 움직인 방향(커서가 없을 때 점멸 방향)
@@ -549,6 +684,9 @@
       canvas.style.height = VH + "px";
       canvas.width = Math.round(VW * DPR);
       canvas.height = Math.round(VH * DPR);
+      bgCv.width = fgCv.width = canvas.width;
+      bgCv.height = fgCv.height = canvas.height;
+      if (fxgl) fxgl.resize(VW, VH, DPR);
       // HUD 는 화면 폭에 맞춰 줄고 는다(1000px 폭일 때 --u = 1px)
       view.style.width = VW + "px";
       view.style.setProperty("--u", (VW / 1000).toFixed(4) + "px");
@@ -644,11 +782,115 @@
       if (c.wind <= 0) release(c);
     }
 
+    // ── 하드 모드 CC ──
+    // 스킬 레벨: 내 레벨 3마다 하나(1~3레벨은 1, 13레벨부터 5). 적도 나와 같이 자란다고 본다
+    const rank = () => Math.min(5, 1 + Math.floor((level - 1) / 3));
+    const byRank = v => (Array.isArray(v) ? v[rank() - 1] : v);
+    // 지금 걸려 있는 그 종류의 CC(여럿이면 가장 늦게 끝나는 것)
+    function cc(type) {
+      let best = null;
+      for (const e of effects) if (e.type === type && e.start <= t && e.end > t && (!best || e.end > best.end)) best = e;
+      return best;
+    }
+    // 이동 불가 효과(기절·속박·매혹·공중에 뜸). 이 동안은 점멸을 못 쓴다
+    const held = () => cc("air") || cc("stun") || cc("charm") || cc("root");
+    // CC 를 건다. 공중에 뜸 말고는 정화의 강인함만큼 짧아진다. 롤 위키: 강인함으로는 0.5초 밑으로 안 줄어든다.
+    // at 초 뒤부터 걸 수도 있다(초가스 Q 의 뒤따르는 둔화)
+    function addCC(type, dur, s, extra = {}, at = 0) {
+      if (type !== "air" && tenacity > t) dur = Math.max(Math.min(dur, 0.5), dur * (1 - spellById("cleanse").tenacity));
+      const e = { type, start: t + at, end: t + at + dur, skill: s, ...extra };
+      effects.push(e);
+      if (type !== "slow" && at === 0) target = null;     // 롤처럼 이동 명령이 끊긴다
+      return e;
+    }
+    // 사슬(블리츠·쓰레쉬): 시전자에서 나까지. on 이 풀리면(정화) 같이 끊긴다
+    function tie(c, s, dur, on) {
+      if (!c) return;
+      c.fade = Math.max(c.fade, dur + 0.3);
+      tethers.push({ c, skill: s, until: t + dur, on });
+    }
+
+    // 맞은 스킬의 CC. 값은 롤 클라이언트 데이터(16.19 DataValues), 없는 것은 롤 위키·나무위키.
+    // how: { m 투사체, c 시전자, d 장판 가운데까지 거리 }
+    function applyCC(s, how) {
+      const from = how.c || (how.m && { x: how.m.ox, y: how.m.oy });
+      const flown = how.m ? how.m.flown : 0;
+      const center = how.d != null && s.inner && how.d < s.inner + CHAMP.radius;   // 중심부에 몸이 걸쳤다
+      let got = true;
+      switch (s.name.replace(" (갈라짐)", "")) {
+        case "모르가나 Q": addCC("root", byRank([2, 2.25, 2.5, 2.75, 3]), s); break;
+        case "럭스 Q": addCC("root", 2, s); break;
+        case "자이라 E": addCC("root", byRank([1, 1.25, 1.5, 1.75, 2]), s); break;
+        // 레오나 E: 속박 0.5초, 레오나가 내 뒤 225 로 돌진한다
+        case "레오나 E": addCC("root", 0.5, s); if (how.c) leonaDash(how.c); break;
+        // 진 W: 표식(최근 4초 안에 맞음) 이 있을 때만 속박
+        case "진 W": if (marked > t) addCC("root", byRank([1.25, 1.5, 1.75, 2, 2.25]), s); else got = false; break;
+        // 아리 E: 매혹. 65% 느려진 채 아리 쪽으로 걸어간다
+        case "아리 E": addCC("charm", byRank([1.2, 1.35, 1.5, 1.65, 1.8]), s, { from, slow: 0.65 }); break;
+        case "베이가 E": addCC("stun", byRank([1.5, 1.75, 2, 2.25, 2.5]), s); break;
+        // 날아간 거리에 비례. 제라스 E 는 데이터 이름 그대로 0.5 + 100 유닛마다 0.17 을 0.75~2.25 로 자른다
+        case "제라스 E": addCC("stun", Math.min(2.25, Math.max(0.75, 0.5 + 0.17 * flown / 100)), s); break;
+        // 애쉬 R 1~3.5초. 최대가 되는 거리는 클라이언트 데이터·롤 위키에 없어서 1500 유닛으로 잡았다(추정)
+        case "애쉬 R": addCC("stun", 1 + 2.5 * Math.min(1, flown / 1500), s); break;
+        // 브랜드: 스킬에 맞으면 4초 동안 불길. 불길이 있을 때 Q 에 맞으면 기절 1.75초
+        case "브랜드 Q": if (ablaze > t) addCC("stun", 1.75, s); else got = false; ablaze = t + 4; break;
+        case "브랜드 W": ablaze = t + 4; got = false; break;
+        case "블리츠크랭크 Q": {
+          // 기절 0.65초, 블리츠 앞 75 까지 끌려간다(롤 위키: 내 중심이 블리츠 앞 75 에 온다.
+          // 끌려가는 동안 공중에 뜸, 최대 1초). 끌려가는 속도는 데이터·위키에 없어서 손 속도(1800) 로 잡았다(추정)
+          addCC("stun", 0.65, s);
+          if (how.c) {
+            const c = how.c, d = dist(player, c) || 1, gap = 75;
+            const to = { x: c.x + (player.x - c.x) / d * gap, y: c.y + (player.y - c.y) / d * gap };
+            addCC("air", 1, s, { pull: to, speed: 1800 });
+            tie(c, s, 1, null);
+          }
+          break;
+        }
+        case "쓰레쉬 Q": {
+          // 기절 1.5초 + 공중에 뜸 0.4초. 기절 중 0.1초·0.7초에 한 번씩 쓰레쉬 쪽으로 끌어당긴다
+          const st = addCC("stun", 1.5, s, { tugs: how.c || from });
+          addCC("air", 0.4, s);
+          tie(how.c, s, st.end - t, st);
+          break;
+        }
+        // 초가스 Q: 공중에 뜸 1초, 그 뒤 둔화 60% 1.5초
+        case "초가스 Q": addCC("air", 1, s, { lift: 1 }); addCC("slow", 1.5, s, { pct: 0.6 }, 1); break;
+        // 벨코즈 E: 공중에 뜸 + 기절 0.75초
+        case "벨코즈 E": addCC("air", 0.75, s, { lift: 1 }); break;
+        // 벨코즈 Q(갈라진 것도): 둔화 70% 가 지속 시간에 걸쳐 0 으로
+        case "벨코즈 Q": addCC("slow", byRank([1, 1.4, 1.8, 2.2, 2.6]), s, { pct: 0.7, to: 0 }); break;
+        case "징크스 W": addCC("slow", 2, s, { pct: byRank([0.4, 0.5, 0.6, 0.7, 0.8]) }); break;
+        // 제라스 W: 둔화 25% 2.5초. 중심부는 60~80% 에서 25% 로 줄어든다
+        case "제라스 W":
+          if (center) addCC("slow", 2.5, s, { pct: byRank([0.6, 0.65, 0.7, 0.75, 0.8]), to: 0.25 });
+          else addCC("slow", 2.5, s, { pct: 0.25 });
+          break;
+        // 레오나 R: 모두 둔화 80%, 중심부는 기절도(둘 다 1.75초. 롤 위키)
+        case "레오나 R": addCC("slow", 1.75, s, { pct: 0.8 }); if (center) addCC("stun", 1.75, s); break;
+        default: got = false;
+      }
+      marked = t + 4;          // 진의 표식은 맞을 때마다 4초(진 W 자신을 판정한 뒤에)
+      if (got) { sfx("cc"); ccFx(s); }
+    }
+
+    // 레오나가 내 뒤 225 로 돌진한다(그림. 레오나 초상화가 옮겨 간다)
+    function leonaDash(c) {
+      const d = dist(player, c) || 1;
+      const to = { x: player.x + (player.x - c.x) / d * 225, y: player.y + (player.y - c.y) / d * 225 };
+      to.x = Math.min(ARENA.w, Math.max(0, to.x));
+      to.y = Math.min(ARENA.h, Math.max(0, to.y));
+      c.dash = { fx: c.x, fy: c.y, tx: to.x, ty: to.y, t0: t, dur: 0.2 };
+      c.fade = Math.max(c.fade, 1.2);
+    }
+
     // 소환사 주문
     function useSpell(id) {
-      if (state !== "play") return;
-      const sp = SPELLS.find(x => x.id === id);
+      if (state !== "play" || !spells.includes(id)) return;
+      const sp = spellById(id);
       if (cds[id] > 0) { sfx("deny"); return; }
+      // 이동 불가 효과 중에는 점멸을 못 쓴다
+      if (id === "flash" && held()) { sfx("deny"); return; }
       cds[id] = sp.cd;
       if (id === "flash") {
         // 커서 쪽으로 최대 400. 커서를 모르면(휴대폰·WASD) 가던 방향으로
@@ -661,13 +903,18 @@
         player.x = Math.min(ARENA.w - CHAMP.radius, Math.max(CHAMP.radius, player.x + dx * len));
         player.y = Math.min(ARENA.h - CHAMP.radius, Math.max(CHAMP.radius, player.y + dy * len));
         target = null;
-        burst(from.x, from.y, 60, "#ffe066", 16, 260);
-        burst(player.x, player.y, 60, "#fff3bf", 16, 260);
+        flashFx(from, player);
         fx.push({ kind: "ring", x: player.x, y: player.y, r: CHAMP.radius + 20, color: "#ffe066", life: 0.35, max: 0.35 });
         sfx("flash");
       } else if (id === "ghost") {
         ghostLeft = sp.last;
         sfx("ghost");
+      } else if (id === "cleanse") {
+        // 공중에 뜸 말고 지금 걸린 CC 를 모두 푼다(쓰레쉬 사슬도 끊긴다). 그 뒤 3초 동안 강인함 75%
+        effects = effects.filter(e => e.type === "air" || e.start > t);
+        tenacity = t + sp.last;
+        cleanseFx();
+        sfx("cleanse");
       }
     }
 
@@ -680,23 +927,24 @@
       if (kind !== "death" && !(voice && sample(voice, 0.7))) sfx("announce");
     }
 
-    // 맞았다. 무적 중이면 없던 일로(false). 목숨을 다 잃으면 끝
-    function hit(s) {
-      if (safe > 0 || dead) return false;
+    // 맞았다. 무적 중이면 없던 일로(false). 목숨을 다 잃으면 끝.
+    // 하드 모드는 무적이 없고, 맞은 스킬의 CC 를 그대로 당한다(how: applyCC 참고)
+    function hit(s, how = {}) {
+      if (dead || (mode !== "hard" && safe > 0)) return false;
       lives -= 1;
       hits.push(s.name);
       lastHit = s;
-      safe = SAFE_AFTER_HIT;
+      safe = mode === "hard" ? 0 : SAFE_AFTER_HIT;
       shake = 0.25;
       hurt = 0.4;
-      burst(player.x, player.y, 90, s.color, 26, 420);
-      fx.push({ kind: "spark", x: player.x, y: player.y, color: s.color, life: 0.35, max: 0.35 });
+      hitFx(s);
       // 롤처럼 머리 위로 피해 숫자(마법 피해는 보라)
       pops.push({ x: player.x, y: player.y, text: String(Math.round(HP_MAX / LIVES)), life: 1, max: 1 });
       sfx("hit");
       skillSound(s, "hit");
       if (lives === 1) announce("체력이 낮습니다", "warn");
       if (lives <= 0) dead = true;
+      else if (mode === "hard") applyCC(s, how);
       return true;
     }
 
@@ -705,7 +953,7 @@
       const sp = m.skill.split;
       const piece = { ...m.skill, name: m.skill.name + " (갈라짐)", speed: sp.speed, radius: sp.radius, range: sp.range, split: null };
       for (const side of [1, -1]) {
-        missiles.push({ skill: piece, x: m.x, y: m.y, ox: m.x, oy: m.y, dx: -m.dy * side, dy: m.dx * side, speed: sp.speed, left: sp.range, flown: 0 });
+        missiles.push({ skill: piece, x: m.x, y: m.y, ox: m.x, oy: m.y, dx: -m.dy * side, dy: m.dx * side, speed: sp.speed, left: sp.range, flown: 0, caster: m.caster });
       }
       burst(m.x, m.y, MISSILE_Z, m.skill.color, 14, 300);
     }
@@ -735,8 +983,9 @@
     function release(c) {
       const s = c.skill;
       skillSound(s, "release");
+      castFx(c);
       if (s.kind === "line") {
-        missiles.push({ skill: s, x: c.x, y: c.y, ox: c.x, oy: c.y, dx: c.dx, dy: c.dy, speed: s.speed, left: s.range, flown: 0 });
+        missiles.push({ skill: s, x: c.x, y: c.y, ox: c.x, oy: c.y, dx: c.dx, dy: c.dy, speed: s.speed, left: s.range, flown: 0, caster: c });
       } else if (s.kind === "circle") {
         // 벨코즈 E 처럼 멀리 던질수록 늦는 건, 가장 짧은 지연으로 자리를 잡고(더 넉넉한 쪽) 지연은 그 자리로 다시 잰다
         const at = fairSpot(c.aim, s, s.delay, c);
@@ -746,8 +995,9 @@
         zones.push({ skill: s, x: c.aim.x, y: c.aim.y, wait: s.delay, total: s.delay, up: 0 });
       } else if (s.kind === "beam") {
         const a = { x: c.x, y: c.y }, b = { x: c.x + c.dx * s.range, y: c.y + c.dy * s.range };
-        if (!(segDist(player, a, b) < CHAMP.radius + s.radius && hit(s))) dodged += 1;
-        flashes.push({ skill: s, a, b, left: 0.35 });
+        if (!(segDist(player, a, b) < CHAMP.radius + s.radius && hit(s, { c }))) dodged += 1;
+        flashes.push({ skill: s, a, b, left: 0.35, max: 0.35 });
+        beamFx(s, a, b);
       }
     }
 
@@ -759,16 +1009,45 @@
       // 소환사 주문 쿨타임, 유체화
       for (const sp of SPELLS) cds[sp.id] = Math.max(0, cds[sp.id] - dt);
       ghostLeft = Math.max(0, ghostLeft - dt);
-      const ghost = SPELLS.find(sp => sp.id === "ghost");
-      const spd = CHAMP.speed * (ghostLeft > 0 ? 1 + ghost.bonus : 1);
+      const base = CHAMP.speed * (ghostLeft > 0 ? 1 + spellById("ghost").bonus : 1);
+      // 둔화: 가장 센 것 하나만. 줄어드는 둔화(to) 는 시간에 따라 pct → to. 이동 속도는 110 아래로 안 내려간다
+      let slow = 0;
+      for (const e of effects) {
+        if (e.type !== "slow" || e.start > t || e.end <= t) continue;
+        slow = Math.max(slow, e.to == null ? e.pct : e.pct + (e.to - e.pct) * (t - e.start) / (e.end - e.start));
+      }
+      const spd = slow > 0 ? Math.max(110, base * (1 - slow)) : base;
+      const air = cc("air"), stun = cc("stun"), root = cc("root"), charm = cc("charm");
 
-      // 이동: WASD 가 눌려 있으면 그쪽으로, 아니면 찍은 곳으로
+      // 이동: CC 가 먼저. 없으면 WASD 가 눌려 있으면 그쪽으로, 아니면 찍은 곳으로
       let mx = 0, my = 0;
       if (keys.has("KeyW") || keys.has("ArrowUp")) my -= 1;
       if (keys.has("KeyS") || keys.has("ArrowDown")) my += 1;
       if (keys.has("KeyA") || keys.has("ArrowLeft")) mx -= 1;
       if (keys.has("KeyD") || keys.has("ArrowRight")) mx += 1;
-      if (mx || my) {
+      const toward = (p, v) => {
+        const dx = p.x - player.x, dy = p.y - player.y, d = Math.hypot(dx, dy);
+        if (d <= v * dt) { player.vx = player.vy = 0; player.x = p.x; player.y = p.y; return true; }
+        player.vx = dx / d * v; player.vy = dy / d * v;
+        return false;
+      };
+      if (air && air.pull) {
+        // 블리츠 Q: 블리츠 앞까지 끌려간다. 닿으면 공중에 뜸이 끝난다
+        if (toward(air.pull, air.speed)) air.end = t;
+      } else if (stun || root || air) {
+        player.vx = player.vy = 0;
+        // 쓰레쉬 Q: 기절한 뒤 0.1초·0.7초에 한 번씩 0.15초 동안 쓰레쉬 쪽으로 끌려간다.
+        // 롤 위키도 "짧은 거리" 라고만 해서 한 번에 100 으로 잡았다(추정).
+        // 쓰레쉬와 가까우면(200 안) 끌지 않는다
+        const since = stun && stun.tugs ? t - stun.start : -1;
+        if ((since >= 0.1 && since < 0.25) || (since >= 0.7 && since < 0.85)) {
+          if (dist(player, stun.tugs) > 200) toward(stun.tugs, 100 / 0.15);
+        }
+      } else if (charm) {
+        // 매혹: 시전자 쪽으로 느리게 걸어간다(매혹의 둔화는 110 밑으로도 내려간다)
+        target = null;
+        toward(charm.from, base * (1 - charm.slow));
+      } else if (mx || my) {
         target = null;
         const n = Math.hypot(mx, my);
         player.vx = mx / n * spd;
@@ -822,8 +1101,18 @@
         } else {
           c.fade -= dt;
         }
+        if (c.dash) {
+          // 레오나 E 돌진
+          const k = Math.min(1, (t - c.dash.t0) / c.dash.dur);
+          c.x = c.dash.fx + (c.dash.tx - c.dash.fx) * k;
+          c.y = c.dash.fy + (c.dash.ty - c.dash.fy) * k;
+          if (k >= 1) c.dash = null;
+        }
       }
       casters = casters.filter(c => c.wind > 0 || c.fade > 0);
+      // 끝난 CC·사슬은 버린다(정화로 풀린 기절에 걸린 사슬도)
+      effects = effects.filter(e => e.end > t);
+      tethers = tethers.filter(x => x.until > t && (!x.on || effects.includes(x.on)) && (x.skill.champ !== "Blitzcrank" || cc("air")));
       if (dead) return;
 
       // 투사체. 갈라지면 새로 생기는 게 있어서 지금 있는 것만 돈다
@@ -833,7 +1122,7 @@
         m.x += m.dx * d; m.y += m.dy * d;
         m.left -= d; m.flown += d;
         const reach = CHAMP.radius + m.skill.radius;
-        if ((m.x - player.x) ** 2 + (m.y - player.y) ** 2 < reach * reach && hit(m.skill)) {
+        if ((m.x - player.x) ** 2 + (m.y - player.y) ** 2 < reach * reach && hit(m.skill, { m, c: m.caster })) {
           m.gone = true;          // 맞힌 투사체는 사라진다
           if (dead) return;
           continue;
@@ -876,7 +1165,7 @@
             z.done = 0.3;          // 터진 자리를 잠깐 보여 준다
             boom(z.x, z.y, s.radius, s.color, s);
             skillSound(s, "land");
-            if (d < s.radius + CHAMP.radius && hit(s)) { if (dead) return; }
+            if (d < s.radius + CHAMP.radius && hit(s, { d })) { if (dead) return; }
             else dodged += 1;
             continue;
           }
@@ -888,7 +1177,7 @@
             fx.push({ kind: "ring", x: z.x, y: z.y, r: s.radius, color: s.color, life: 0.4, max: 0.4 });
             skillSound(s, "form");
           }
-          if (!z.struck && Math.abs(d - s.radius) < CHAMP.radius && hit(s)) {
+          if (!z.struck && Math.abs(d - s.radius) < CHAMP.radius && hit(s, { d })) {
             z.struck = true;        // 감옥은 한 번만 스턴한다
             if (dead) return;
           }
@@ -906,23 +1195,169 @@
     const MISSILE_Z = 90;          // 투사체가 떠서 나는 높이
     const PORTRAIT_Z = 150;        // 적 초상화 높이
 
-    // 파편 n 개를 (x, y, z) 에서 사방으로
+    // ── 파티클(효과층에 그린다) ──
+    // 바닥 좌표(x, y) 와 높이 z 에서 움직이고 흐려지거나 침식된다. 그림일 뿐 판정과 상관없다
+    //   size→size1 크기(유닛), color→color1, a 진하기, add 1 빛(더하기) · 0 연기(반투명), shape 모양,
+    //   drag 공기 저항, grav 중력, spin 회전, stretch 속도 방향으로 늘이기(불티), ground 바닥에 눕힘,
+    //   erode 노이즈로 갉아먹히며 사라짐, pillar 빛기둥(높이), line 두 점을 잇는 빛줄기
+    const RGB = new Map();
+    function rgb(hex) {
+      let c = RGB.get(hex);
+      if (!c) {
+        const n = parseInt(hex.slice(1, 7), 16);
+        c = [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255];
+        RGB.set(hex, c);
+      }
+      return c;
+    }
+    const rand = (a, b) => a + Math.random() * (b - a);
+    function emit(p) {
+      if (parts.length > 2600) parts.splice(0, parts.length - 2600);
+      p.z = p.z || 0; p.vx = p.vx || 0; p.vy = p.vy || 0; p.vz = p.vz || 0;
+      p.max = p.life;
+      p.size1 = p.size1 == null ? p.size : p.size1;
+      p.c0 = rgb(p.color || "#ffffff");
+      p.c1 = rgb(p.color1 || p.color || "#ffffff");
+      p.a = p.a == null ? 1 : p.a;
+      p.add = p.add == null ? 1 : p.add;
+      // 하트는 똑바로 선다
+      p.rot = p.rot == null ? (p.shape === "heart" ? 0 : Math.random() * Math.PI * 2) : p.rot;
+      p.nu = Math.random(); p.nv = Math.random();     // 침식 노이즈 자리(파티클마다 다르게)
+      parts.push(p);
+      return p;
+    }
+    // 표의 파티클 하나(GFX 의 motes) 를 (x, y, z) 에서. dir: 날아가는 방향과 속도(뒤로 밀리는 몫)
+    function mote(d, x, y, z, dir) {
+      const a = Math.random() * Math.PI * 2, v = (d.drift || 0) * Math.random();
+      const back = d.back && dir ? -dir.v * d.back : 0;
+      emit({ x: x + rand(-8, 8), y: y + rand(-8, 8), z,
+             vx: Math.cos(a) * v + (dir ? dir.x * back : 0), vy: Math.sin(a) * v + (dir ? dir.y * back : 0),
+             vz: (d.vz || 0) * (0.6 + Math.random() * 0.8),
+             life: d.life * (0.7 + Math.random() * 0.6), size: rand(d.size[0], d.size[1]),
+             size1: rand(d.size[0], d.size[1]) * (d.grow == null ? 0.3 : d.grow),
+             color: d.color, color1: d.color1, add: d.add, a: d.a, shape: d.shape, grav: d.grav, drag: 1.5,
+             spin: d.spin ? rand(-d.spin, d.spin) : 0, stretch: d.stretch, erode: d.erode });
+    }
+
+    // 파편 n 개를 (x, y, z) 에서 사방으로(불티처럼 늘어진다)
     function burst(x, y, z, color, n, speed) {
       for (let i = 0; i < n; i++) {
         const a = Math.random() * Math.PI * 2, v = speed * (0.4 + Math.random() * 0.6);
-        parts.push({ x, y, z, vx: Math.cos(a) * v, vy: Math.sin(a) * v, vz: 150 + Math.random() * 350,
-                     life: 0.45 + Math.random() * 0.3, max: 0.75, color, size: 6 + Math.random() * 8 });
+        emit({ x, y, z, vx: Math.cos(a) * v, vy: Math.sin(a) * v, vz: 150 + Math.random() * 350, grav: 1400,
+               life: 0.4 + Math.random() * 0.35, size: 9 + Math.random() * 8, size1: 2, color: "#ffffff", color1: color,
+               shape: "spark", stretch: 0.045, drag: 1 });
       }
     }
+    // 화면이 굴절되는 충격파(바닥 좌표). amp: 처음 세기(px)
+    function wave(x, y, r0, r1, life, amp) { waves.push({ x, y, r0, r1, life, max: life, amp }); }
+    // 바닥에 확 퍼지는 빛 + 고리
+    function flashGround(x, y, r, color, life = 0.35) {
+      emit({ x, y, ground: 1, size: r * 1.3, size1: r * 1.6, color: "#ffffff", color1: color, shape: "glow", life, a: 0.9 });
+      emit({ x, y, ground: 1, size: r * 0.7, size1: r * 1.25, color, shape: "ring", life: life * 1.3, a: 0.9, erode: 1 });
+    }
 
-    // 장판이 터짐: 빛기둥 + 퍼지는 고리 + 파편 + 그을린 바닥(초가스 Q 는 가시가 솟는다)
+    // 장판이 터짐: 빛기둥 + 퍼지는 고리 + 파편 + 그을린 바닥(초가스 Q 는 가시가 솟는다). 스킬마다 GFX 의 boom
     function boom(x, y, r, color, s) {
-      fx.push({ kind: "pillar", x, y, r, color, life: 0.4, max: 0.4 });
       fx.push({ kind: "ring", x, y, r, color, life: 0.35, max: 0.35 });
       fx.push({ kind: "shock", x, y, r, color, life: 0.45, max: 0.45 });
       fx.push({ kind: "scorch", x, y, r, color, art: s && ZONE_ART[s.name], life: 0.9, max: 0.9 });
       if (s && s.name === "초가스 Q") fx.push({ kind: "spikes", x, y, r, color, life: 0.7, max: 0.7, seed: Math.random() * 6 });
-      burst(x, y, 20, color, Math.round(r / 8), r * 1.6);
+      const b = ((s && gfxOf(s).zone) || {}).boom || { pillar: color, h: 420, sparks: color };
+      flashGround(x, y, r, color);
+      wave(x, y, r * 0.4, r * 2.2, 0.55, Math.min(26, 8 + r / 14));
+      if (b.pillar) {
+        emit({ x, y, pillar: b.h, size: r * 1.1, size1: r * 0.35, color: "#ffffff", color1: b.pillar, shape: "beam", life: 0.5, a: 1 });
+        emit({ x, y, pillar: b.h * 0.8, size: r * 0.4, size1: r * 0.1, color: "#ffffff", shape: "beam", life: 0.3, a: 1 });
+      }
+      if (b.sparks) burst(x, y, 20, b.sparks, Math.round(r / 6), r * 1.8);
+      if (b.smoke) {
+        for (let i = 0; i < 12; i++) {
+          const a = Math.random() * Math.PI * 2, d = Math.random() * r * 0.8;
+          emit({ x: x + Math.cos(a) * d, y: y + Math.sin(a) * d, z: 20, vx: Math.cos(a) * 80, vy: Math.sin(a) * 80, vz: rand(40, 120),
+                 size: rand(80, 120), size1: rand(140, 200), color: b.smoke, add: 0, a: 0.45, shape: "smoke", life: rand(0.5, 0.8), erode: 1, drag: 1.2 });
+        }
+      }
+      if (b.debris) {
+        for (let i = 0; i < 14; i++) {
+          const a = Math.random() * Math.PI * 2, v = rand(150, 420);
+          emit({ x, y, z: 10, vx: Math.cos(a) * v, vy: Math.sin(a) * v, vz: rand(350, 750), grav: 1600, size: rand(18, 34),
+                 color: "#ffffff", color1: b.debris, shape: "shard", add: 0.6, life: rand(0.6, 0.9), spin: rand(-10, 10) });
+        }
+      }
+      if (b.souls) {
+        for (let i = 0; i < 6; i++) {
+          emit({ x: x + rand(-r, r) * 0.5, y: y + rand(-r, r) * 0.5, z: 10, vz: rand(220, 380), size: rand(50, 80), size1: 20,
+                 color: "#ffffff", color1: b.souls, shape: "smoke", life: rand(0.6, 0.9), erode: 1, drag: 0.5 });
+        }
+      }
+      if (b.flames) {
+        for (let i = 0; i < 26; i++) {
+          const a = Math.random() * Math.PI * 2, d = Math.random() * r * 0.7;
+          emit({ x: x + Math.cos(a) * d, y: y + Math.sin(a) * d, z: 0, vz: rand(250, 600), size: rand(60, 110), size1: 20,
+                 color: "#fff3bf", color1: "#e03131", shape: "flame", life: rand(0.4, 0.7), erode: 1, drag: 0.8 });
+        }
+      }
+      if (b.rays) emit({ x, y, ground: 1, size: r * 1.6, size1: r * 2.4, color: "#fff9db", color1: "#fab005", shape: "rays", life: 0.6, a: 1, spin: 0.6 });
+    }
+
+    // 적이 시전을 끝낸 순간: 초상화 앞에서 번쩍
+    function castFx(c) {
+      const g = gfxOf(c.skill);
+      emit({ x: c.x, y: c.y, z: PORTRAIT_Z, size: 90, size1: 150, color: "#ffffff", color1: g.glow || c.skill.color, shape: "star", life: 0.25 });
+    }
+    // 레이저가 친 순간: 쏜 자리 섬광, 선을 따라 불티, 끝까지 퍼지는 충격
+    function beamFx(s, a, b) {
+      const lux = s.name === "럭스 R";
+      emit({ x: a.x, y: a.y, z: 60, size: lux ? 260 : 140, size1: 40, color: "#ffffff", color1: s.color, shape: "star", life: 0.35 });
+      const L = Math.min(FAR, 2400);
+      for (let i = 0; i < (lux ? 50 : 24); i++) {
+        const k = Math.random() * L, side = rand(-1, 1) * s.radius;
+        emit({ x: a.x + (b.x - a.x) * k / FAR - (b.y - a.y) / FAR * side, y: a.y + (b.y - a.y) * k / FAR + (b.x - a.x) / FAR * side, z: 60,
+               vx: rand(-60, 60), vy: rand(-60, 60), vz: rand(60, 260), size: rand(10, 18), size1: 2, color: "#ffffff", color1: s.color,
+               shape: "spark", stretch: 0.05, life: rand(0.3, 0.6), grav: 300 });
+      }
+    }
+    // 내가 맞았을 때: 스킬 색 불티 + 섬광 + 바닥 고리 + 작은 충격파 + 색수차
+    function hitFx(s) {
+      const col = gfxOf(s).hit || s.color;
+      burst(player.x, player.y, 90, col, 30, 460);
+      emit({ x: player.x, y: player.y, z: 90, size: 130, size1: 190, color: "#ffffff", color1: col, shape: "glow", life: 0.22, a: 0.55 });
+      emit({ x: player.x, y: player.y, z: 90, size: 160, size1: 80, color: "#ffffff", color1: col, shape: "star", life: 0.18, spin: 3, a: 0.7 });
+      flashGround(player.x, player.y, 90, col, 0.25);
+      wave(player.x, player.y, 40, 260, 0.4, 14);
+      ca = 1;
+    }
+    // 점멸: 출발점과 도착점에 노란 섬광, 그 사이를 빛줄기가 잇는다
+    function flashFx(from, to) {
+      for (const p of [from, to]) {
+        emit({ x: p.x, y: p.y, z: 70, size: 170, size1: 60, color: "#ffffff", color1: "#ffd43b", shape: "star", life: 0.3, spin: 4 });
+        emit({ x: p.x, y: p.y, ground: 1, size: 80, size1: 150, color: "#fff3bf", color1: "#fab005", shape: "ring", life: 0.35, erode: 1 });
+        burst(p.x, p.y, 60, "#ffe066", 12, 240);
+      }
+      emit({ x: from.x, y: from.y, z: 70, line: [from.x, from.y, to.x, to.y], size: 60, size1: 10, color: "#fff9db", color1: "#fab005", shape: "spark", life: 0.25 });
+    }
+    // 정화: 발밑에서 맑은 빛이 퍼지고 반짝이가 솟는다
+    function cleanseFx() {
+      flashGround(player.x, player.y, 140, "#99e9f2", 0.45);
+      emit({ x: player.x, y: player.y, z: 80, size: 260, size1: 120, color: "#ffffff", color1: "#66d9e8", shape: "glow", life: 0.35 });
+      for (let i = 0; i < 26; i++) {
+        const a = Math.random() * Math.PI * 2, d = rand(20, 90);
+        emit({ x: player.x + Math.cos(a) * d, y: player.y + Math.sin(a) * d, z: rand(0, 60), vz: rand(200, 420), size: rand(18, 30), size1: 4,
+               color: "#ffffff", color1: "#66d9e8", shape: "star", life: rand(0.5, 0.8), spin: 4, drag: 1 });
+      }
+      wave(player.x, player.y, 30, 220, 0.35, 9);
+    }
+    // CC 에 걸린 순간: 종류마다 다른 표시(롤은 기절에 별, 속박에 사슬·덩굴, 매혹에 하트, 공중에 뜸에 먼지)
+    function ccFx(s) {
+      const col = gfxOf(s).hit || s.color;
+      if (cc("air")) {
+        for (let i = 0; i < 16; i++) {
+          const a = i / 16 * Math.PI * 2;
+          emit({ x: player.x + Math.cos(a) * 50, y: player.y + Math.sin(a) * 50, z: 5, vx: Math.cos(a) * 260, vy: Math.sin(a) * 260, vz: 40,
+                 size: rand(50, 80), size1: 130, color: "#a68a64", color1: "#4a3b2a", add: 0, a: 0.6, shape: "smoke", life: 0.6, erode: 1, drag: 3 });
+        }
+      }
+      emit({ x: player.x, y: player.y, ground: 1, size: 90, size1: 170, color: "#ffffff", color1: col, shape: "rune", life: 0.5, spin: 2, erode: 1 });
     }
 
     // 바닥에 누운 원(투영한 다각형). 원근 때문에 앞쪽이 크게 보인다
@@ -1009,29 +1444,357 @@
     function glow(color, blur) { ctx.shadowColor = color; ctx.shadowBlur = blur; }
     function noGlow() { ctx.shadowBlur = 0; }
 
+    // ── 효과층에 쿼드 쌓기 ──
+    // FX(): 지금 쓰는 그리개. WebGL 이면 묶음에 쌓았다가 frame() 에서 한 번에, 아니면 2D 로 바로 그린다
+    const FX = () => (fxgl ? fxgl : fx2d);
+    const ATLAS_FR = new Map();
+    // 모양(dodge-gl.js 의 SHAPES) 이나 롤 그림(FX_MAP) 의 텍스처 자리
+    function frameOf(name) {
+      const R = FX();
+      if (!R) return null;
+      if (R.frames[name]) return R.frames[name];
+      if (!fxReady || !FX_MAP[name]) return null;
+      let f = ATLAS_FR.get(name);
+      if (!f) {
+        const [x, y, w, h] = FX_MAP[name], iw = fxImg.naturalWidth, ih = fxImg.naturalHeight;
+        f = { tex: 0, u0: x / iw, v0: y / ih, u1: (x + w) / iw, v1: (y + h) / ih };
+        ATLAS_FR.set(name, f);
+      }
+      return f;
+    }
+    const sub = (f, u0, v0, u1, v1) => ({ tex: f.tex, u0: f.u0 + (f.u1 - f.u0) * u0, v0: f.v0 + (f.v1 - f.v0) * v0,
+                                          u1: f.u0 + (f.u1 - f.u0) * u1, v1: f.v0 + (f.v1 - f.v0) * v1 });
+    const mixC = (a, b, k) => [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k];
+    // 화면에 세운 회전 사각형(가운데 cx, cy)
+    function rq(L, f, cx, cy, w, h, rot, col, a, add = 1, erode = 0, nz = 0, nuv = null) {
+      if (!f || a <= 0.004 || w < 0.5) return;
+      const c = Math.cos(rot), s = Math.sin(rot), hw = w / 2, hh = h / 2;
+      L.quad([cx - hw * c + hh * s, cy - hw * s - hh * c, cx + hw * c + hh * s, cy + hw * s - hh * c,
+              cx + hw * c - hh * s, cy + hw * s + hh * c, cx - hw * c - hh * s, cy - hw * s + hh * c], f, col, a, add, erode, nz, nuv);
+    }
+    // a → b 로 늘인 사각형(텍스처 가로가 길이 방향. 불티·빛줄기)
+    function seg(L, f, ax, ay, bx, by, w, col, a, add = 1) {
+      if (!f || a <= 0.004) return;
+      const dx = bx - ax, dy = by - ay, d = Math.hypot(dx, dy) || 1, nx = -dy / d * w / 2, ny = dx / d * w / 2;
+      L.quad([ax + nx, ay + ny, bx + nx, by + ny, bx - nx, by - ny, ax - nx, ay - ny], f, col, a, add);
+    }
+    // 위(top) → 아래(bot) 로 세운 사각형(텍스처 세로가 길이 방향. 빛기둥·리본 꼬리). 폭은 양 끝 따로
+    function segV(L, f, top, bot, w0, w1, col, a, add = 1, erode = 0, nz = 0, nuv = null) {
+      if (!f || a <= 0.004) return;
+      const dx = bot.x - top.x, dy = bot.y - top.y, d = Math.hypot(dx, dy) || 1, nx = -dy / d, ny = dx / d;
+      L.quad([top.x - nx * w0 / 2, top.y - ny * w0 / 2, top.x + nx * w0 / 2, top.y + ny * w0 / 2,
+              bot.x + nx * w1 / 2, bot.y + ny * w1 / 2, bot.x - nx * w1 / 2, bot.y - ny * w1 / 2], f, col, a, add, erode, nz, nuv);
+    }
+    // 바닥에 눕힌 그림(가운데 x, y, 반지름 r). 크면 원근의 휨이 보여서 2×2, 4×4 로 잘라 편다
+    function floorQ(L, f, x, y, r, rot, col, a, add = 1, erode = 0, nz = 0, ns = 1, no = null) {
+      if (!f || a <= 0.004 || r <= 0) return;
+      const n = r > 260 ? 4 : r > 110 ? 2 : 1, c = Math.cos(rot) * r, s = Math.sin(rot) * r;
+      const P = [];
+      for (let j = 0; j <= n; j++) for (let i = 0; i <= n; i++) {
+        const u = -1 + 2 * i / n, v = -1 + 2 * j / n;
+        P.push(proj(x + c * u - s * v, y + s * u + c * v));
+      }
+      for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+        const p00 = P[j * (n + 1) + i], p10 = P[j * (n + 1) + i + 1], p11 = P[(j + 1) * (n + 1) + i + 1], p01 = P[(j + 1) * (n + 1) + i];
+        const nuv = no ? [no[0] + ns * i / n, no[1] + ns * j / n, no[0] + ns * (i + 1) / n, no[1] + ns * (j + 1) / n] : null;
+        L.quad([p00.x, p00.y, p10.x, p10.y, p11.x, p11.y, p01.x, p01.y], sub(f, i / n, j / n, (i + 1) / n, (j + 1) / n), col, a, add, erode, nz, nuv);
+      }
+    }
+    // 경기장 안으로 자른 선분(레이저가 경기장 밖 허공에 그려지지 않게)
+    function clipArena(a, b) {
+      let t0 = 0, t1 = 1;
+      const dx = b.x - a.x, dy = b.y - a.y;
+      for (const [p, q] of [[-dx, a.x], [dx, ARENA.w - a.x], [-dy, a.y], [dy, ARENA.h - a.y]]) {
+        if (p === 0) { if (q < 0) return null; continue; }
+        const r = q / p;
+        if (p < 0) t0 = Math.max(t0, r); else t1 = Math.min(t1, r);
+      }
+      if (t0 >= t1) return null;
+      return [{ x: a.x + dx * t0, y: a.y + dy * t0 }, { x: a.x + dx * t1, y: a.y + dy * t1 }];
+    }
+    // 바닥에서 z 높이에 눕힌 띠 a → b(반쪽 폭 hw). 텍스처 세로가 길이 방향, 노이즈가 길이 방향으로 흐른다
+    function band(L, f, a, b, hw, z, col, al, add = 1, erode = 0, nz = 0, flow = 0) {
+      const cut = clipArena(a, b);
+      if (!cut || !f || al <= 0.004) return;
+      [a, b] = cut;
+      const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy) || 1, nx = -dy / len * hw, ny = dx / len * hw;
+      const n = Math.max(1, Math.ceil(len / 150));
+      const P = (x, y) => (z ? upright(x, y, z) : proj(x, y));
+      for (let i = 0; i < n; i++) {
+        const t0 = i / n, t1 = (i + 1) / n;
+        const x0 = a.x + dx * t0, y0 = a.y + dy * t0, x1 = a.x + dx * t1, y1 = a.y + dy * t1;
+        const q0 = P(x0 - nx, y0 - ny), q1 = P(x0 + nx, y0 + ny), q2 = P(x1 + nx, y1 + ny), q3 = P(x1 - nx, y1 - ny);
+        L.quad([q0.x, q0.y, q1.x, q1.y, q2.x, q2.y, q3.x, q3.y], sub(f, 0, 0.2 + 0.4 * t0, 1, 0.2 + 0.4 * t1), col, al, add, erode, nz,
+               [0, len * t0 / 400 - flow, 0.5, len * t1 / 400 - flow]);
+      }
+    }
+
+    // 파티클을 쌓는다. ground: 바닥에 눕는 것만, 아니면 공중의 것만
+    function drawParts(L, ground) {
+      for (const p of parts) {
+        if (!!p.ground !== ground) continue;
+        const f = frameOf(p.shape || "dot");
+        if (!f) continue;
+        const k = Math.min(1, 1 - p.life / p.max);
+        const size = p.size + (p.size1 - p.size) * k;
+        const er = p.erode ? Math.pow(k, 1.3) * 0.95 : 0;
+        const a = p.a * Math.min(1, k / 0.06 + 0.15) * (p.erode ? 1 : 1 - k * k);
+        const col = mixC(p.c0, p.c1, k);
+        const nuv = er ? [p.nu, p.nv, p.nu + 0.4, p.nv + 0.4] : null;
+        if (ground) {
+          floorQ(L, f, p.x, p.y, size, p.rot, col, a, p.add, er, er ? 0.3 : 0, 0.4, nuv && [p.nu, p.nv]);
+        } else if (p.pillar) {
+          const b = proj(p.x, p.y, 0), tp = upright(p.x, p.y, p.pillar * (0.55 + 0.45 * Math.sqrt(k)));
+          segV(L, f, tp, b, size * b.k * 0.6, size * b.k, col, a, p.add, 0, 0.5, [0, -k * 2, 1, 1 - k * 2]);
+        } else if (p.line) {
+          const A = upright(p.line[0], p.line[1], p.z), B = upright(p.line[2], p.line[3], p.z);
+          seg(L, f, A.x, A.y, B.x, B.y, size * A.k, col, a, p.add);
+        } else {
+          const q = upright(p.x, p.y, p.z), w = size * q.k;
+          if (p.stretch) {
+            const q2 = upright(p.x - p.vx * p.stretch, p.y - p.vy * p.stretch, p.z - p.vz * p.stretch);
+            const L2 = Math.hypot(q.x - q2.x, q.y - q2.y);
+            if (L2 > w) { seg(L, f, q2.x, q2.y, q.x, q.y, w * 0.6, col, a, p.add); continue; }
+          }
+          rq(L, f, q.x, q.y, w, w, p.rot, col, a, p.add, er, er ? 0.25 : 0, nuv);
+        }
+      }
+    }
+
+    // 투사체: 리본 꼬리 + 둘레 빛 + 속 + 반짝임. 생김새(롤 그림) 는 drawMissile 이 2D 로 그린다
+    function missileFx(L, m, now) {
+      const s = m.skill, g = gfxOf(s), zh = s.look === "vines" ? 18 : MISSILE_Z;
+      const p = upright(m.x, m.y, zh), r = s.radius * p.k;
+      if (g.trail && m.hist && m.hist.length > 1) {
+        const pts = m.hist.concat([{ x: m.x, y: m.y }]).map(q => upright(q.x, q.y, zh));
+        const n = pts.length - 1, col = rgb(g.trail[0]), white = rgb("#ffffff"), beam = frameOf("beam");
+        for (let i = 0; i < n; i++) {
+          const ta = i / n, tb = (i + 1) / n, w = s.radius * g.trail[1] * 2 * p.k;
+          const nuv = [0, ta * 2 - now * 3, 1, tb * 2 - now * 3];
+          segV(L, sub(beam, 0, 0.2, 1, 0.65), pts[i], pts[i + 1], w * (0.2 + 0.8 * ta), w * (0.2 + 0.8 * tb), col, Math.pow(tb, 1.2) * 0.9, 1, 0, 0.5, nuv);
+          segV(L, sub(beam, 0, 0.2, 1, 0.65), pts[i], pts[i + 1], w * 0.3 * ta, w * 0.3 * tb, white, Math.pow(tb, 2) * 0.8, 1);
+        }
+      }
+      let k = 1;
+      if (m.splitIn != null) k = 1 + 0.7 * (1 - Math.max(0, m.splitIn) / s.split.telegraph);
+      const gc = rgb(g.glow || s.color), cc0 = rgb(g.core || "#ffffff");
+      rq(L, frameOf("dot"), p.x, p.y, r * 3.6 * k, r * 3.6 * k, 0, gc, 0.28, 1);
+      rq(L, frameOf("glow"), p.x, p.y, r * 1.9 * k, r * 1.9 * k, 0, cc0, 0.6, 1);
+      if (g.flare || m.splitIn != null) rq(L, frameOf("star"), p.x, p.y, r * 3.4 * k, r * 3.4 * k, now * 1.7, cc0, 0.45, 1);
+    }
+
+    // 지금 걸린 CC 의 이름(롤처럼 머리 위 이름 자리에 뜬다) 과 남은 비율
+    const CC_NAMES = [["air", "공중에 뜸"], ["stun", "기절"], ["charm", "매혹"], ["root", "속박"]];
+    function ccLabel() {
+      if (mode !== "hard") return null;
+      for (const [type, text] of CC_NAMES) {
+        const e = cc(type);
+        if (e) return { text, frac: (e.end - t) / (e.end - e.start) };
+      }
+      return null;
+    }
+    // 공중에 뜬 높이(그림). 끌려가는 동안은 살짝, 띄우는 스킬은 포물선
+    function lift() {
+      const e = mode === "hard" && cc("air");
+      if (!e) return 0;
+      if (e.pull) return 50;
+      return (e.lift ? 170 : 70) * Math.sin(Math.PI * Math.min(1, (t - e.start) / (e.end - e.start)));
+    }
+
+    // 바닥 층: 장판이 차오르는 빛, 레이저가 지나간 바닥, 투사체가 바닥에 비치는 빛, 발밑 표시, 바닥 파티클
+    function buildGround(L) {
+      const now = performance.now() / 1000;
+      for (const z of zones) {
+        const s = z.skill, col = rgb(s.color), zg = gfxOf(s).zone || {};
+        if (s.kind === "circle" && z.wait > 0) {
+          const p = 1 - z.wait / z.total;
+          floorQ(L, frameOf("disc"), z.x, z.y, s.radius, 0, col, 0.08 + 0.22 * p, 1, (1 - p) * 0.55, 0.9, 1.6, [now * 0.06, now * 0.09]);
+          if (zg.rune) floorQ(L, frameOf("rune"), z.x, z.y, s.radius * 1.05, now * 0.5, col, 0.2 + 0.5 * p, 1);
+          floorQ(L, frameOf("ring"), z.x, z.y, s.radius * 1.25, 0, col, 0.25 + 0.6 * p * p, 1);
+          if (s.inner) floorQ(L, frameOf("ring"), z.x, z.y, s.inner * 1.25, 0, mixC(col, [1, 1, 1], 0.5), 0.4 + 0.5 * p, 1);
+        } else if (s.kind === "cage" && z.formed) {
+          const a = z.done != null ? Math.max(0, z.done / 0.3) : 1;
+          floorQ(L, frameOf("ring"), z.x, z.y, s.radius * 1.25, 0, col, 0.7 * a, 1);
+          floorQ(L, frameOf("disc"), z.x, z.y, s.radius, now * 0.2, col, 0.1 * a, 1, 0.3, 0.9, 1.6, [now * 0.04, -now * 0.05]);
+        }
+      }
+      for (const f of flashes) {
+        const al = Math.max(0, f.left / f.max), col = rgb(f.skill.color);
+        band(L, frameOf("beam"), f.a, f.b, f.skill.radius * (1.6 + (1 - al) * 0.6), 0, col, al * 0.8, 1, (1 - al) * 0.7, 0.7, now * 3);
+      }
+      for (const m of missiles) {
+        const g = gfxOf(m.skill);
+        floorQ(L, frameOf("glow"), m.x, m.y, m.skill.radius * 2.6, 0, rgb(g.glow || m.skill.color), 0.3, 1);
+      }
+      if (mode === "hard" && player) {
+        const root = cc("root");
+        if (root) floorQ(L, frameOf("rune"), player.x, player.y, 100, now * 1.2, rgb(gfxOf(root.skill).hit || root.skill.color), 0.55, 1);
+        if (cc("slow")) floorQ(L, frameOf("swirl"), player.x, player.y, 85, -now * 3, rgb("#74c0fc"), 0.55, 1);
+        if (tenacity > t) floorQ(L, frameOf("ring"), player.x, player.y, 110, 0, rgb("#99e9f2"), 0.35 + 0.15 * Math.sin(now * 8), 1);
+      }
+      drawParts(L, true);
+    }
+
+    // 공중 층: 파티클, 투사체 빛, 레이저 빛줄기, 시전 중 모이는 빛, 사슬, CC 표시
+    function buildAir(L) {
+      const now = performance.now() / 1000;
+      drawParts(L, false);
+      for (const m of missiles) missileFx(L, m, now);
+      for (const f of flashes) {
+        const al = Math.max(0, f.left / f.max), col = rgb(f.skill.color), w = f.skill.radius;
+        band(L, frameOf("beam"), f.a, f.b, w * 1.2, 60, col, al, 1, 0, 0.4, now * 4);
+        band(L, frameOf("beam"), f.a, f.b, w * 0.35, 60, rgb("#ffffff"), al, 1);
+      }
+      for (const c of casters) {
+        if (c.wind <= 0 || !c.skill.cast) continue;
+        const p = 1 - c.wind / c.skill.cast, head = upright(c.x, c.y, PORTRAIT_Z), col = rgb(gfxOf(c.skill).glow || c.skill.color);
+        rq(L, frameOf("glow"), head.x, head.y, 260 * head.k * (0.5 + 0.7 * p), 260 * head.k * (0.5 + 0.7 * p), 0, col, 0.55 * p, 1);
+        rq(L, frameOf("rune"), head.x, head.y, 170 * head.k, 170 * head.k, now * 2, col, 0.5 * p, 1);
+      }
+      // 레오나 R: 하늘에서 햇빛 한 줄기가 내려와 점점 굵어진다
+      for (const z of zones) {
+        if (z.skill.name !== "레오나 R" || z.wait <= 0) continue;
+        const p = 1 - z.wait / z.total, b = proj(z.x, z.y), tp = upright(z.x, z.y, 1400);
+        segV(L, frameOf("beam"), tp, b, 30 * b.k * p, 90 * b.k * p, rgb("#ffe066"), 0.6 * p, 1, 0, 0.5, [0, -now, 1, 1 - now]);
+      }
+      // 사슬: 시전자에서 나까지 고리를 잇는다
+      for (const x of tethers) {
+        const from = upright(x.c.x, x.c.y, 80), to = upright(player.x, player.y, 80 + lift());
+        const col = rgb(gfxOf(x.skill).hit || x.skill.color), d = Math.hypot(to.x - from.x, to.y - from.y);
+        seg(L, frameOf("spark"), from.x, from.y, to.x, to.y, 40 * from.k, col, 0.6, 1);
+        const n = Math.max(2, Math.floor(d / (22 * from.k))), ang = Math.atan2(to.y - from.y, to.x - from.x);
+        for (let i = 0; i <= n; i++) {
+          rq(L, frameOf("chain"), from.x + (to.x - from.x) * i / n, from.y + (to.y - from.y) * i / n,
+             30 * from.k, 15 * from.k, ang + (i % 2) * 0.3, [0.85, 0.9, 0.9], 0.9, 0.3);
+        }
+      }
+      if (mode === "hard" && player) {
+        const L0 = lift(), head = upright(player.x, player.y, PORTRAIT_Z + 70 + L0);
+        if (cc("stun") || cc("air")) {
+          for (let i = 0; i < 3; i++) {
+            const a = now * 5 + i * Math.PI * 2 / 3;
+            rq(L, frameOf("star"), head.x + Math.cos(a) * 46 * head.k, head.y + Math.sin(a) * 13 * head.k, 40 * head.k, 40 * head.k, now * 3,
+               rgb("#ffe066"), 0.95, 1);
+          }
+        }
+        const root = cc("root");
+        if (root) {
+          const col = rgb(gfxOf(root.skill).hit || root.skill.color);
+          for (const h of [35, 95]) {
+            const q = upright(player.x, player.y, h + L0);
+            rq(L, frameOf("ring"), q.x, q.y, 150 * q.k, 46 * q.k, 0, col, 0.6, 1);
+          }
+        }
+        if (cc("charm")) {
+          const q = upright(player.x, player.y, PORTRAIT_Z + L0);
+          rq(L, frameOf("glow"), q.x, q.y, 220 * q.k, 220 * q.k, 0, rgb("#f06595"), 0.35, 1);
+        }
+      }
+    }
+
+    // 충격파를 화면 좌표로(원근 때문에 세로로 눌린 타원)
+    function screenWaves() {
+      return waves.slice(-8).map(w => {
+        const k = 1 - w.life / w.max, r = w.r0 + (w.r1 - w.r0) * (1 - (1 - k) * (1 - k));
+        const c = proj(w.x, w.y), ex = proj(w.x + r, w.y), y1 = proj(w.x, w.y + r), y0 = proj(w.x, w.y - r);
+        const rx = Math.max(1, Math.abs(ex.x - c.x)), ry = Math.abs(y1.y - y0.y) / 2;
+        return { x: c.x, y: c.y, r: rx, amp: w.amp * (1 - k), th: Math.max(10, rx * 0.22), sq: Math.max(0.2, ry / rx) };
+      });
+    }
+
     // 그림 효과만 흘러간다(실제 시간). 게임이 끝나도 파편은 마저 떨어진다
     function tickFx(dt) {
       for (const f of fx) f.life -= dt;
       fx = fx.filter(f => f.life > 0);
       for (const p of parts) {
+        if (p.drag) { const k = Math.max(0, 1 - p.drag * dt); p.vx *= k; p.vy *= k; p.vz *= k; }
+        if (p.grav) p.vz -= p.grav * dt;
         p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
-        p.vz -= 1400 * dt;
-        if (p.z < 0) { p.z = 0; p.vz *= -0.3; p.vx *= 0.6; p.vy *= 0.6; }
+        if (p.grav && p.z < 0) { p.z = 0; p.vz *= -0.3; p.vx *= 0.6; p.vy *= 0.6; }
+        if (p.spin) p.rot += p.spin * dt;
         p.life -= dt;
       }
       parts = parts.filter(p => p.life > 0);
+      for (const w of waves) w.life -= dt;
+      waves = waves.filter(w => w.life > 0);
       for (const p of pops) p.life -= dt;
       pops = pops.filter(p => p.life > 0);
-      // 브랜드 Q 는 날아가며 불티를 흘린다
-      if (state === "play") {
-        for (const m of missiles) {
-          if (m.skill.look !== "fire" || Math.random() > dt * 40) continue;
-          parts.push({ x: m.x - m.dx * 20, y: m.y - m.dy * 20, z: MISSILE_Z, vx: (Math.random() - 0.5) * 120, vy: (Math.random() - 0.5) * 120,
-                       vz: 80 + Math.random() * 120, life: 0.35, max: 0.35, color: Math.random() < 0.5 ? "#ffa94d" : "#ffe066", size: 7 + Math.random() * 6 });
-        }
-      }
+      ca = Math.max(0, ca - dt * 2.5);
+      deadFx = state === "over" ? Math.min(1, deadFx + dt / 0.6) : 0;
       shake = Math.max(0, shake - dt);
       hurt = Math.max(0, hurt - dt);
+      if (state !== "play" || !player) return;
+
+      // 투사체: 지나온 길(리본 꼬리) 을 적어 두고, 표의 파티클을 흘린다
+      const now = performance.now() / 1000;
+      for (const m of missiles) {
+        const g = gfxOf(m.skill);
+        (m.hist = m.hist || []).push({ x: m.x, y: m.y, at: now });
+        const keep = g.trail ? g.trail[2] : 0.2;
+        while (m.hist.length > 2 && now - m.hist[0].at > keep) m.hist.shift();
+        const zh = m.skill.look === "vines" ? 18 : MISSILE_Z;
+        (g.motes || []).forEach((d, i) => {
+          m.acc = m.acc || [];
+          m.acc[i] = (m.acc[i] || 0) + dt;
+          while (m.acc[i] >= d.every) { m.acc[i] -= d.every; mote(d, m.x, m.y, zh, { x: m.dx, y: m.dy, v: m.speed }); }
+        });
+      }
+      // 장판: 차오르는 동안 안에서 솟는 것이 점점 많아진다. 감옥은 테두리를 따라 보랏빛이 솟는다
+      for (const z of zones) {
+        const s = z.skill, zd = (gfxOf(s).zone || {}).motes;
+        if (s.kind === "circle" && z.wait > 0 && zd) {
+          const p = 1 - z.wait / z.total;
+          z.acc = (z.acc || 0) + dt * (20 + 90 * p) * s.radius / 220;
+          while (z.acc >= 1) {
+            z.acc -= 1;
+            const a = Math.random() * Math.PI * 2, d = Math.sqrt(Math.random()) * s.radius * 0.9;
+            mote({ ...zd, drift: 20 }, z.x + Math.cos(a) * d, z.y + Math.sin(a) * d, 0);
+          }
+        } else if (s.kind === "cage" && z.formed && z.done == null) {
+          z.acc = (z.acc || 0) + dt * 70;
+          while (z.acc >= 1) {
+            z.acc -= 1;
+            const a = Math.random() * Math.PI * 2;
+            emit({ x: z.x + Math.cos(a) * s.radius, y: z.y + Math.sin(a) * s.radius, z: rand(0, 40), vz: rand(120, 260),
+                   size: rand(14, 26), size1: 4, color: "#e5dbff", color1: "#7048e8", shape: "dot", life: rand(0.5, 0.9) });
+          }
+        }
+      }
+      // 시전 중: 스킬 색 빛이 초상화로 빨려 들어간다. 레오나 E 돌진은 금빛 자취
+      for (const c of casters) {
+        if (c.wind > 0 && c.skill.cast > 0) {
+          c.acc = (c.acc || 0) + dt * 40;
+          while (c.acc >= 1) {
+            c.acc -= 1;
+            const a = Math.random() * Math.PI * 2, r = rand(90, 140);
+            emit({ x: c.x + Math.cos(a) * r, y: c.y + Math.sin(a) * r * 0.5, z: PORTRAIT_Z + rand(-40, 40),
+                   vx: -Math.cos(a) * r * 3.2, vy: -Math.sin(a) * r * 1.6, size: rand(10, 18), size1: 4,
+                   color: "#ffffff", color1: gfxOf(c.skill).glow || c.skill.color, shape: "dot", life: 0.3 });
+          }
+        }
+        if (c.dash) emit({ x: c.x, y: c.y, z: PORTRAIT_Z, size: 70, size1: 20, color: "#fff3bf", color1: "#f59f00", shape: "glow", life: 0.25 });
+      }
+      // 내 상태: 유체화(푸른 자취), 둔화(발밑 자국), 불길(불꽃), 매혹(하트)
+      const moving = player.vx || player.vy;
+      const every = (key, sec, fn) => { player[key] = (player[key] || 0) + dt; while (player[key] >= sec) { player[key] -= sec; fn(); } };
+      if (ghostLeft > 0 && moving) {
+        every("ghostAcc", 0.03, () => emit({ x: player.x + rand(-30, 30), y: player.y + rand(-30, 30), z: rand(10, 120), vz: 60,
+          size: rand(40, 60), size1: 10, color: "#c5f6fa", color1: "#1098ad", shape: "smoke", life: 0.5, erode: 1 }));
+      }
+      if (mode === "hard") {
+        if (cc("slow") && moving) {
+          every("slowAcc", 0.14, () => emit({ x: player.x - player.vx * 0.12, y: player.y - player.vy * 0.12, ground: 1,
+            size: 40, size1: 55, color: "#a5d8ff", color1: "#1c7ed6", shape: "swirl", life: 0.9, a: 0.8, erode: 1 }));
+        }
+        if (ablaze > t) {
+          every("fireAcc", 0.04, () => emit({ x: player.x + rand(-35, 35), y: player.y + rand(-35, 35), z: rand(20, 140), vz: rand(120, 220),
+            size: rand(30, 50), size1: 8, color: "#ffe066", color1: "#e03131", shape: "flame", life: rand(0.3, 0.5), erode: 1 }));
+        }
+        if (cc("charm")) {
+          every("charmAcc", 0.16, () => emit({ x: player.x + rand(-30, 30), y: player.y + rand(-30, 30), z: PORTRAIT_Z + 40, vz: 140,
+            size: rand(24, 34), size1: 10, color: "#ffdeeb", color1: "#f06595", shape: "heart", life: 0.7, rot: 0 }));
+        }
+      }
     }
 
     // ── 바닥 ──
@@ -1356,17 +2119,25 @@
     // ── 서 있는 것들 ──
     const U = () => VW / 1000;       // HUD 크기 단위(화면 폭 1000 일 때 1)
 
-    // 머리 위 체력바. ally 면 초록(나), 아니면 빨강(적). frac: 남은 체력 비율, segs: 칸 수
-    function healthBar(x, y, frac, ally, lv, name, segs = 3) {
+    // 머리 위 체력바. ally 면 초록(나), 아니면 빨강(적). frac: 남은 체력 비율, segs: 칸 수.
+    // cc: 걸린 CC { text, frac }. 롤처럼 이름 자리에 CC 이름이 뜨고, 체력바 아래 선이 남은 시간만큼 줄어든다
+    function healthBar(x, y, frac, ally, lv, name, segs = 3, cc = null) {
       const u = U(), w = 96 * u, h = 11 * u, box = 16 * u;
       const left = x - w / 2 + box / 2;
+      if (cc) name = cc.text;
       if (name) {
-        ctx.font = "600 " + Math.max(9, 12 * u) + "px 'IBM Plex Sans KR', sans-serif";
+        ctx.font = (cc ? "800 " : "600 ") + Math.max(9, (cc ? 14 : 12) * u) + "px 'IBM Plex Sans KR', sans-serif";
         ctx.textAlign = "center";
         ctx.fillStyle = "rgba(0, 0, 0, .6)";
         ctx.fillText(name, x + 1, y - h - 4 * u + 1);
-        ctx.fillStyle = ally ? "#f0e6d2" : "#ffb4b4";
+        ctx.fillStyle = cc ? "#ffd43b" : ally ? "#f0e6d2" : "#ffb4b4";
         ctx.fillText(name, x, y - h - 4 * u);
+      }
+      if (cc) {
+        ctx.fillStyle = "#010a13";
+        ctx.fillRect(left - u, y + 3 * u, w - box + 2 * u, 4 * u);
+        ctx.fillStyle = "#f0e6d2";
+        ctx.fillRect(left, y + 4 * u, (w - box) * Math.max(0, cc.frac), 2 * u);
       }
       ctx.fillStyle = "#010a13";
       ctx.fillRect(left - 2 * u, y - h - 2 * u, w - box + 4 * u, h + 4 * u);
@@ -1400,8 +2171,9 @@
     }
 
     function drawPlayer() {
-      // 내 챔피언(티어표 OP 챔피언) 초상화가 받침대 위에 선다. 적과 같은 모양, 테두리만 금색
-      const base = proj(player.x, player.y, 0), head = upright(player.x, player.y, PORTRAIT_Z);
+      // 내 챔피언(티어표 OP 챔피언) 초상화가 받침대 위에 선다. 적과 같은 모양, 테두리만 금색.
+      // 공중에 뜨면 초상화가 떠오른다
+      const base = proj(player.x, player.y, 0), head = upright(player.x, player.y, PORTRAIT_Z + lift());
       const r = 46 * head.k;
       const blink = safe > 0 && Math.floor(safe * 10) % 2;
       ctx.globalAlpha = blink ? 0.4 : 1;
@@ -1420,6 +2192,7 @@
       ctx.beginPath(); ctx.moveTo(base.x, base.y); ctx.lineTo(head.x, head.y + r); ctx.stroke();
       ctx.save();
       ctx.beginPath(); ctx.arc(head.x, head.y, r, 0, Math.PI * 2); ctx.clip();
+      const face = champImage(faceKey);
       if (face.complete && face.naturalWidth) ctx.drawImage(face, head.x - r, head.y - r, r * 2, r * 2);
       else { ctx.fillStyle = "#f0b429"; ctx.fillRect(head.x - r, head.y - r, r * 2, r * 2); }
       ctx.restore();
@@ -1429,7 +2202,7 @@
       ctx.beginPath(); ctx.arc(head.x, head.y, r, 0, Math.PI * 2); ctx.stroke();
       noGlow();
       ctx.globalAlpha = 1;
-      healthBar(head.x, head.y - r - 8 * U(), Math.max(0, lives) / LIVES, true, level, opts.name || "나", LIVES);
+      healthBar(head.x, head.y - r - 8 * U(), Math.max(0, lives) / LIVES, true, level, opts.name || "나", LIVES, ccLabel());
     }
 
     function drawCaster(c) {
@@ -1451,7 +2224,7 @@
       ctx.strokeStyle = "#ff4d4f";
       ctx.lineWidth = Math.max(1.5, 4 * head.k);
       ctx.beginPath(); ctx.arc(head.x, head.y, r, 0, Math.PI * 2); ctx.stroke();
-      healthBar(head.x, head.y - r - 10 * U(), 1, false, 18, c.skill.name.split(" ")[0], 5);
+      healthBar(head.x, head.y - r - 10 * U(), 1, false, level, c.skill.name.split(" ")[0], 5);
       // 시전 중: 테두리가 스킬 색으로 차오르고 빛난다
       if (c.wind > 0 && c.skill.cast > 0) {
         const p = 1 - c.wind / c.skill.cast;
@@ -1515,8 +2288,9 @@
         ctx.beginPath(); ctx.arc(0, 0, rad, 0, Math.PI * 2); ctx.fill();
         ctx.globalAlpha = 1;
       };
-      // 지나온 길의 옅은 꼬리
+      // 지나온 길의 옅은 꼬리(효과층이 있으면 그쪽의 리본 꼬리가 대신한다)
       const trail = (len, width, color, alpha = 0.35) => {
+        if (fxgl) return;
         const g = ctx.createLinearGradient(-len * fw, 0, 0, 0);
         g.addColorStop(0, color + "00");
         g.addColorStop(1, color);
@@ -1683,7 +2457,7 @@
           ctx.beginPath(); ctx.arc(0, 0, r * k * 1.25, 0, Math.PI * 2); ctx.fill();
           ctx.globalAlpha = 1;
         }
-        if (art.trail) {
+        if (art.trail && !fxgl) {
           const [name, color, len, wide] = art.trail;
           const L = Math.min(m.flown, len) * fw, H = r * wide * 2, img = spr(name, color), W = img.width;
           // 머리에서 멀어질수록 옅게(네 토막)
@@ -1761,38 +2535,14 @@
       }
     }
 
+    // 2D 로 그리는 롤 그림 효과(초가스 Q 가시, 하늘에서 떨어지는 베이가 W·생기는 신드라 Q 구체).
+    // 빛기둥·불티·파편은 효과층 파티클(emit) 이 그린다
     function drawEffects() {
       ctx.globalCompositeOperation = "lighter";
-      for (const f of fx) {
-        if (f.kind !== "pillar") continue;
-        const a = f.life / f.max;
-        if (fxReady) {
-          const b = proj(f.x, f.y, 0), w = f.r * 1.5 * b.k * (0.5 + 0.5 * a), h = 520 * b.k * (1.25 - a);
-          ctx.globalAlpha = a * 0.9;
-          ctx.drawImage(spr("glow", f.color), b.x - w / 2, b.y - h, w, h * 1.15);
-          ctx.drawImage(spr("glow", "#ffffff"), b.x - w / 5, b.y - h * 0.9, w / 2.5, h);
-          continue;
-        }
-        const b = proj(f.x, f.y, 0), tp = proj(f.x, f.y, 420 * (1.2 - a));
-        const w = f.r * b.k * (0.6 + 0.4 * a);
-        const g = ctx.createLinearGradient(0, b.y, 0, tp.y);
-        g.addColorStop(0, f.color + "cc");
-        g.addColorStop(1, f.color + "00");
-        ctx.globalAlpha = a;
-        ctx.fillStyle = g;
-        ctx.beginPath();
-        ctx.moveTo(b.x - w, b.y); ctx.lineTo(tp.x - w * 0.5, tp.y); ctx.lineTo(tp.x + w * 0.5, tp.y); ctx.lineTo(b.x + w, b.y);
-        ctx.closePath();
-        ctx.fill();
-      }
       if (fxReady) {
         for (const f of fx) {
           const a = f.life / f.max;
-          if (f.kind === "spark") {
-            // 맞은 자리의 불꽃(이즈리얼 Q 적중 텍스처를 스킬 색으로)
-            const q = upright(f.x, f.y, 100);
-            standSprite(spr("ez_spark", f.color), q.x, q.y, 320 * q.k * (1.3 - 0.5 * a), a, f.x);
-          } else if (f.kind === "spikes") {
+          if (f.kind === "spikes") {
             // 초가스 Q: 땅에서 가시가 솟았다가 가라앉는다
             ctx.globalCompositeOperation = "source-over";
             const img = spr("cho_spike", "#d8f5a2");
@@ -1821,12 +2571,6 @@
             standSprite(spr(name, color), q.x, q.y, z.skill.radius * 0.9 * q.k * pr, pr);
           }
         }
-      }
-      for (const p of parts) {
-        const q = proj(p.x, p.y, p.z);
-        ctx.globalAlpha = Math.max(0, p.life / p.max);
-        ctx.fillStyle = p.color;
-        ctx.beginPath(); ctx.arc(q.x, q.y, p.size * q.k, 0, Math.PI * 2); ctx.fill();
       }
       ctx.globalAlpha = 1;
       ctx.globalCompositeOperation = "source-over";
@@ -1881,18 +2625,31 @@
       }
     }
 
+    // 효과층이 있으면: 바닥(bg) · 선 것들(fg) 을 2D 로 따로 그리고, 효과층이 파티클·왜곡·번짐을 더해 합친다.
+    // 위의 입력용 캔버스는 투명하게 비워 둔다. 효과층이 없으면 예전처럼 한 장에 그리고 파티클은 2D 로
     function draw(fdt) {
       if (fdt) tickFx(fdt);
+      if (fxgl && !fxgl.ok()) { fxgl.canvas.remove(); fxgl = null; }    // WebGL 이 끊기면 2D 로
+      const R = FX(), gl = !!fxgl;
+      const sm = shake > 0 ? 10 * shake / 0.25 : 0;
+      const sx = (Math.random() - 0.5) * sm, sy = (Math.random() - 0.5) * sm;
+      ctx = gl ? bgx : mainCtx;
+      if (!gl && R) R.use(ctx);
       ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
       ctx.clearRect(0, 0, VW, VH);
       ctx.save();
-      if (shake > 0) {
-        const m = 10 * shake / 0.25;
-        ctx.translate((Math.random() - 0.5) * m, (Math.random() - 0.5) * m);
-      }
+      if (!gl && sm) ctx.translate(sx, sy);
       drawGround();
+      if (player) drawDecals();
+      if (gl) {
+        ctx.restore();
+        ctx = fgx;
+        ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+        ctx.clearRect(0, 0, VW, VH);
+        ctx.save();
+      }
       if (player) {
-        drawDecals();
+        if (R) buildGround(R.ground);
         drawCageBars(false);
         // 먼 것(y 가 작은 것) 부터 그려야 앞의 것이 뒤의 것을 가린다
         const actors = [
@@ -1903,14 +2660,24 @@
         actors.forEach(a => a.draw());
         drawCageBars(true);
         drawEffects();
+        if (R) buildAir(R.air);
         drawPops();
       }
       ctx.restore();
+      ctx = mainCtx;
+      const low = player && lives === 1 && state === "play" ? 0.18 + 0.1 * Math.sin(performance.now() / 250) : 0;
+      if (gl) {
+        fxgl.frame({ bg: bgCv, fg: fgCv, waves: player ? screenWaves() : [], shake: { x: sx, y: sy },
+                     ca: ca, dead: deadFx, hurt: hurt / 0.4, low });
+        mainCtx.setTransform(1, 0, 0, 1, 0, 0);
+        mainCtx.clearRect(0, 0, canvas.width, canvas.height);
+      }
       drawMinimap();
+      if (gl) return;
 
       // 체력이 한 칸 남으면 화면 가장자리가 계속 붉게 숨 쉰다(롤의 낮은 체력)
-      if (player && lives === 1 && state === "play") {
-        const a = 0.18 + 0.1 * Math.sin(performance.now() / 250);
+      if (low) {
+        const a = low;
         const g = ctx.createRadialGradient(VW / 2, VH / 2, Math.min(VW, VH) * 0.4, VW / 2, VH / 2, Math.max(VW, VH) * 0.72);
         g.addColorStop(0, "rgba(160, 0, 0, 0)");
         g.addColorStop(1, "rgba(160, 0, 0, " + a.toFixed(3) + ")");
@@ -1937,15 +2704,32 @@
       hud("hpfill").style.width = (hp / HP_MAX * 100) + "%";
       hud("hptext").textContent = Math.round(hp) + " / " + HP_MAX;
       hud("level").textContent = level;
-      for (const sp of SPELLS) {
-        const b = root.querySelector('[data-spell="' + sp.id + '"]');
+      const blocked = state === "play" && held();
+      root.querySelectorAll("[data-slot]").forEach(b => {
+        const sp = spellById(b.dataset.spell);
+        if (!sp) return;
         const left = cds[sp.id];
         // 쿨타임은 시계 방향으로 걷히는 그림자와 남은 초
         b.querySelector("i").style.background = left > 0
           ? "conic-gradient(rgba(1, 10, 19, .78) " + (left / sp.cd * 360) + "deg, transparent 0)" : "none";
         b.querySelector("b").textContent = left > 0 ? Math.ceil(left) : "";
-        b.classList.toggle("active", sp.id === "ghost" && ghostLeft > 0);
-      }
+        b.classList.toggle("active", (sp.id === "ghost" && ghostLeft > 0) || (sp.id === "cleanse" && tenacity > t));
+        // CC 때문에 못 쓰는 주문(이동 불가 중의 점멸) 은 어둡게
+        b.classList.toggle("locked", sp.id === "flash" && !!blocked);
+      });
+    }
+    // HUD 주문 칸에 이번 판의 주문 두 개를 넣는다(키 순서대로)
+    function paintSpells() {
+      const k = spellKeys(controls);
+      const ids = spellsOf(controls).slice().sort((a, b) => keyPair(controls.move).indexOf(k[a]) - keyPair(controls.move).indexOf(k[b]));
+      root.querySelectorAll("[data-slot]").forEach((b, i) => {
+        const sp = spellById(ids[i]);
+        b.dataset.spell = sp.id;
+        b.querySelector("img").src = sp.icon;
+        b.querySelector("img").alt = sp.name;
+        b.querySelector("kbd").textContent = k[sp.id];
+        b.title = sp.name + " (" + k[sp.id] + ")";
+      });
     }
 
     // ── 흐름 ──
@@ -1967,6 +2751,7 @@
 
     function start() {
       reset();
+      paintSpells();
       state = "play";
       over.hidden = true;
       clearTimeout(overTimer);
@@ -1988,11 +2773,11 @@
       announce("처치당했습니다", "death", 1600);
       sfx("death");
       setTimeout(() => sample("slain", 0.7), 350);   // "당신은 처치당했습니다!"(아나운서)
-      const result = { ms: Math.round(t * 1000), dodged, by: lastHit.name, ver: VERSION };
+      const result = { ms: Math.round(t * 1000), dodged, by: lastHit.name, ver: VERSION, mode };
       clearTimeout(overTimer);
       overTimer = setTimeout(() => showOver(`
         <h2>처치당했습니다</h2>
-        <p class="note">마지막 스킬: ${esc(lastHit.name)} · 레벨 ${level}</p>
+        <p class="note">${mode === "hard" ? "하드 모드 · " : ""}마지막 스킬: ${esc(lastHit.name)} · 레벨 ${level}</p>
         <p class="dodge-score">${fmt(t)}</p>
         <p class="note">피한 스킬 ${dodged}개 · 맞은 스킬 ${hits.map(esc).join(" → ")}</p>
         <div data-extra></div>
@@ -2068,7 +2853,7 @@
     window.addEventListener("blur", onBlur);
     window.addEventListener("resize", fit);
     // HUD 의 주문 칸은 눌러도 쓴다(휴대폰)
-    root.querySelectorAll("[data-spell]").forEach(b => b.addEventListener("pointerdown", e => {
+    root.querySelectorAll("[data-slot]").forEach(b => b.addEventListener("pointerdown", e => {
       e.preventDefault();
       e.stopPropagation();
       useSpell(b.dataset.spell);
@@ -2086,38 +2871,44 @@
     volInput.onchange = () => { ensureAudio(); loadSamples(); sfx("flash"); };
     soundBtn.onclick = () => { setSound(!soundOn()); paintSound(); if (soundOn()) loadSamples(); };
     paintSound();
-    root.querySelector('[data-hud="face"]').src = face.src;
+    root.querySelector('[data-hud="face"]').src = hudFace(faceKey);
 
     reset();
     fit();
+    paintSpells();
     hudUpdate();
-    // HUD 주문 칸의 키 글자
-    function paintKeys() {
-      for (const sp of SPELLS) {
-        const b = root.querySelector('[data-spell="' + sp.id + '"]');
-        b.querySelector("kbd").textContent = keyOf(sp.id);
-        b.title = sp.name + " (" + keyOf(sp.id) + ")";
-      }
-    }
 
-    // 시작 창. 이동 방식과 주문 배치를 고르면 바로 다시 그린다
+    // 시작 창. 모드·이동 방식·주문을 고르면 바로 다시 그린다
     function showIntro() {
       const [a, b] = keyPair(controls.move);
+      const [s1, s2] = spellsOf(controls).map(spellById);
       const k = spellKeys(controls);
+      const hard = controls.mode === "hard";
       const on = v => (v ? "true" : "false");
+      const pairName = id => PAIRS[id].map(x => spellById(x).name).join("·");
       showOver(`
       <h2>스킬샷 피하기</h2>
-      <p>사방에서 날아오는 스킬을 피해 오래 버티세요. ${LIVES}번 맞으면 처치당해요. 맞은 뒤 ${SAFE_AFTER_HIT}초는 무적이에요.</p>
+      <p>사방에서 날아오는 스킬을 피해 오래 버티세요. ${LIVES}번 맞으면 처치당해요.
+        ${hard ? "하드 모드는 무적이 없고, 스킬의 CC 를 그대로 당해요." : `맞은 뒤 ${SAFE_AFTER_HIT}초는 무적이에요.`}</p>
       <div class="dodge-setup">
+        <div><span>모드</span>
+          <div class="seg dodge-seg" role="group" aria-label="모드">
+            <button type="button" data-mode="normal" aria-selected="${on(!hard)}">노멀</button>
+            <button type="button" data-mode="hard" aria-selected="${on(hard)}">하드 (CC)</button>
+          </div></div>
         <div><span>이동 방식</span>
           <div class="seg dodge-seg" role="group" aria-label="이동 방식">
             <button type="button" data-move="mouse" aria-selected="${on(controls.move === "mouse")}">마우스 클릭</button>
             <button type="button" data-move="wasd" aria-selected="${on(controls.move === "wasd")}">WASD</button>
           </div></div>
-        <div><span>소환사 주문</span>
+        ${hard ? `<div><span>주문 고르기</span>
+          <div class="seg dodge-seg" role="group" aria-label="소환사 주문 두 개">
+            ${Object.keys(PAIRS).map(id => `<button type="button" data-pair="${id}" aria-selected="${on(controls.pair === id)}">${pairName(id)}</button>`).join("")}
+          </div></div>` : ""}
+        <div><span>주문 배치</span>
           <div class="seg dodge-seg" role="group" aria-label="소환사 주문 배치">
-            <button type="button" data-order="first" aria-selected="${on(controls.flashFirst)}">점멸 ${a} · 유체화 ${b}</button>
-            <button type="button" data-order="second" aria-selected="${on(!controls.flashFirst)}">유체화 ${a} · 점멸 ${b}</button>
+            <button type="button" data-order="first" aria-selected="${on(controls.flashFirst)}">${s1.name} ${a} · ${s2.name} ${b}</button>
+            <button type="button" data-order="second" aria-selected="${on(!controls.flashFirst)}">${s2.name} ${a} · ${s1.name} ${b}</button>
           </div></div>
       </div>
       <ul class="dodge-keys">
@@ -2126,37 +2917,44 @@
         <li><b>레이저</b> 깜빡이는 선이 보이면 곧 그 선 전체를 쳐요</li>
         <li><b>감옥</b> 창살에 닿으면 맞아요. 안에 갇히면 닿지 않게 버티세요</li>
       </ul>
+      ${hard ? `<ul class="dodge-keys">
+        <li><b>CC</b> 기절·속박·공중에 뜸은 못 움직이고, 매혹은 아리 쪽으로 끌려가요. 그동안 점멸을 못 써요</li>
+        <li><b>둔화</b> 가장 센 둔화 하나만 걸려요. 진 W 는 맞은 지 4초 안이면 속박, 브랜드 Q 는 불붙어 있으면 기절</li>
+        <li><b>정화</b> 공중에 뜸만 빼고 CC 를 풀고, 3초 동안 새 CC 가 1/4 로 짧아져요</li>
+        <li><b>스킬 레벨</b> 3레벨마다 올라서 CC 가 점점 길어져요(13레벨부터 최대)</li>
+      </ul>` : ""}
       <ul class="dodge-keys">
         ${controls.move === "mouse"
           ? `<li><b>우클릭</b> 찍은 곳으로 이동 (누른 채 끌면 계속 따라가요)</li>`
           : `<li><b>WASD</b> 누른 쪽으로 이동 (방향키도 돼요). 마우스는 점멸 방향만 정해요</li>`}
-        <li><b>${k.flash} · ${k.ghost}</b> 점멸(커서 쪽 400) · 유체화. 쿨타임 ${SPELLS.map(sp => sp.cd + "초").join(" · ")}</li>
+        <li><b>${k[s1.id]} · ${k[s2.id]}</b> ${s1.name} · ${s2.name}. 쿨타임 ${s1.cd}초 · ${s2.cd}초
+          (점멸은 커서 쪽 400, 유체화는 3초 동안 이동 속도 +40%)</li>
         <li><b>휴대폰</b> 화면을 누른 곳으로 이동, 주문은 아래 칸을 눌러요</li>
       </ul>
-      <p class="note">이동 속도 ${CHAMP.speed}. 스킬 수치·그림은 롤 클라이언트, 소리는 롤 위키 것이에요.</p>
+      <p class="note">이동 속도 ${CHAMP.speed}. 스킬 수치·CC·그림은 롤 클라이언트, 소리는 롤 위키 것이에요.</p>
       <div class="dodge-actions"><button type="button" data-start>시작 <small>Space</small></button>${opts.links || ""}</div>`);
-      over.querySelectorAll("[data-move]").forEach(btn => btn.onclick = () => {
-        controls.move = btn.dataset.move;
+      const pick = fn => btn => btn.onclick = () => {
+        fn(btn);
         saveControls(controls);
         keys.clear();
-        paintKeys();
+        reset();          // 모드·주문이 바뀌면 HUD 도 새 주문으로
+        paintSpells();
+        hudUpdate();
         showIntro();
-      });
-      over.querySelectorAll("[data-order]").forEach(btn => btn.onclick = () => {
-        controls.flashFirst = btn.dataset.order === "first";
-        saveControls(controls);
-        paintKeys();
-        showIntro();
-      });
+        if (opts.onMode) opts.onMode(controls.mode);
+      };
+      over.querySelectorAll("[data-mode]").forEach(pick(btn => { controls.mode = btn.dataset.mode; }));
+      over.querySelectorAll("[data-move]").forEach(pick(btn => { controls.move = btn.dataset.move; }));
+      over.querySelectorAll("[data-pair]").forEach(pick(btn => { controls.pair = btn.dataset.pair; }));
+      over.querySelectorAll("[data-order]").forEach(pick(btn => { controls.flashFirst = btn.dataset.order === "first"; }));
     }
-    paintKeys();
     showIntro();
 
     function setBest(text) { hud("best").innerHTML = text || ""; }
 
     // 내 챔피언을 나중에 바꾼다(티어표를 늦게 받았을 때)
     function setChamp(key, name) {
-      if (key) { face = champImage(key); root.querySelector('[data-hud="face"]').src = face.src; }
+      if (key) { faceKey = key; root.querySelector('[data-hud="face"]').src = hudFace(key); }
       if (name) opts.name = name;
     }
 
@@ -2169,9 +2967,11 @@
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("blur", onBlur);
       window.removeEventListener("resize", fit);
+      onFx.delete(atlasUp);
+      if (fxgl) { fxgl.destroy(); fxgl = null; }
     }
 
-    return { destroy, setBest, setChamp };
+    return { destroy, setBest, setChamp, mode: () => controls.mode };
   }
 
   window.DodgeGame = { mount, fmt, SKILLS, VERSION };
