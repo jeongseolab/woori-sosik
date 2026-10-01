@@ -410,12 +410,34 @@
 
   // 받은 모델 파일(.bin + 텍스처) 은 페이지에 남겨 둔다. 연습장을 나갔다(티어표·그룹방) 다시 와도 새로 받지 않는다.
   // WebGL 버퍼는 연습장마다 새로 만들지만 그건 금방이다
+  // 파일은 브라우저 저장소(Cache Storage) 에도 넣어 둬서 다음에 연습장을 열 때는 받지 않는다.
+  // ver 는 index.json 의 v(파일 내용 해시). 모델을 다시 만들면 v 가 바뀌어 새로 받고, 그 챔피언의 옛 파일은 지운다.
+  // 저장소를 못 쓰면(http 주소·사생활 보호 모드) 그냥 받는다
   const RAW = new Map();
-  function rawModel(key, base) {
+  const STORE = "dodge-models";
+  function stored(url) {
+    if (!window.caches) return fetch(url).then(r => { if (!r.ok) throw new Error(r.status); return r; });
+    return caches.open(STORE).then(c => c.match(url).then(hit => hit || fetch(url).then(r => {
+      if (!r.ok) throw new Error(r.status);
+      const path = new URL(url, location.href).pathname;
+      c.put(url, r.clone())
+        .then(() => c.keys())
+        .then(ks => ks.forEach(q => { if (new URL(q.url).pathname === path && q.url !== new URL(url, location.href).href) c.delete(q); }))
+        .catch(() => {});
+      return r;
+    }))).catch(() => fetch(url).then(r => { if (!r.ok) throw new Error(r.status); return r; }));
+  }
+  function rawModel(key, base, ver) {
     if (RAW.has(key)) return RAW.get(key);
+    const q = ver ? "?v=" + ver : "";
     const p = Promise.all([
-      fetch(base + key + ".bin").then(r => { if (!r.ok) throw new Error(r.status); return r.arrayBuffer(); }),
-      new Promise((ok, no) => { const img = new Image(); img.onload = () => ok(img); img.onerror = no; img.src = base + key + ".webp"; }),
+      stored(base + key + ".bin" + q).then(r => r.arrayBuffer()),
+      stored(base + key + ".webp" + q).then(r => r.blob()).then(b => new Promise((ok, no) => {
+        const img = new Image(), src = URL.createObjectURL(b);
+        img.onload = () => { URL.revokeObjectURL(src); ok(img); };
+        img.onerror = () => { URL.revokeObjectURL(src); no(new Error("texture")); };
+        img.src = src;
+      })),
     ]);
     p.catch(() => RAW.delete(key));
     RAW.set(key, p);
@@ -595,9 +617,9 @@
     // ── 3D 챔피언 ──
     // 받아 둔 모델: 키 → { m(parseModel), tex, uvBuf, idxBuf, posBuf, out(뼈를 섞은 위치), mats(섞은 뼈 행렬) }
     const models = new Map(), asked = new Map();
-    function loadModel(key, base) {
+    function loadModel(key, base, ver) {
       if (asked.has(key)) return asked.get(key);
-      const p = rawModel(key, base).then(([buf, img]) => {
+      const p = rawModel(key, base, ver).then(([buf, img]) => {
         if (lost) return null;
         const m = parseModel(buf);
         const mk = (kind, data) => { const b = gl.createBuffer(); gl.bindBuffer(kind, b); gl.bufferData(kind, data, gl.STATIC_DRAW); return b; };

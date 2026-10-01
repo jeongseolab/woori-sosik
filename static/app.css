@@ -785,11 +785,7 @@ table.dodge-table { min-width: 0; }
 .champ-slot img { width: 42px; height: 42px; display: block; }
 .spell-pop.champ-pop { width: min(352px, calc(100% - 16px)); }
 .champ-pop .spell-pop-grid { gap: 4px; max-height: 264px; overflow-y: auto; }
-.champ-pop .spell-pop-grid button { position: relative; width: 38px; height: 38px; }
-.champ-pop .spell-pop-grid button.op i {
-  position: absolute; left: 0; right: 0; bottom: 0; background: rgba(1, 10, 19, .85);
-  color: #c8aa6e; font: 700 9px/1.4 "IBM Plex Sans KR", sans-serif; font-style: normal; text-align: center;
-}
+.champ-pop .spell-pop-grid button { width: 38px; height: 38px; }
 .spell-pop-info { margin-top: 8px; padding-top: 8px; border-top: 1px solid #3c3c41; }
 .spell-pop-info b { color: #f0e6d2; }
 .spell-pop-info small { color: #a09b8c; margin-left: 6px; }

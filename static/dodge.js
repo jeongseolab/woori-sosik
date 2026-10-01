@@ -137,7 +137,7 @@
     const ok = v => Array.isArray(v) && v.length === 2 && v[0] !== v[1] && v.every(spellById);
     const slots = {};
     for (const m of ["normal", "hard"]) slots[m] = ok(c.slots && c.slots[m]) ? c.slots[m].slice() : DEFAULT_SLOTS[m].slice();
-    // champ: 시작 창에서 고른 내 챔피언(MOBILITY 의 키). 없으면 티어표의 OP 챔피언
+    // champ: 시작 창에서 고른 내 챔피언(MOBILITY 의 키). 없으면 myChamp() 의 기본값
     return { move: c.move === "wasd" ? "wasd" : "mouse", mode: c.mode === "hard" ? "hard" : "normal", slots,
              champ: MOBILITY[c.champ] ? c.champ : null };
   }
@@ -694,8 +694,8 @@
     const soundBtn = root.querySelector("[data-sound]");
     const volInput = root.querySelector("[data-volume]");
     const volText = root.querySelector("[data-volume-text]");
-    let opFace = opts.champ || "Ezreal";       // 티어표의 OP 챔피언(setChamp 로 늦게 올 수 있다)
-    let faceKey = opFace;                       // 내 챔피언(그릴 때마다 champImage 로 찾는다. ID 표가 늦게 와도 바로 바뀐다)
+    let opFace = opts.champ || "Ezreal";       // 앱이 넘긴 챔피언(티어표의 OP. setChamp 로 늦게 올 수 있다)
+    let faceKey = "Ezreal";                      // 내 챔피언(그릴 때마다 champImage 로 찾는다. ID 표가 늦게 와도 바로 바뀐다)
     const over = root.querySelector("[data-over]");
     const hud = name => root.querySelector(`[data-hud="${name}"]`);
     const skillBtns = [...root.querySelectorAll("[data-skill]")];
@@ -721,7 +721,7 @@
         let done = 0;
         const tick = () => { loadingFill.style.width = done / keys.length * 100 + "%"; };
         tick();
-        return Promise.all(keys.map(k => fxgl.loadModel(k, MODELS).catch(() => null).then(() => { done++; tick(); })));
+        return Promise.all(keys.map(k => fxgl.loadModel(k, MODELS, modelIndex[k].v).catch(() => null).then(() => { done++; tick(); })));
       }).then(loaded);
     }
     // 연습장에 들어온 것 자체가 클릭이라 소리를 미리 받아 풀어 둔다(첫 판 "환영합니다" 부터 나오게)
@@ -739,9 +739,12 @@
     let skillLeft, skillMax, charges, dash, untarget, ret, skillAt;   // 내 챔피언 이동기(useSkill)
     let bannerTimer = 0, overTimer = 0;
     let controls = loadControls();
-    // 시작 창에서 고른 챔피언이 있으면 그 챔피언, 없으면 OP 챔피언
-    if (controls.champ) faceKey = champAlias(controls.champ);
-    ensureModels([faceKey, ...SKILLS.map(s => s.champ)]);
+    // 내 챔피언: 시작 창에서 고른 챔피언. 고른 적이 없으면 앱이 넘긴 챔피언이 고를 수 있는 40명 안에 있을 때 그 챔피언, 아니면 이즈리얼
+    const myChamp = () => controls.champ || (MOBILITY[modelKey(opFace)] ? modelKey(opFace) : "ezreal");
+    faceKey = champAlias(myChamp());
+    // 고를 수 있는 챔피언과 적 챔피언의 모델을 처음 열 때 한꺼번에 받는다(다음부터는 브라우저 저장소에서 읽는다).
+    // 그래서 시작 창에서 챔피언을 바꿀 때는 로딩이 없다
+    ensureModels([faceKey, ...SKILLS.map(s => s.champ), ...Object.keys(MOBILITY)]);
     const keyOf = id => spellKeys(controls)[id];
     const keys = new Set();
     let holding = false;
@@ -1687,7 +1690,7 @@
       const key = modelKey(champ);
       if (!fxgl || !modelIndex || !modelIndex[key]) return null;
       const md = fxgl.model(key);
-      if (!md) fxgl.loadModel(key, MODELS);
+      if (!md) fxgl.loadModel(key, MODELS, modelIndex[key].v);
       return md ? modelIndex[key] : null;
     }
     // 스킬 이름의 마지막 글자(Q W E R) → 롤 애니메이션 이름(spell1 … spell4)
@@ -2453,7 +2456,7 @@
         healthBar(top.x, top.y, Math.max(0, lives) / LIVES, true, level, opts.name || "나", LIVES, ccLabel());
         return;
       }
-      // 내 챔피언(티어표 OP 챔피언) 초상화가 받침대 위에 선다. 적과 같은 모양, 테두리만 금색.
+      // 내 챔피언 초상화가 받침대 위에 선다. 적과 같은 모양, 테두리만 금색.
       // 공중에 뜨면 초상화가 떠오른다
       const base = proj(player.x, player.y, 0), head = upright(player.x, player.y, PORTRAIT_Z + lift());
       const r = 46 * head.k;
@@ -3243,7 +3246,7 @@
                     title="${esc(champName(faceKey))} · 눌러서 바꾸기" aria-label="내 챔피언 ${esc(champName(faceKey))}, 눌러서 바꾸기">
               <img src="${hudFace(faceKey)}" alt=""><b>${esc(champName(faceKey))}</b>
             </button>
-            <small>${controls.champ ? "" : "티어표 OP 챔피언 · "}눌러서 바꿔요</small>
+            <small>눌러서 바꿔요</small>
           </div></div>
         <div><span>모드</span>
           <div class="seg dodge-seg" role="group" aria-label="모드">
@@ -3306,7 +3309,7 @@
       over.querySelector("[data-champ-pick]").onclick = e => { e.stopPropagation(); champPopup(e.currentTarget, pick); };
     }
 
-    // 내 챔피언 고르기: 이동기와 그 3D 동작이 있는 챔피언(MOBILITY) 과, 맨 앞에 티어표 OP 챔피언(고른 것을 지운다).
+    // 내 챔피언 고르기: 이동기와 그 3D 동작이 있는 챔피언(MOBILITY).
     // 칸에 올리면 아래에 그 챔피언의 이동기 설명. 바깥을 누르거나 Esc 면 닫힌다
     function champPopup(btn, pick) {
       const card = over.querySelector(".dodge-card");
@@ -3318,20 +3321,18 @@
       pop.setAttribute("aria-label", "내 챔피언 고르기");
       pop.innerHTML = `
         <div class="spell-pop-grid">
-          <button type="button" data-champ-choose="" class="op" aria-pressed="${!controls.champ}" aria-label="티어표 OP 챔피언 ${esc(champName(opFace))}">
-            <img src="${hudFace(opFace)}" alt=""><i>OP</i></button>
           ${list.map(k => `
-            <button type="button" data-champ-choose="${k}" aria-pressed="${controls.champ === k}" aria-label="${esc(champName(k))}">
+            <button type="button" data-champ-choose="${k}" aria-pressed="${myChamp() === k}" aria-label="${esc(champName(k))}">
               <img src="${hudFace(champAlias(k))}" alt="" loading="lazy"></button>`).join("")}
         </div>
         <div class="spell-pop-info"></div>`;
       const info = pop.querySelector(".spell-pop-info");
       const show = k => {
-        const sk = MOBILITY[k ? k : modelKey(opFace)];
-        info.innerHTML = `<b>${esc(champName(k || opFace))}</b>${k ? "" : " <small>티어표 OP 챔피언</small>"}
-          <p>${sk ? `${skillLabels(controls.move)[sk.slot]} · ${skillText(sk)}. 쿨타임 ${skillCd(sk)}초` : "연습장에서 쓸 이동기가 없어요"}</p>`;
+        const sk = MOBILITY[k];
+        info.innerHTML = `<b>${esc(champName(k))}</b>
+          <p>${skillLabels(controls.move)[sk.slot]} · ${skillText(sk)}. 쿨타임 ${skillCd(sk)}초</p>`;
       };
-      show(controls.champ || "");
+      show(myChamp());
       card.appendChild(pop);
       // 누른 칸 바로 아래에 띄운다(챔피언 칸은 시작 창 맨 위라 위에는 자리가 없다)
       const cr = card.getBoundingClientRect(), br = btn.getBoundingClientRect();
@@ -3348,10 +3349,10 @@
       document.addEventListener("keydown", esc2, true);
       pop.querySelectorAll("[data-champ-choose]").forEach(b => {
         const k = b.dataset.champChoose;
-        b.title = champName(k || opFace);
+        b.title = champName(k);
         b.onmouseenter = b.onfocus = () => show(k);
         pick(() => {
-          controls.champ = k || null;
+          controls.champ = k;
           close();
           applyFace();
         })(b);
@@ -3415,7 +3416,7 @@
 
     // 내 챔피언을 정한 대로 바꾼다(초상화·스킬 칸·3D 모델)
     function applyFace() {
-      faceKey = controls.champ ? champAlias(controls.champ) : opFace;
+      faceKey = champAlias(myChamp());
       root.querySelector('[data-hud="face"]').src = hudFace(faceKey);
       paintSkills();
       ensureModels([faceKey]);
@@ -3424,7 +3425,7 @@
     function setBest(text) { hud("best").innerHTML = text || ""; }
 
     // 내 챔피언을 나중에 바꾼다(티어표를 늦게 받았을 때)
-    // 시작 창에서 직접 고른 챔피언이 있으면 그쪽이 먼저다
+    // 시작 창에서 직접 고른 챔피언이 있으면 그쪽이 먼저다(고를 수 있는 40명 밖의 챔피언이면 이즈리얼)
     function setChamp(key, name) {
       if (key) { opFace = key; if (!controls.champ) applyFace(); }
       if (name) opts.name = name;
