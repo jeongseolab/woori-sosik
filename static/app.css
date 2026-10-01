@@ -903,6 +903,7 @@ table.dodge-table { min-width: 0; }
 .lol-loading { position: absolute; inset: 0; z-index: 5; display: grid; place-items: center;
   background: radial-gradient(circle at center, #0b1828 0%, #010a13 70%); }
 .lol-loading[hidden] { display: none; }
+.dodge-loading .dodge-over { visibility: hidden; }     /* 로딩이 끝나기 전엔 규칙 화면을 숨긴다 */
 .lol-loading-ring { width: min(60vmin, 320px); aspect-ratio: 1; border-radius: 50%; display: grid; place-content: center; justify-items: center; gap: 10px;
   border: 1px solid rgba(200, 170, 110, .35); box-shadow: 0 0 0 14px rgba(200, 170, 110, .04), inset 0 0 40px rgba(10, 200, 185, .08); }
 .lol-loading-ring b { font: 700 64px/1 serif; color: #c8aa6e; text-shadow: 0 0 18px rgba(10, 200, 185, .5); }
