@@ -113,6 +113,9 @@
     ekko: { slot: 2, kind: "dash", range: 350, fixed: true, speed: 1150, cd: 7, src: "range: data, speed: 추정" },
     akali: { slot: 2, kind: "dash", range: 400, fixed: true, back: true, speed: 1000, cd: 10, src: "range: data, speed: 추정" },
   };
+  // 고를 수 있는 내 챔피언은 이동기와 그 3D 동작이 다 들어간 이 40명. 키(소문자) → OP.GG·모델에 쓰는 이름(첫 글자만 대문자)
+  const champAlias = k => k[0].toUpperCase() + k.slice(1);
+  const champName = key => CHAMP_NAMES[String(key).toLowerCase()] || key;
   // 롤 쿨타임 그대로면 궁극기(100초) 는 한 판에 한 번, 벨베스 Q(1초) 는 쉬지 않고 쓴다. 소환사 주문(15·20초) 쪽으로 맞춘다
   const skillCd = sk => Math.min(20, Math.max(4, sk.cd));
   // 시작 창·칸 설명에 쓰는 한 줄
@@ -134,7 +137,9 @@
     const ok = v => Array.isArray(v) && v.length === 2 && v[0] !== v[1] && v.every(spellById);
     const slots = {};
     for (const m of ["normal", "hard"]) slots[m] = ok(c.slots && c.slots[m]) ? c.slots[m].slice() : DEFAULT_SLOTS[m].slice();
-    return { move: c.move === "wasd" ? "wasd" : "mouse", mode: c.mode === "hard" ? "hard" : "normal", slots };
+    // champ: 시작 창에서 고른 내 챔피언(MOBILITY 의 키). 없으면 티어표의 OP 챔피언
+    return { move: c.move === "wasd" ? "wasd" : "mouse", mode: c.mode === "hard" ? "hard" : "normal", slots,
+             champ: MOBILITY[c.champ] ? c.champ : null };
   }
   function saveControls(c) { try { localStorage.setItem(CONTROL_KEY, JSON.stringify(c)); } catch {} }
   // 이번 판의 주문 두 개(앞 키 칸, 뒤 키 칸 순서)
@@ -334,14 +339,17 @@
   // 아이콘은 숫자 ID 로만 있어서 이름 → ID 표(champion-summary.json) 를 한 번 받는다. 받기 전에는 원으로 그린다
   const CD_ROOT = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/";
   const CDRAGON = CD_ROOT + "v1/";
-  const CHAMP_IDS = {};
+  const CHAMP_IDS = {}, CHAMP_NAMES = {};      // 소문자 이름(alias) → 숫자 ID, 한국어 이름
   let idsAsked = null;
   // 받은 뒤(또는 못 받은 뒤) 풀리는 약속을 돌려준다. 못 받으면 다음에 다시 받는다
   function loadChampIds() {
     if (!idsAsked) {
-      idsAsked = fetch(CDRAGON + "champion-summary.json")
+      idsAsked = fetch(CD_ROOT.replace("/default/", "/ko_kr/") + "v1/champion-summary.json")
         .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
-        .then(list => { list.forEach(c => { if (c.id > 0) CHAMP_IDS[String(c.alias).toLowerCase()] = c.id; }); preload(); })
+        .then(list => {
+          list.forEach(c => { if (c.id > 0) { const k = String(c.alias).toLowerCase(); CHAMP_IDS[k] = c.id; CHAMP_NAMES[k] = c.name; } });
+          preload();
+        })
         .catch(() => { idsAsked = null; });
     }
     return idsAsked;
@@ -686,7 +694,8 @@
     const soundBtn = root.querySelector("[data-sound]");
     const volInput = root.querySelector("[data-volume]");
     const volText = root.querySelector("[data-volume-text]");
-    let faceKey = opts.champ || "Ezreal";      // 내 챔피언(그릴 때마다 champImage 로 찾는다. ID 표가 늦게 와도 바로 바뀐다)
+    let opFace = opts.champ || "Ezreal";       // 티어표의 OP 챔피언(setChamp 로 늦게 올 수 있다)
+    let faceKey = opFace;                       // 내 챔피언(그릴 때마다 champImage 로 찾는다. ID 표가 늦게 와도 바로 바뀐다)
     const over = root.querySelector("[data-over]");
     const hud = name => root.querySelector(`[data-hud="${name}"]`);
     const skillBtns = [...root.querySelectorAll("[data-skill]")];
@@ -700,14 +709,21 @@
     const loadingEl = root.querySelector("[data-loading]"), loadingFill = root.querySelector("[data-loading-fill]");
     root.classList.add("dodge-loading");
     const loaded = () => { loading = false; loadingEl.hidden = true; root.classList.remove("dodge-loading"); };
-    loadModelIndex().then(() => {
-      if (!fxgl) return loaded();          // WebGL 이 없으면 초상화로 그리니 받을 것이 없다
-      const keys = [...new Set([faceKey, ...SKILLS.map(s => s.champ)].map(modelKey))].filter(k => modelIndex[k]);
-      let done = 0;
-      const tick = () => { loadingFill.style.width = (keys.length ? done / keys.length * 100 : 100) + "%"; };
-      tick();
-      Promise.all(keys.map(k => fxgl.loadModel(k, MODELS).catch(() => null).then(() => { done++; tick(); }))).then(loaded);
-    });
+    // 아직 안 받은 모델이 있으면 로딩 화면을 띄우고 받는다(시작 창에서 내 챔피언을 바꿨을 때도)
+    function ensureModels(champs) {
+      return loadModelIndex().then(() => {
+        if (!fxgl) return;          // WebGL 이 없으면 초상화로 그리니 받을 것이 없다
+        const keys = [...new Set(champs.map(modelKey))].filter(k => modelIndex[k] && !fxgl.model(k));
+        if (!keys.length) return;
+        loading = true;
+        loadingEl.hidden = false;
+        root.classList.add("dodge-loading");
+        let done = 0;
+        const tick = () => { loadingFill.style.width = done / keys.length * 100 + "%"; };
+        tick();
+        return Promise.all(keys.map(k => fxgl.loadModel(k, MODELS).catch(() => null).then(() => { done++; tick(); })));
+      }).then(loaded);
+    }
     // 연습장에 들어온 것 자체가 클릭이라 소리를 미리 받아 풀어 둔다(첫 판 "환영합니다" 부터 나오게)
     if (soundOn()) loadSamples();
 
@@ -723,6 +739,9 @@
     let skillLeft, skillMax, charges, dash, untarget, ret, skillAt;   // 내 챔피언 이동기(useSkill)
     let bannerTimer = 0, overTimer = 0;
     let controls = loadControls();
+    // 시작 창에서 고른 챔피언이 있으면 그 챔피언, 없으면 OP 챔피언
+    if (controls.champ) faceKey = champAlias(controls.champ);
+    ensureModels([faceKey, ...SKILLS.map(s => s.champ)]);
     const keyOf = id => spellKeys(controls)[id];
     const keys = new Set();
     let holding = false;
@@ -3218,6 +3237,14 @@
       <p>사방에서 날아오는 스킬을 피해 오래 버티세요. ${LIVES}번 맞으면 처치당해요.
         ${hard ? "하드 모드는 무적이 없고, 스킬의 CC 를 그대로 당해요." : `맞은 뒤 ${SAFE_AFTER_HIT}초는 무적이에요.`}</p>
       <div class="dodge-setup">
+        <div><span>챔피언</span>
+          <div class="spell-pick">
+            <button type="button" class="champ-slot" data-champ-pick aria-haspopup="dialog"
+                    title="${esc(champName(faceKey))} · 눌러서 바꾸기" aria-label="내 챔피언 ${esc(champName(faceKey))}, 눌러서 바꾸기">
+              <img src="${hudFace(faceKey)}" alt=""><b>${esc(champName(faceKey))}</b>
+            </button>
+            <small>${controls.champ ? "" : "티어표 OP 챔피언 · "}눌러서 바꿔요</small>
+          </div></div>
         <div><span>모드</span>
           <div class="seg dodge-seg" role="group" aria-label="모드">
             <button type="button" data-mode="normal" aria-selected="${on(!hard)}">노멀</button>
@@ -3276,6 +3303,60 @@
       over.querySelectorAll("[data-mode]").forEach(pick(btn => { controls.mode = btn.dataset.mode; }));
       over.querySelectorAll("[data-move]").forEach(pick(btn => { controls.move = btn.dataset.move; }));
       over.querySelectorAll("[data-slot-pick]").forEach(btn => btn.onclick = e => { e.stopPropagation(); spellPopup(btn, pick); });
+      over.querySelector("[data-champ-pick]").onclick = e => { e.stopPropagation(); champPopup(e.currentTarget, pick); };
+    }
+
+    // 내 챔피언 고르기: 이동기와 그 3D 동작이 있는 챔피언(MOBILITY) 과, 맨 앞에 티어표 OP 챔피언(고른 것을 지운다).
+    // 칸에 올리면 아래에 그 챔피언의 이동기 설명. 바깥을 누르거나 Esc 면 닫힌다
+    function champPopup(btn, pick) {
+      const card = over.querySelector(".dodge-card");
+      card.querySelectorAll(".spell-pop").forEach(x => x.remove());
+      const list = Object.keys(MOBILITY).sort((a, b) => champName(a).localeCompare(champName(b), "ko"));
+      const pop = document.createElement("div");
+      pop.className = "spell-pop champ-pop";
+      pop.setAttribute("role", "dialog");
+      pop.setAttribute("aria-label", "내 챔피언 고르기");
+      pop.innerHTML = `
+        <div class="spell-pop-grid">
+          <button type="button" data-champ-choose="" class="op" aria-pressed="${!controls.champ}" aria-label="티어표 OP 챔피언 ${esc(champName(opFace))}">
+            <img src="${hudFace(opFace)}" alt=""><i>OP</i></button>
+          ${list.map(k => `
+            <button type="button" data-champ-choose="${k}" aria-pressed="${controls.champ === k}" aria-label="${esc(champName(k))}">
+              <img src="${hudFace(champAlias(k))}" alt="" loading="lazy"></button>`).join("")}
+        </div>
+        <div class="spell-pop-info"></div>`;
+      const info = pop.querySelector(".spell-pop-info");
+      const show = k => {
+        const sk = MOBILITY[k ? k : modelKey(opFace)];
+        info.innerHTML = `<b>${esc(champName(k || opFace))}</b>${k ? "" : " <small>티어표 OP 챔피언</small>"}
+          <p>${sk ? `${skillLabels(controls.move)[sk.slot]} · ${skillText(sk)}. 쿨타임 ${skillCd(sk)}초` : "연습장에서 쓸 이동기가 없어요"}</p>`;
+      };
+      show(controls.champ || "");
+      card.appendChild(pop);
+      // 누른 칸 바로 아래에 띄운다(챔피언 칸은 시작 창 맨 위라 위에는 자리가 없다)
+      const cr = card.getBoundingClientRect(), br = btn.getBoundingClientRect();
+      pop.style.left = Math.max(8, Math.min(card.clientWidth - pop.offsetWidth - 8, br.left - cr.left)) + "px";
+      pop.style.top = (br.bottom - cr.top + card.scrollTop + 8) + "px";
+      const outside = e => { if (!pop.contains(e.target)) close(); };
+      const esc2 = e => { if (e.key === "Escape") { e.stopPropagation(); close(); btn.focus(); } };
+      function close() {
+        pop.remove();
+        document.removeEventListener("pointerdown", outside, true);
+        document.removeEventListener("keydown", esc2, true);
+      }
+      document.addEventListener("pointerdown", outside, true);
+      document.addEventListener("keydown", esc2, true);
+      pop.querySelectorAll("[data-champ-choose]").forEach(b => {
+        const k = b.dataset.champChoose;
+        b.title = champName(k || opFace);
+        b.onmouseenter = b.onfocus = () => show(k);
+        pick(() => {
+          controls.champ = k || null;
+          close();
+          applyFace();
+        })(b);
+      });
+      pop.querySelector('[aria-pressed="true"]').focus();
     }
 
     // 롤의 소환사 주문 고르기: 칸을 누르면 그 칸 위에 주문 목록이 뜨고, 고르면 그 칸이 바뀐다.
@@ -3329,12 +3410,23 @@
       pop.querySelector('[aria-pressed="true"]').focus();
     }
     showIntro();
+    // 한국어 챔피언 이름이 시작 창보다 늦게 오면 시작 창을 다시 그린다(고르기 목록이 열려 있을 때는 두고)
+    loadChampIds().then(() => { if (over.querySelector("[data-champ-pick]") && !over.querySelector(".spell-pop")) showIntro(); });
+
+    // 내 챔피언을 정한 대로 바꾼다(초상화·스킬 칸·3D 모델)
+    function applyFace() {
+      faceKey = controls.champ ? champAlias(controls.champ) : opFace;
+      root.querySelector('[data-hud="face"]').src = hudFace(faceKey);
+      paintSkills();
+      ensureModels([faceKey]);
+    }
 
     function setBest(text) { hud("best").innerHTML = text || ""; }
 
     // 내 챔피언을 나중에 바꾼다(티어표를 늦게 받았을 때)
+    // 시작 창에서 직접 고른 챔피언이 있으면 그쪽이 먼저다
     function setChamp(key, name) {
-      if (key) { faceKey = key; root.querySelector('[data-hud="face"]').src = hudFace(key); paintSkills(); }
+      if (key) { opFace = key; if (!controls.champ) applyFace(); }
       if (name) opts.name = name;
     }
 
