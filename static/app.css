@@ -712,6 +712,8 @@ dialog.modal::backdrop { background: rgba(5, 10, 20, .72); }
 /* ── 그룹방·연습장: 스킬샷 순위 ── */
 .dodge-board-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
 .dodge-board-head .sub-h { margin: 0; }
+.dodge-board-head .dodge-mode-seg { margin: 0 0 0 auto; }
+.dodge-board-head .dodge-mode-seg button { padding: 5px 12px; font-size: 13px; }
 table.dodge-table { min-width: 0; }
 .dodge-table td b { color: var(--gold); font-variant-numeric: tabular-nums; }
 .dodge-table td { font-variant-numeric: tabular-nums; }
@@ -755,7 +757,9 @@ table.dodge-table { min-width: 0; }
 }
 .dodge-stage .dodge-actions button:hover, .dodge-stage .dodge-actions .btn:hover { filter: brightness(1.15); }
 /* 롤 색: 금 #c8aa6e · 어두운 금 #785a28 · 밤하늘 #010a13 · 글자 #f0e6d2 */
-.lol-view { position: relative; margin: 0 auto; --u: 1px; font-family: "IBM Plex Sans KR", sans-serif; }
+.lol-view { position: relative; margin: 0 auto; --u: 1px; font-family: "IBM Plex Sans KR", sans-serif; isolation: isolate; }
+/* WebGL 효과층: 입력을 받는 캔버스(투명) 바로 밑에 깐다. isolation 덕분에 .lol-view 안에서만 뒤로 간다 */
+.lol-view > .lol-gl { position: absolute; left: 0; top: 0; z-index: -1; pointer-events: none; display: block; }
 .lol-view > canvas:first-child {
   display: block; touch-action: none; outline: none;
   /* 롤 커서 비슷한 금빛 화살표 */
@@ -839,6 +843,9 @@ table.dodge-table { min-width: 0; }
   color: #c8aa6e; font: 700 calc(var(--u) * 10)/1.3 "IBM Plex Sans KR", sans-serif;
 }
 .lol-spell.active { border-color: #66d9e8; box-shadow: 0 0 calc(var(--u) * 8) #66d9e8; }
+/* CC 때문에 지금 못 쓰는 주문(이동 불가 중의 점멸) */
+.lol-spell.locked img { filter: grayscale(1) brightness(.45); }
+.lol-spell.locked { border-color: #e84057; }
 .lol-hp {
   position: relative; width: calc(var(--u) * 180); height: calc(var(--u) * 16);
   background: #1e2328; border: 1px solid #010a13; box-shadow: 0 0 0 1px #785a28;
