@@ -567,7 +567,7 @@
           </div>
         </div>
         <div class="dodge-over" data-over></div>
-        <div class="lol-loading" data-loading hidden>
+        <div class="lol-loading" data-loading>
           <div class="lol-loading-ring"><b>L</b><span>로딩 중</span><div class="lol-loading-bar"><i data-loading-fill></i></div></div>
         </div>
       </div>`;
@@ -596,20 +596,19 @@
     loadArt();
     // 3D 모델을 판 시작 전에 미리 받아 둔다. 처음 나올 때 받기 시작하면 일찍 나오는 챔피언(모르가나·초가스 등) 은
     // 다 받기 전까지 초상화로 보인다
-    // 다 받기 전에는 롤 로딩 화면을 띄우고 시작을 막는다. 받은 모델은 dodge-gl.js 가 페이지에 남겨 둬서
-    // 티어표·그룹방에 갔다 와도 다시 받지 않는다(그때는 로딩 화면이 거의 안 보인다)
-    let loading = false;
+    // 연습장을 열면 규칙 화면보다 먼저 롤 로딩 화면을 띄우고, 모델을 다 받을 때까지 시작을 막는다.
+    // 받은 모델은 dodge-gl.js 가 페이지에 남겨 둬서 티어표·그룹방에 갔다 와도 다시 받지 않는다(그때는 곧바로 끝난다)
+    let loading = true;
     const loadingEl = root.querySelector("[data-loading]"), loadingFill = root.querySelector("[data-loading-fill]");
+    root.classList.add("dodge-loading");
+    const loaded = () => { loading = false; loadingEl.hidden = true; root.classList.remove("dodge-loading"); };
     loadModelIndex().then(() => {
-      if (!fxgl) return;
+      if (!fxgl) return loaded();          // WebGL 이 없으면 초상화로 그리니 받을 것이 없다
       const keys = [...new Set([faceKey, ...SKILLS.map(s => s.champ)].map(modelKey))].filter(k => modelIndex[k]);
       let done = 0;
-      loading = true;
-      const tick = () => { loadingFill.style.width = (done / keys.length * 100) + "%"; };
-      const timer = setTimeout(() => { if (loading) loadingEl.hidden = false; }, 150);   // 이미 받아 둔 것이면 깜빡이지 않게
+      const tick = () => { loadingFill.style.width = (keys.length ? done / keys.length * 100 : 100) + "%"; };
       tick();
-      Promise.all(keys.map(k => fxgl.loadModel(k, MODELS).catch(() => null).then(() => { done++; tick(); })))
-        .then(() => { loading = false; clearTimeout(timer); loadingEl.hidden = true; });
+      Promise.all(keys.map(k => fxgl.loadModel(k, MODELS).catch(() => null).then(() => { done++; tick(); }))).then(loaded);
     });
     // 연습장에 들어온 것 자체가 클릭이라 소리를 미리 받아 풀어 둔다(첫 판 "환영합니다" 부터 나오게)
     if (soundOn()) loadSamples();
