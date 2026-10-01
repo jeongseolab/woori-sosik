@@ -594,6 +594,15 @@ def build(key, wad_dir, spells):
     return {"h": round(height, 1), "anims": list(anims)}
 
 
+def file_version(key):
+    """모델 파일(.bin·.webp) 내용의 짧은 해시. 화면은 이 값으로 브라우저에 저장해 둔 모델이 옛것인지 안다"""
+    h = xxhash.xxh64()
+    for ext in (".bin", ".webp"):
+        with open(os.path.join(OUT, key + ext), "rb") as f:
+            h.update(f.read())
+    return h.hexdigest()[:8]
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("champions", nargs="*", help="챔피언 영문 이름(소문자). 비우면 연습장 챔피언")
@@ -616,6 +625,7 @@ def main():
     for k in keys:
         try:
             index[k] = build(k, wad_dir, sorted(set(CASTERS.get(k, [])) | ({MOBILITY[k]} if k in MOBILITY else set())))
+            index[k]["v"] = file_version(k)
             print(k, index[k], flush=True)
         except Exception as e:      # 한 챔피언이 안 돼도 나머지는 만든다
             print(k, "실패:", e, file=sys.stderr, flush=True)
