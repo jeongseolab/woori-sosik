@@ -776,6 +776,20 @@ table.dodge-table { min-width: 0; }
 .spell-pop-grid button[aria-pressed="true"] { border: 2px solid #c8aa6e; box-shadow: 0 0 10px rgba(200, 170, 110, .7); }
 /* 다른 칸에 들어 있는 주문(고르면 두 칸이 서로 바뀐다) */
 .spell-pop-grid button.other img { filter: brightness(.55); }
+/* 내 챔피언 칸(초상화 + 이름)과 고르기 목록(40명이라 칸을 작게, 넓게) */
+.champ-slot {
+  display: flex; align-items: center; gap: 8px; padding: 0 12px 0 0; height: 44px; border-radius: 2px; overflow: hidden;
+  background: #010a13; border: 1px solid #785a28; cursor: pointer; color: #f0e6d2; font: 700 13px "IBM Plex Sans KR", sans-serif;
+}
+.champ-slot:hover, .champ-slot:focus-visible { border-color: #c8aa6e; box-shadow: 0 0 8px rgba(200, 170, 110, .55); filter: none; }
+.champ-slot img { width: 42px; height: 42px; display: block; }
+.spell-pop.champ-pop { width: min(352px, calc(100% - 16px)); }
+.champ-pop .spell-pop-grid { gap: 4px; max-height: 264px; overflow-y: auto; }
+.champ-pop .spell-pop-grid button { position: relative; width: 38px; height: 38px; }
+.champ-pop .spell-pop-grid button.op i {
+  position: absolute; left: 0; right: 0; bottom: 0; background: rgba(1, 10, 19, .85);
+  color: #c8aa6e; font: 700 9px/1.4 "IBM Plex Sans KR", sans-serif; font-style: normal; text-align: center;
+}
 .spell-pop-info { margin-top: 8px; padding-top: 8px; border-top: 1px solid #3c3c41; }
 .spell-pop-info b { color: #f0e6d2; }
 .spell-pop-info small { color: #a09b8c; margin-left: 6px; }
