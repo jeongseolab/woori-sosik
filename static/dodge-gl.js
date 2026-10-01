@@ -9,6 +9,9 @@
 //   2. 충격파 왜곡: 터진 자리에서 퍼지는 고리 모양으로 화면을 굴절시킨다(원근 때문에 세로로 눌린 타원)
 //   3. 빛 번짐(bloom): 밝은 곳만 골라 1/2·1/4·1/8 크기로 흐려 다시 더한다
 //   4. 마무리: 화면 흔들림, 맞을 때 색수차, 가장자리 어둡게, 맞음·낮은 체력의 붉은 테두리, 죽으면 회색
+//   5. 3D 챔피언: tools/champ_models.py 가 롤 게임 파일에서 만든 모델(static/dodge/models/*.bin) 을
+//      구운 애니메이션(서 있기·달리기·스킬) 으로 움직인다. 바닥 위, 2D 로 그린 선 것들 밑에 깊이 버퍼로 그린다.
+//      화면 투영은 dodge.js 의 proj 와 같은 식을 셰이더에서 그대로 한다(2D 그림과 정확히 겹치게)
 //
 // WebGL 을 못 쓰면 create 가 null 을 돌려주고, dodge.js 는 canvas2d() 로 같은 쿼드를 2D 로 그린다(침식·왜곡·번짐 없이).
 (function () {
@@ -329,6 +332,82 @@
       gl_FragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
     }`;
 
+  // ── 3D 챔피언 모델(.bin, 형식은 tools/champ_models.py) ──
+  function half(h) {
+    const s = (h & 0x8000) ? -1 : 1, e = (h >> 10) & 0x1F, f = h & 0x3FF;
+    if (e === 0) return s * f * 5.960464477539063e-8;
+    if (e === 31) return f ? NaN : s * Infinity;
+    return s * (1 + f / 1024) * Math.pow(2, e - 15);
+  }
+  function parseModel(buf) {
+    const dv = new DataView(buf);
+    if (String.fromCharCode(dv.getUint8(0), dv.getUint8(1), dv.getUint8(2), dv.getUint8(3)) !== "LMDL") throw new Error("모델 아님");
+    let o = 8;
+    const u32 = () => { const v = dv.getUint32(o, true); o += 4; return v; };
+    const f32 = () => { const v = dv.getFloat32(o, true); o += 4; return v; };
+    const V = u32(), I = u32(), B = u32(), A = u32(), height = f32(), scale = f32();
+    const pos = new Float32Array(buf.slice(o, o + V * 12)); o += V * 12;
+    const uv16 = new Uint16Array(buf.slice(o, o + V * 4)); o += V * 4;
+    const bones = new Uint8Array(buf.slice(o, o + V * 4)); o += V * 4;
+    const weights = new Float32Array(V * 4);
+    const w8 = new Uint8Array(buf, o, V * 4); o += V * 4;
+    for (let i = 0; i < V * 4; i++) weights[i] = w8[i] / 255;
+    const idx = new Uint16Array(buf.slice(o, o + I * 2)); o += I * 2;
+    o = (o + 3) & ~3;
+    const uv = new Float32Array(V * 2);
+    for (let i = 0; i < V * 2; i++) uv[i] = uv16[i] / 65535;
+    const anims = {};
+    for (let a = 0; a < A; a++) {
+      let name = "";
+      for (let i = 0; i < 12; i++) { const c = dv.getUint8(o + i); if (c) name += String.fromCharCode(c); }
+      o += 12;
+      const fps = f32(), F = u32(), n = F * B * 12;
+      const h = new Uint16Array(buf.slice(o, o + n * 2)); o += n * 2;
+      o = (o + 3) & ~3;
+      const m = new Float32Array(n);
+      for (let i = 0; i < n; i++) m[i] = half(h[i]);
+      anims[name] = { fps, F, m };
+    }
+    return { V, I, B, height, scale, pos, uv, bones, weights, idx, anims };
+  }
+
+  // 모델 좌표 → 바닥 좌표 → 화면. dodge.js 의 proj 와 같은 식(uC: S, OX, OY, FOCAL · uC2: CAM_D, COS, SIN · uC3: 경기장 가운데)
+  const VS_MODEL = `
+    attribute vec3 aPos; attribute vec2 aUv;
+    uniform vec4 uPlace; uniform vec2 uRot; uniform float uScale;
+    uniform vec4 uC; uniform vec3 uC2; uniform vec2 uC3; uniform vec2 uRes;
+    varying vec2 vUv; varying float vH;
+    void main() {
+      vec3 p = aPos * uScale;
+      // 롤 모델은 앞이 +z, 오른쪽이 +x(이즈리얼의 왼손 건틀릿이 -x). 앞을 uRot(바라보는 방향) 으로,
+      // +x 를 그 오른쪽(바닥 좌표에서 (-sin, cos)) 으로 놓는다
+      float wx = uPlace.x + p.z * uRot.x - p.x * uRot.y;
+      float wy = uPlace.y + p.z * uRot.y + p.x * uRot.x;
+      float wz = p.y + uPlace.z;
+      float dy = (wy - uC3.y) - uC2.x * uC2.y, dz = wz - uC2.x * uC2.z;
+      float yc = -dy * uC2.z + dz * uC2.y;
+      float zc = -dy * uC2.y - dz * uC2.z;
+      float k = uC.w / zc * uC.x;
+      float sx = uC.y + (wx - uC3.x) * k, sy = uC.z - yc * k;
+      vec2 ndc = vec2(sx / uRes.x * 2.0 - 1.0, 1.0 - sy / uRes.y * 2.0);
+      float d = clamp((zc - 500.0) / 6000.0, 0.0, 1.0) * 2.0 - 1.0;
+      gl_Position = vec4(ndc * zc, d * zc, zc);
+      vUv = aUv;
+      vH = clamp(aPos.y / 220.0, 0.0, 1.0);
+    }`;
+  // 텍스처 + 위로 갈수록 살짝 밝게(롤의 위쪽 조명 흉내) + 덧칠(맞을 때 흰빛, 유체화 푸른빛) + 진하기
+  const FS_MODEL = `
+    precision mediump float;
+    uniform sampler2D uTex; uniform vec4 uTint; uniform float uAlpha;
+    varying vec2 vUv; varying float vH;
+    void main() {
+      vec4 t = texture2D(uTex, vUv);
+      if (t.a < 0.35) discard;
+      vec3 c = t.rgb / max(t.a, 0.001) * (0.82 + 0.3 * vH);
+      c = mix(c, uTint.rgb, uTint.a);
+      gl_FragColor = vec4(c * uAlpha, uAlpha);
+    }`;
+
   function create(top) {
     const cv = document.createElement("canvas");
     cv.className = "lol-gl";
@@ -370,6 +449,7 @@
         bright: program(VS_FULL, FS_BRIGHT),
         blur: program(VS_FULL, FS_BLUR),
         final: program(VS_FULL, FS_FINAL),
+        model: program(VS_MODEL, FS_MODEL),
       };
     } catch (e) {
       console.warn("dodge-gl: 셰이더를 만들지 못해 2D 로 그립니다", e);
@@ -408,15 +488,23 @@
     const tBg = texture(null), tFg = texture(null);
 
     // 화면 크기 버퍼들: A 전체, 번짐용 1/2·1/4·1/8(각각 가로세로 흐림에 두 장)
-    function target(w, h) {
+    function target(w, h, depth) {
       const t = texture(null);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
       const fb = gl.createFramebuffer();
       gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
-      return { t, fb, w, h };
+      let rb = null;
+      if (depth) {
+        // 3D 모델끼리 앞뒤를 가리는 깊이 버퍼
+        rb = gl.createRenderbuffer();
+        gl.bindRenderbuffer(gl.RENDERBUFFER, rb);
+        gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, w, h);
+        gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, rb);
+      }
+      return { t, fb, w, h, rb };
     }
-    function drop(rt) { if (rt) { gl.deleteTexture(rt.t); gl.deleteFramebuffer(rt.fb); } }
+    function drop(rt) { if (rt) { gl.deleteTexture(rt.t); gl.deleteFramebuffer(rt.fb); if (rt.rb) gl.deleteRenderbuffer(rt.rb); } }
     let W = 1, H = 1, cssW = 1, cssH = 1, RT = null;
     function resize(w, h, dpr) {
       cssW = w; cssH = h;
@@ -427,7 +515,7 @@
       W = cv.width = pw; H = cv.height = ph;
       if (RT) Object.values(RT).forEach(drop);
       const s = k => [Math.max(1, Math.round(W / k)), Math.max(1, Math.round(H / k))];
-      RT = { A: target(W, H), h1: target(...s(2)), h2: target(...s(2)), q1: target(...s(4)), q2: target(...s(4)),
+      RT = { A: target(W, H, true), h1: target(...s(2)), h2: target(...s(2)), q1: target(...s(4)), q2: target(...s(4)),
              e1: target(...s(8)), e2: target(...s(8)) };
     }
 
@@ -490,6 +578,94 @@
       ["aUv", "aNuv", "aCol", "aP"].forEach(n => { const a = q.a(n); if (a >= 0) gl.disableVertexAttribArray(a); });
     }
 
+    // ── 3D 챔피언 ──
+    // 받아 둔 모델: 키 → { m(parseModel), tex, uvBuf, idxBuf, posBuf, out(뼈를 섞은 위치), mats(섞은 뼈 행렬) }
+    const models = new Map(), asked = new Map();
+    function loadModel(key, base) {
+      if (asked.has(key)) return asked.get(key);
+      const p = Promise.all([
+        fetch(base + key + ".bin").then(r => { if (!r.ok) throw new Error(r.status); return r.arrayBuffer(); }),
+        new Promise((ok, no) => { const img = new Image(); img.onload = () => ok(img); img.onerror = no; img.src = base + key + ".webp"; }),
+      ]).then(([buf, img]) => {
+        if (lost) return null;
+        const m = parseModel(buf);
+        const mk = (kind, data) => { const b = gl.createBuffer(); gl.bindBuffer(kind, b); gl.bufferData(kind, data, gl.STATIC_DRAW); return b; };
+        const posBuf = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
+        gl.bufferData(gl.ARRAY_BUFFER, m.V * 12, gl.DYNAMIC_DRAW);
+        const md = { m, tex: texture(img), uvBuf: mk(gl.ARRAY_BUFFER, m.uv), idxBuf: mk(gl.ELEMENT_ARRAY_BUFFER, m.idx), posBuf,
+                     out: new Float32Array(m.V * 3), mats: new Float32Array(m.B * 12) };
+        models.set(key, md);
+        return md;
+      });
+      p.catch(() => {});
+      asked.set(key, p);
+      return p;
+    }
+    // 애니메이션 name 의 time 초 자세로 뼈를 섞어 정점을 옮긴다(앞뒤 프레임 사이는 행렬을 그대로 섞는다)
+    function pose(md, name, time, loop) {
+      const m = md.m, an = m.anims[name] || m.anims.idle || Object.values(m.anims)[0];
+      const mats = md.mats, out = md.out;
+      if (!an) { out.set(m.pos); return; }
+      let f = time * an.fps;
+      f = loop ? ((f % an.F) + an.F) % an.F : Math.min(an.F - 1, Math.max(0, f));
+      const f0 = Math.floor(f), f1 = loop ? (f0 + 1) % an.F : Math.min(an.F - 1, f0 + 1), k = f - f0;
+      const a0 = f0 * m.B * 12, a1 = f1 * m.B * 12, src = an.m;
+      for (let i = 0; i < m.B * 12; i++) mats[i] = src[a0 + i] + (src[a1 + i] - src[a0 + i]) * k;
+      const P = m.pos, Bn = m.bones, Wt = m.weights;
+      for (let v = 0, n = m.V; v < n; v++) {
+        const x = P[v * 3], y = P[v * 3 + 1], z = P[v * 3 + 2];
+        let ox = 0, oy = 0, oz = 0;
+        for (let j = 0; j < 4; j++) {
+          const w = Wt[v * 4 + j];
+          if (w === 0) continue;
+          const b = Bn[v * 4 + j] * 12;
+          ox += w * (mats[b] * x + mats[b + 1] * y + mats[b + 2] * z + mats[b + 3]);
+          oy += w * (mats[b + 4] * x + mats[b + 5] * y + mats[b + 6] * z + mats[b + 7]);
+          oz += w * (mats[b + 8] * x + mats[b + 9] * y + mats[b + 10] * z + mats[b + 11]);
+        }
+        out[v * 3] = ox; out[v * 3 + 1] = oy; out[v * 3 + 2] = oz;
+      }
+    }
+    // actors: [{ key, x, y, z, angle, anim, time, loop, alpha, tint: [r, g, b, a] }], cam: dodge.js 의 투영 값
+    function drawModels(actors, cam) {
+      if (!actors || !actors.length || !cam) return;
+      const q = P.model, u = q.u;
+      gl.useProgram(q.p);
+      gl.enable(gl.DEPTH_TEST);
+      gl.depthFunc(gl.LEQUAL);
+      gl.depthMask(true);
+      gl.clear(gl.DEPTH_BUFFER_BIT);
+      gl.uniform4f(u.uC, cam.S, cam.OX, cam.OY, cam.FOCAL);
+      gl.uniform3f(u.uC2, cam.CAM_D, cam.COS, cam.SIN);
+      gl.uniform2f(u.uC3, cam.W2, cam.H2);
+      gl.uniform2f(u.uRes, cssW, cssH);
+      const aPos = q.a("aPos"), aUv = q.a("aUv");
+      gl.enableVertexAttribArray(aPos);
+      gl.enableVertexAttribArray(aUv);
+      for (const ac of actors) {
+        const md = models.get(ac.key);
+        if (!md) continue;
+        pose(md, ac.anim, ac.time, ac.loop !== false);
+        gl.bindBuffer(gl.ARRAY_BUFFER, md.posBuf);
+        gl.bufferSubData(gl.ARRAY_BUFFER, 0, md.out);
+        gl.vertexAttribPointer(aPos, 3, gl.FLOAT, false, 12, 0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, md.uvBuf);
+        gl.vertexAttribPointer(aUv, 2, gl.FLOAT, false, 8, 0);
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, md.idxBuf);
+        gl.uniform4f(u.uPlace, ac.x, ac.y, ac.z || 0, 0);
+        gl.uniform2f(u.uRot, Math.cos(ac.angle), Math.sin(ac.angle));
+        gl.uniform1f(u.uScale, md.m.scale);
+        const tint = ac.tint || [0, 0, 0, 0];
+        gl.uniform4f(u.uTint, tint[0], tint[1], tint[2], tint[3]);
+        gl.uniform1f(u.uAlpha, ac.alpha == null ? 1 : ac.alpha);
+        bindTex(0, md.tex, u.uTex);
+        gl.drawElements(gl.TRIANGLES, md.m.I, gl.UNSIGNED_SHORT, 0);
+      }
+      gl.disableVertexAttribArray(aUv);
+      gl.disable(gl.DEPTH_TEST);
+    }
+
     function upload(t, canvas) {
       gl.bindTexture(gl.TEXTURE_2D, t);
       gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
@@ -536,11 +712,12 @@
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
       drawBatch(ground);
+      drawModels(o.actors, o.cam);
       layer(tFg, o.waves);
       drawBatch(air);
       gl.disable(gl.BLEND);
       // 2) 빛 번짐: 밝은 곳만 1/2 로, 흐리고, 1/4·1/8 로 내리며 또 흐린다
-      down(RT.A, RT.h1, 0.72);
+      down(RT.A, RT.h1, 0.8);
       blur(RT.h1, RT.h2, 1);
       down(RT.h1, RT.q1, 0);
       blur(RT.q1, RT.q2, 1.4);
@@ -577,6 +754,8 @@
       frame,
       ok: () => !lost,
       setAtlas(img) { gl.deleteTexture(tAtlas); tAtlas = texture(img); },
+      loadModel,
+      model: key => models.get(key) || null,
       destroy() { cv.remove(); const ext = gl.getExtension("WEBGL_lose_context"); if (ext) ext.loseContext(); },
     };
   }

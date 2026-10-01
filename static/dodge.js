@@ -53,32 +53,35 @@
   // 정화: 쿨타임 240초(롤 데이터), 공중에 뜸·제압을 뺀 CC 를 풀고 3초 동안 강인함 75%(14.10 패치, 나무위키).
   // 쿨타임은 유체화(실제 240초) 와 같게 20초로 줄였다
   const SPELLS = [
-    { id: "flash", name: "점멸", cd: 15, range: 400, icon: ICONS + "summoner_flash.png" },
-    { id: "ghost", name: "유체화", cd: 20, last: 3, bonus: 0.4, icon: ICONS + "summoner_haste.png" },
-    { id: "cleanse", name: "정화", cd: 20, last: 3, tenacity: 0.75, icon: ICONS + "summoner_boost.png" },
+    { id: "flash", name: "점멸", cd: 15, range: 400, icon: ICONS + "summoner_flash.png",
+      desc: "커서 쪽으로 짧은 거리(400)를 순간이동합니다. 기절·속박·매혹·공중에 뜸 중에는 못 써요." },
+    { id: "ghost", name: "유체화", cd: 20, last: 3, bonus: 0.4, icon: ICONS + "summoner_haste.png",
+      desc: "3초 동안 이동 속도가 40% 오릅니다." },
+    { id: "cleanse", name: "정화", cd: 20, last: 3, tenacity: 0.75, icon: ICONS + "summoner_boost.png",
+      desc: "공중에 뜸을 뺀 모든 CC 를 풀고, 3초 동안 강인함 75%를 얻습니다. 노멀 모드에는 CC 가 없어요." },
   ];
   const spellById = id => SPELLS.find(sp => sp.id === id);
 
-  // 조작 설정: 이동 방식(mouse | wasd), 모드(normal | hard), 하드 모드의 주문 두 개(pair),
-  // 앞 주문을 두 키 중 앞 키에 둘지(flashFirst). 브라우저에 기억한다
+  // 조작 설정: 이동 방식(mouse | wasd), 모드(normal | hard), 모드마다 주문 두 칸(slots: [앞 키 칸, 뒤 키 칸]).
+  // 롤처럼 칸을 눌러 주문을 바꾼다(spellPopup). 브라우저에 기억한다
   const CONTROL_KEY = "tiergg-dodge-controls";
-  // 하드 모드는 롤처럼 세 주문 중 두 개를 고른다. 노멀은 CC 가 없어서 점멸·유체화 그대로
-  const PAIRS = { "flash-cleanse": ["flash", "cleanse"], "flash-ghost": ["flash", "ghost"], "ghost-cleanse": ["ghost", "cleanse"] };
+  const DEFAULT_SLOTS = { normal: ["ghost", "flash"], hard: ["cleanse", "flash"] };
   function loadControls() {
-    try {
-      const c = JSON.parse(localStorage.getItem(CONTROL_KEY) || "{}");
-      return { move: c.move === "wasd" ? "wasd" : "mouse", flashFirst: !!c.flashFirst,
-               mode: c.mode === "hard" ? "hard" : "normal", pair: PAIRS[c.pair] ? c.pair : "flash-cleanse" };
-    } catch { return { move: "mouse", flashFirst: false, mode: "normal", pair: "flash-cleanse" }; }
+    let c = {};
+    try { c = JSON.parse(localStorage.getItem(CONTROL_KEY) || "{}") || {}; } catch {}
+    const ok = v => Array.isArray(v) && v.length === 2 && v[0] !== v[1] && v.every(spellById);
+    const slots = {};
+    for (const m of ["normal", "hard"]) slots[m] = ok(c.slots && c.slots[m]) ? c.slots[m].slice() : DEFAULT_SLOTS[m].slice();
+    return { move: c.move === "wasd" ? "wasd" : "mouse", mode: c.mode === "hard" ? "hard" : "normal", slots };
   }
   function saveControls(c) { try { localStorage.setItem(CONTROL_KEY, JSON.stringify(c)); } catch {} }
-  // 이번 판의 주문 두 개
-  function spellsOf(c) { return c.mode === "hard" ? PAIRS[c.pair] : ["flash", "ghost"]; }
+  // 이번 판의 주문 두 개(앞 키 칸, 뒤 키 칸 순서)
+  function spellsOf(c) { return c.slots[c.mode]; }
   // 이동 방식에 따른 주문 두 키
   function keyPair(move) { return move === "wasd" ? ["V", "F"] : ["D", "F"]; }
   function spellKeys(c) {
     const [a, b] = keyPair(c.move), [s1, s2] = spellsOf(c);
-    return c.flashFirst ? { [s1]: a, [s2]: b } : { [s1]: b, [s2]: a };
+    return { [s1]: a, [s2]: b };
   }
   const HP_MAX = 1500;            // 체력(한 번 맞을 때마다 HP_MAX / LIVES)
   // 연속으로 피한 수에 따라 롤 안내 문구와 아나운서 음성(롤의 연속 처치 순서 그대로)
@@ -278,6 +281,15 @@
     }
     return IMG[id];
   }
+  // 3D 챔피언 모델(tools/champ_models.py 가 롤 게임 파일에서 만든 것). 목록에 있는 챔피언만 3D 로, 나머지는 초상화로 그린다
+  const MODELS = "dodge/models/";
+  let modelIndex = null, modelAsked = false;
+  function loadModelIndex() {
+    if (modelAsked) return;
+    modelAsked = true;
+    fetch(MODELS + "index.json").then(r => (r.ok ? r.json() : {})).then(d => { modelIndex = d || {}; }, () => { modelIndex = {}; });
+  }
+  const modelKey = champ => String(champ || "").toLowerCase();
   // HUD(DOM) 초상화는 캔버스가 아니라서 OP.GG 그림을 그대로 쓴다
   const hudFace = key => "https://opgg-static.akamaized.net/meta/images/lol/latest/champion/" + key + ".png";
   // 게임이 시작되기 전에 미리 받아 둔다. 못 받아도 원으로 그린다
@@ -569,6 +581,7 @@
     const hud = name => root.querySelector(`[data-hud="${name}"]`);
     preload();
     loadArt();
+    loadModelIndex();
     // 연습장에 들어온 것 자체가 클릭이라 소리를 미리 받아 풀어 둔다(첫 판 "환영합니다" 부터 나오게)
     if (soundOn()) loadSamples();
 
@@ -778,6 +791,7 @@
         c.aim = { x: at0.x + c.dx * r, y: at0.y + c.dy * r };
       }
       casters.push(c);
+      model(skill.champ);       // 3D 모델이 있으면 받기 시작(다 받기 전엔 초상화)
       skillSound(skill, "cast");
       if (c.wind <= 0) release(c);
     }
@@ -1444,6 +1458,40 @@
     function glow(color, blur) { ctx.shadowColor = color; ctx.shadowBlur = blur; }
     function noGlow() { ctx.shadowBlur = 0; }
 
+    // ── 3D 챔피언 ──
+    // 모델이 있으면(효과층 + 목록에 있는 챔피언 + 다 받음) 초상화 대신 3D 로 그린다. 없으면 받기 시작만 한다
+    function model(champ) {
+      const key = modelKey(champ);
+      if (!fxgl || !modelIndex || !modelIndex[key]) return null;
+      const md = fxgl.model(key);
+      if (!md) fxgl.loadModel(key, MODELS);
+      return md ? modelIndex[key] : null;
+    }
+    // 스킬 이름의 마지막 글자(Q W E R) → 롤 애니메이션 이름(spell1 … spell4)
+    const spellAnim = s => "spell" + ("QWER".indexOf(s.name.replace(" (갈라짐)", "").slice(-1)) + 1);
+    let animClock = 0;      // 실제 시간(애니메이션이 게임이 끝나도 흐르게)
+    // 효과층에 넘길 3D 챔피언들
+    function modelActors() {
+      const out = [];
+      if (!player) return out;
+      if (model(faceKey)) {
+        const moving = (player.vx || player.vy) && !(mode === "hard" && held());
+        out.push({ key: modelKey(faceKey), x: player.x, y: player.y, z: lift(), angle: Math.atan2(facing.y, facing.x),
+                   anim: moving ? "run" : "idle", time: animClock, loop: true,
+                   alpha: safe > 0 && Math.floor(safe * 10) % 2 ? 0.45 : 1,
+                   tint: hurt > 0 ? [1, 1, 1, hurt / 0.4 * 0.55] : ghostLeft > 0 ? [0.4, 0.85, 0.95, 0.22] : null });
+      }
+      for (const c of casters) {
+        if (!model(c.skill.champ)) continue;
+        const since = c.skill.cast - c.wind;            // 시전을 시작한 뒤 흐른 시간(풀린 뒤에도 계속 는다)
+        const casting = c.wind > 0 || c.fade > 0.25;
+        out.push({ key: modelKey(c.skill.champ), x: c.x, y: c.y, z: 0, angle: Math.atan2(c.dy, c.dx),
+                   anim: c.dash ? "run" : casting ? spellAnim(c.skill) : "idle", time: c.dash ? animClock : Math.max(0, since + (c.wind > 0 ? 0 : 0.5 - c.fade)),
+                   loop: !!c.dash, alpha: c.wind > 0 ? 1 : Math.min(1, Math.max(0, c.fade / 0.5)) });
+      }
+      return out;
+    }
+
     // ── 효과층에 쿼드 쌓기 ──
     // FX(): 지금 쓰는 그리개. WebGL 이면 묶음에 쌓았다가 frame() 에서 한 번에, 아니면 2D 로 바로 그린다
     const FX = () => (fxgl ? fxgl : fx2d);
@@ -1578,8 +1626,8 @@
       let k = 1;
       if (m.splitIn != null) k = 1 + 0.7 * (1 - Math.max(0, m.splitIn) / s.split.telegraph);
       const gc = rgb(g.glow || s.color), cc0 = rgb(g.core || "#ffffff");
-      rq(L, frameOf("dot"), p.x, p.y, r * 3.6 * k, r * 3.6 * k, 0, gc, 0.28, 1);
-      rq(L, frameOf("glow"), p.x, p.y, r * 1.9 * k, r * 1.9 * k, 0, cc0, 0.6, 1);
+      rq(L, frameOf("dot"), p.x, p.y, r * 3.4 * k, r * 3.4 * k, 0, gc, 0.2, 1);
+      rq(L, frameOf("glow"), p.x, p.y, r * 1.7 * k, r * 1.7 * k, 0, cc0, 0.38, 1);
       if (g.flare || m.splitIn != null) rq(L, frameOf("star"), p.x, p.y, r * 3.4 * k, r * 3.4 * k, now * 1.7, cc0, 0.45, 1);
     }
 
@@ -1723,6 +1771,7 @@
       deadFx = state === "over" ? Math.min(1, deadFx + dt / 0.6) : 0;
       shake = Math.max(0, shake - dt);
       hurt = Math.max(0, hurt - dt);
+      animClock += dt;
       if (state !== "play" || !player) return;
 
       // 투사체: 지나온 길(리본 꼬리) 을 적어 두고, 표의 파티클을 흘린다
@@ -2171,6 +2220,13 @@
     }
 
     function drawPlayer() {
+      // 3D 모델이 있으면 효과층이 그린다. 여기서는 모델 머리 위 체력바만
+      const md = model(faceKey);
+      if (md) {
+        const top = upright(player.x, player.y, md.h + 25 + lift());
+        healthBar(top.x, top.y, Math.max(0, lives) / LIVES, true, level, opts.name || "나", LIVES, ccLabel());
+        return;
+      }
       // 내 챔피언(티어표 OP 챔피언) 초상화가 받침대 위에 선다. 적과 같은 모양, 테두리만 금색.
       // 공중에 뜨면 초상화가 떠오른다
       const base = proj(player.x, player.y, 0), head = upright(player.x, player.y, PORTRAIT_Z + lift());
@@ -2207,6 +2263,22 @@
 
     function drawCaster(c) {
       const alpha = c.wind > 0 ? 1 : Math.max(0, c.fade / 0.5);
+      const md = model(c.skill.champ);
+      if (md) {
+        // 3D 모델은 효과층이 그린다. 머리 위 체력바와 시전 중 차오르는 테두리 대신 막대만
+        const top = upright(c.x, c.y, md.h + 25);
+        ctx.globalAlpha = Math.min(1, alpha);
+        healthBar(top.x, top.y, 1, false, level, c.skill.name.split(" ")[0], 5);
+        if (c.wind > 0 && c.skill.cast > 0) {
+          const u = U(), w = 80 * u, p = 1 - c.wind / c.skill.cast;
+          ctx.fillStyle = "#010a13";
+          ctx.fillRect(top.x - w / 2, top.y + 4 * u, w, 5 * u);
+          ctx.fillStyle = c.skill.color;
+          ctx.fillRect(top.x - w / 2, top.y + 4 * u, w * p, 5 * u);
+        }
+        ctx.globalAlpha = 1;
+        return;
+      }
       const base = proj(c.x, c.y, 0), head = upright(c.x, c.y, PORTRAIT_Z);
       const r = 44 * head.k;
       ctx.globalAlpha = alpha;
@@ -2668,7 +2740,8 @@
       const low = player && lives === 1 && state === "play" ? 0.18 + 0.1 * Math.sin(performance.now() / 250) : 0;
       if (gl) {
         fxgl.frame({ bg: bgCv, fg: fgCv, waves: player ? screenWaves() : [], shake: { x: sx, y: sy },
-                     ca: ca, dead: deadFx, hurt: hurt / 0.4, low });
+                     ca: ca, dead: deadFx, hurt: hurt / 0.4, low,
+                     actors: modelActors(), cam: { S, OX, OY, FOCAL, CAM_D, COS, SIN, W2: ARENA.w / 2, H2: ARENA.h / 2 } });
         mainCtx.setTransform(1, 0, 0, 1, 0, 0);
         mainCtx.clearRect(0, 0, canvas.width, canvas.height);
       }
@@ -2721,7 +2794,7 @@
     // HUD 주문 칸에 이번 판의 주문 두 개를 넣는다(키 순서대로)
     function paintSpells() {
       const k = spellKeys(controls);
-      const ids = spellsOf(controls).slice().sort((a, b) => keyPair(controls.move).indexOf(k[a]) - keyPair(controls.move).indexOf(k[b]));
+      const ids = spellsOf(controls);
       root.querySelectorAll("[data-slot]").forEach((b, i) => {
         const sp = spellById(ids[i]);
         b.dataset.spell = sp.id;
@@ -2880,12 +2953,11 @@
 
     // 시작 창. 모드·이동 방식·주문을 고르면 바로 다시 그린다
     function showIntro() {
-      const [a, b] = keyPair(controls.move);
+      const keys2 = keyPair(controls.move);
       const [s1, s2] = spellsOf(controls).map(spellById);
       const k = spellKeys(controls);
       const hard = controls.mode === "hard";
       const on = v => (v ? "true" : "false");
-      const pairName = id => PAIRS[id].map(x => spellById(x).name).join("·");
       showOver(`
       <h2>스킬샷 피하기</h2>
       <p>사방에서 날아오는 스킬을 피해 오래 버티세요. ${LIVES}번 맞으면 처치당해요.
@@ -2901,14 +2973,14 @@
             <button type="button" data-move="mouse" aria-selected="${on(controls.move === "mouse")}">마우스 클릭</button>
             <button type="button" data-move="wasd" aria-selected="${on(controls.move === "wasd")}">WASD</button>
           </div></div>
-        ${hard ? `<div><span>주문 고르기</span>
-          <div class="seg dodge-seg" role="group" aria-label="소환사 주문 두 개">
-            ${Object.keys(PAIRS).map(id => `<button type="button" data-pair="${id}" aria-selected="${on(controls.pair === id)}">${pairName(id)}</button>`).join("")}
-          </div></div>` : ""}
-        <div><span>주문 배치</span>
-          <div class="seg dodge-seg" role="group" aria-label="소환사 주문 배치">
-            <button type="button" data-order="first" aria-selected="${on(controls.flashFirst)}">${s1.name} ${a} · ${s2.name} ${b}</button>
-            <button type="button" data-order="second" aria-selected="${on(!controls.flashFirst)}">${s2.name} ${a} · ${s1.name} ${b}</button>
+        <div><span>소환사 주문</span>
+          <div class="spell-pick" role="group" aria-label="소환사 주문">
+            ${[s1, s2].map((sp, i) => `
+              <button type="button" class="spell-slot" data-slot-pick="${i}" title="${sp.name} (${keys2[i]}) · 눌러서 바꾸기"
+                      aria-haspopup="dialog" aria-label="${keys2[i]} 칸 ${sp.name}, 눌러서 바꾸기">
+                <img src="${sp.icon}" alt=""><kbd>${keys2[i]}</kbd>
+              </button>`).join("")}
+            <small>칸을 눌러 바꿔요</small>
           </div></div>
       </div>
       <ul class="dodge-keys">
@@ -2945,8 +3017,58 @@
       };
       over.querySelectorAll("[data-mode]").forEach(pick(btn => { controls.mode = btn.dataset.mode; }));
       over.querySelectorAll("[data-move]").forEach(pick(btn => { controls.move = btn.dataset.move; }));
-      over.querySelectorAll("[data-pair]").forEach(pick(btn => { controls.pair = btn.dataset.pair; }));
-      over.querySelectorAll("[data-order]").forEach(pick(btn => { controls.flashFirst = btn.dataset.order === "first"; }));
+      over.querySelectorAll("[data-slot-pick]").forEach(btn => btn.onclick = e => { e.stopPropagation(); spellPopup(btn, pick); });
+    }
+
+    // 롤의 소환사 주문 고르기: 칸을 누르면 그 칸 위에 주문 목록이 뜨고, 고르면 그 칸이 바뀐다.
+    // 다른 칸에 있는 주문을 고르면 롤처럼 두 칸이 서로 바뀐다. 바깥을 누르거나 Esc 면 닫힌다
+    function spellPopup(btn, pick) {
+      const card = over.querySelector(".dodge-card");
+      card.querySelectorAll(".spell-pop").forEach(x => x.remove());
+      const i = +btn.dataset.slotPick, slots = controls.slots[controls.mode];
+      const pop = document.createElement("div");
+      pop.className = "spell-pop";
+      pop.setAttribute("role", "dialog");
+      pop.setAttribute("aria-label", "소환사 주문 고르기");
+      pop.innerHTML = `
+        <div class="spell-pop-grid">
+          ${SPELLS.map(sp => `
+            <button type="button" data-spell-choose="${sp.id}" aria-pressed="${sp.id === slots[i]}"
+                    class="${sp.id === slots[1 - i] ? "other" : ""}" aria-label="${sp.name}">
+              <img src="${sp.icon}" alt=""></button>`).join("")}
+        </div>
+        <div class="spell-pop-info"></div>`;
+      const info = pop.querySelector(".spell-pop-info");
+      const show = sp => {
+        info.innerHTML = `<b>${sp.name}</b> <small>재사용 대기시간 ${sp.cd}초</small><p>${sp.desc}</p>`;
+      };
+      show(spellById(slots[i]));
+      card.appendChild(pop);
+      // 누른 칸 바로 위에 띄운다(카드 안에서. 카드는 스크롤될 수 있다). 위에 자리가 없으면 아래에
+      const cr = card.getBoundingClientRect(), br = btn.getBoundingClientRect();
+      const top = br.top - cr.top + card.scrollTop;
+      pop.style.left = Math.max(8, Math.min(card.clientWidth - pop.offsetWidth - 8, br.left - cr.left + br.width / 2 - pop.offsetWidth / 2)) + "px";
+      pop.style.top = (top - pop.offsetHeight - 8 >= card.scrollTop ? top - pop.offsetHeight - 8 : top + br.height + 8) + "px";
+      const outside = e => { if (!pop.contains(e.target)) close(); };
+      const esc = e => { if (e.key === "Escape") { e.stopPropagation(); close(); btn.focus(); } };
+      function close() {
+        pop.remove();
+        document.removeEventListener("pointerdown", outside, true);
+        document.removeEventListener("keydown", esc, true);
+      }
+      document.addEventListener("pointerdown", outside, true);
+      document.addEventListener("keydown", esc, true);
+      pop.querySelectorAll("[data-spell-choose]").forEach(b => {
+        const sp = spellById(b.dataset.spellChoose);
+        b.onmouseenter = b.onfocus = () => show(sp);
+        pick(() => {
+          const j = slots.indexOf(sp.id);
+          if (j === 1 - i) slots[j] = slots[i];     // 다른 칸의 주문이면 서로 바꾼다
+          slots[i] = sp.id;
+          close();
+        })(b);
+      });
+      pop.querySelector('[aria-pressed="true"]').focus();
     }
     showIntro();
 
