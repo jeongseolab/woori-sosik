@@ -92,6 +92,15 @@
   const RARE_CHANCE = 0.03;
   const LIVES = 3;
   const SAFE_AFTER_HIT = 1.0;
+  // 3D 모델이 도는 빠르기(라디안/초). 판정용 facing 은 바로 바뀌고, 보이는 각도만 이 빠르기로 따라간다
+  const TURN_RATE = Math.PI * 6;
+  // 멈추기 직전 이만큼(초) 안에 바뀐 방향은 버린다. 대각선으로 가다 두 키를 조금 다르게 떼도 대각선을 보고 선다
+  const STOP_GRACE = 0.08;
+  // a 에서 want 쪽으로 짧은 길로 최대 max 만큼 돈 각도
+  function turnToward(a, want, max) {
+    const d = ((want - a + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
+    return Math.abs(d) <= max ? want : a + Math.sign(d) * max;
+  }
   // 바닥 표시를 보고 움직이기 시작하기까지 걸리는 시간(사람의 반응 시간).
   // 장판은 표시가 뜬 뒤 이만큼 늦게 움직여도 빠져나갈 수 있는 자리로 찍는다
   const REACT = 0.25;
@@ -591,7 +600,7 @@
     let lives, hits, safe, lastHit, dead;
     let fx, parts, shake, hurt;          // 그림 효과(판정과 상관없음)
     let waves, ca, deadFx;               // 효과층: 충격파 왜곡, 색수차, 죽은 뒤 회색이 되는 정도
-    let cds, ghostLeft, cursor, facing, level, pops, lastSpree, lastMark;
+    let cds, ghostLeft, cursor, facing, prevFacing, facingAt, viewAngle, level, pops, lastSpree, lastMark;
     let mode, spells;                    // 이번 판의 모드(normal | hard) 와 주문 두 개
     let effects, tenacity, ablaze, marked, tethers;   // 하드 모드 CC(applyCC)
     let bannerTimer = 0, overTimer = 0;
@@ -632,6 +641,9 @@
       ghostLeft = 0;           // 유체화 남은 시간
       cursor = null;           // 마우스가 가리키는 바닥(점멸 방향)
       facing = { x: 0, y: -1 };    // 마지막으로 움직인 방향(커서가 없을 때 점멸 방향)
+      prevFacing = null;       // 바로 전 방향과 바뀐 시각(STOP_GRACE)
+      facingAt = 0;
+      viewAngle = -Math.PI / 2;    // 3D 모델이 지금 보는 각도(facing 을 TURN_RATE 로 따라간다)
       level = 1;
       pops = [];               // 떠오르는 피해 숫자
       lastSpree = 0;
@@ -1082,8 +1094,14 @@
       }
       if (player.vx || player.vy) {
         const n = Math.hypot(player.vx, player.vy);
-        facing = { x: player.vx / n, y: player.vy / n };
+        const f = { x: player.vx / n, y: player.vy / n };
+        if (f.x !== facing.x || f.y !== facing.y) { prevFacing = facing; facingAt = t; }
+        facing = f;
+      } else if (prevFacing) {
+        if (t - facingAt < STOP_GRACE) facing = prevFacing;
+        prevFacing = null;
       }
+      viewAngle = turnToward(viewAngle, Math.atan2(facing.y, facing.x), TURN_RATE * dt);
       player.x = Math.min(ARENA.w - CHAMP.radius, Math.max(CHAMP.radius, player.x + player.vx * dt));
       player.y = Math.min(ARENA.h - CHAMP.radius, Math.max(CHAMP.radius, player.y + player.vy * dt));
 
@@ -1476,7 +1494,7 @@
       if (!player) return out;
       if (model(faceKey)) {
         const moving = (player.vx || player.vy) && !(mode === "hard" && held());
-        out.push({ key: modelKey(faceKey), x: player.x, y: player.y, z: lift(), angle: Math.atan2(facing.y, facing.x),
+        out.push({ key: modelKey(faceKey), x: player.x, y: player.y, z: lift(), angle: viewAngle,
                    anim: moving ? "run" : "idle", time: animClock, loop: true,
                    alpha: safe > 0 && Math.floor(safe * 10) % 2 ? 0.45 : 1,
                    tint: hurt > 0 ? [1, 1, 1, hurt / 0.4 * 0.55] : ghostLeft > 0 ? [0.4, 0.85, 0.95, 0.22] : null });
