@@ -25,6 +25,7 @@
 쓰는 법:
   pip install xxhash zstandard numpy pillow
   python tools/champ_models.py                      # 연습장에 나오는 챔피언(스킬 쓰는 적) + 이즈리얼
+  python tools/champ_models.py --mobility           # 이동기가 있는 챔피언(MOBILITY)
   python tools/champ_models.py ahri jinx            # 고른 챔피언만(내 챔피언으로 쓰려면)
   python tools/champ_models.py --all                # 모든 챔피언
   python tools/champ_models.py --game "D:/Riot Games/League of Legends"
@@ -54,6 +55,12 @@ CASTERS = {"morgana": [1], "lux": [1, 4], "zyra": [3], "nidalee": [1], "brand": 
            "velkoz": [1, 3], "xerath": [2, 3], "ezreal": [1], "leona": [3, 4], "veigar": [1, 2, 3],
            "blitzcrank": [1], "thresh": [1], "jinx": [2], "ashe": [4], "karthus": [1], "chogath": [1],
            "syndra": [1], "jhin": [2]}
+# 나중에 내 챔피언으로 고르면 쓸 이동기(바로 쓰는 돌진·순간이동, 대상 지정·차징·패시브 제외) 와 그 스킬(Q=1 … R=4)
+MOBILITY = {"ezreal": 3, "lucian": 3, "graves": 3, "vayne": 1, "corki": 2, "tristana": 2, "gragas": 3, "gnar": 3,
+            "kindred": 1, "caitlyn": 3, "ahri": 4, "fizz": 3, "riven": 3, "sejuani": 1, "malphite": 4, "sylas": 3,
+            "zeri": 3, "tryndamere": 3, "renekton": 3, "ornn": 3, "rakan": 2, "aatrox": 3, "kled": 3, "kayn": 1,
+            "khazix": 3, "naafiri": 3, "aurora": 2, "belveth": 1, "gwen": 3, "fiora": 1, "pyke": 3, "shen": 3,
+            "urgot": 3, "galio": 3, "zoe": 4, "kassadin": 4, "shaco": 1, "leblanc": 2, "ekko": 3, "akali": 3}
 FPS = 15
 TEX_SIZE = 512
 
@@ -591,6 +598,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("champions", nargs="*", help="챔피언 영문 이름(소문자). 비우면 연습장 챔피언")
     ap.add_argument("--all", action="store_true", help="모든 챔피언")
+    ap.add_argument("--mobility", action="store_true", help="이동기가 있는 챔피언(MOBILITY)")
     ap.add_argument("--game", default=r"C:\Riot Games\League of Legends", help="롤 설치 폴더")
     a = ap.parse_args()
     wad_dir = os.path.join(a.game, "Game", "DATA", "FINAL", "Champions")
@@ -599,13 +607,15 @@ def main():
         # 이벤트용 항목(jade_ahri 처럼 밑줄이 든 것) 은 챔피언이 아니라서 뺀다
         keys = sorted(str(c["alias"]).lower() for c in get_json(
             "plugins/rcp-be-lol-game-data/global/default/v1/champion-summary.json") if 0 < c["id"] < 10000 and "_" not in str(c["alias"]))
+    elif a.mobility:
+        keys = sorted(MOBILITY)
     else:
         keys = [k.lower() for k in a.champions] or sorted(CASTERS)
     index_path = os.path.join(OUT, "index.json")
     index = json.load(open(index_path, encoding="utf-8")) if os.path.exists(index_path) else {}
     for k in keys:
         try:
-            index[k] = build(k, wad_dir, CASTERS.get(k, []))
+            index[k] = build(k, wad_dir, sorted(set(CASTERS.get(k, [])) | ({MOBILITY[k]} if k in MOBILITY else set())))
             print(k, index[k], flush=True)
         except Exception as e:      # 한 챔피언이 안 돼도 나머지는 만든다
             print(k, "실패:", e, file=sys.stderr, flush=True)
