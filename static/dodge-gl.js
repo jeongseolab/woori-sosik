@@ -598,7 +598,8 @@
         models.set(key, md);
         return md;
       });
-      p.catch(() => {});
+      // 못 받으면(서버가 잠깐 늦거나 끊김) 그 챔피언이 판 내내 초상화로 남지 않게, 잠시 뒤 다시 받을 수 있게 둔다
+      p.catch(() => { setTimeout(() => asked.delete(key), 3000); });
       asked.set(key, p);
       return p;
     }

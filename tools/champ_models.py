@@ -122,7 +122,7 @@ def read_skn(data):
     for _ in range(r.u("I")):
         name = r.d[r.p:r.p + 64].split(b"\0")[0].decode(); r.p += 64
         vs, vc, is_, ic = r.u("IIII")
-        subs.append(dict(name=name, istart=is_, icount=ic))
+        subs.append(dict(name=name, vstart=vs, vcount=vc, istart=is_, icount=ic))
     if major == 4:
         r.u("I")
     icount, vcount = r.u("II")
@@ -397,6 +397,24 @@ def fnv1a(name):
     return h
 
 
+def png_path(tex):
+    return "game/" + tex.lower().replace(".tex", ".png").replace(".dds", ".png")
+
+
+def material_texture(skin, name):
+    """재질(StaticMaterialDef) 이름 → 기본 색 텍스처 경로(Diffuse_Texture). 없으면 None"""
+    if not name:
+        return None
+    mat = skin.get(name) or next((v for v in skin.values() if isinstance(v, dict) and v.get("name") == name), None)
+    if not isinstance(mat, dict):
+        return None
+    samplers = mat.get("samplerValues") or []
+    for s in samplers:
+        if str(s.get("samplerName") or s.get("textureName")).lower() in ("diffuse_texture", "diffuse", "main_texture"):
+            return s.get("texturePath") or s.get("textureName")
+    return next((s.get("texturePath") for s in samplers if "_tx_cm" in str(s.get("texturePath")).lower()), None)
+
+
 def clip_path(clips, name, depth=0):
     """클립 이름(또는 "{해시}") 을 따라가 실제 .anm 경로를 찾는다. 이어 붙이기(Sequencer) 는 마지막의 반복 부분,
     겹치기(Parallel) 는 더하기가 아닌 첫 것, 고르기(Selector) 는 첫 후보를 쓴다."""
@@ -485,7 +503,7 @@ def build(key, wad_dir, spells):
 
     tex_path = mesh.get("texture")
     if tex_path:
-        tex_path = "game/" + tex_path.lower().replace(".tex", ".png").replace(".dds", ".png")
+        tex_path = png_path(tex_path)
     else:
         # 재질(material) 에만 텍스처가 있는 챔피언(이블린 등): 스킨 폴더에서 기본 색 텍스처(*_tx_cm.png) 를 찾는다
         folder = "game/" + os.path.dirname(mesh["simpleSkin"].lower()) + "/"
@@ -496,9 +514,48 @@ def build(key, wad_dir, spells):
             raise FileNotFoundError("텍스처 없음")
         names.sort(key=lambda n: (0 if n.lower().endswith("_tx_cm.png") else 1, len(n)))
         tex_path = folder + names[0]
-    tex = Image.open(io.BytesIO(get_bytes(tex_path)))
-    tex = tex.convert("RGBA").resize((TEX_SIZE, TEX_SIZE), Image.LANCZOS)
-    tex.save(os.path.join(OUT, key + ".webp"), "WEBP", quality=82)
+
+    # 부품(submesh) 마다 텍스처가 다를 수 있다(모르가나 날개, 무기 등). 화면은 텍스처 하나만 쓰므로
+    # 부품 텍스처들을 한 장(아틀라스) 에 칸으로 붙이고, 그 부품 정점의 UV 를 자기 칸으로 옮긴다
+    uv = skn["uv"].copy()
+    sub_tex = {}
+    for o in mesh.get("materialOverride") or []:
+        p = o.get("texture") or material_texture(skin, o.get("material") or o.get("Material"))
+        if o.get("submesh") and p:
+            sub_tex[o["submesh"].lower()] = png_path(p)
+    tiles, data = [tex_path], {tex_path: get_bytes(tex_path)}
+    for s in skn["subs"]:
+        if s["name"].lower() in hidden:
+            continue
+        p = sub_tex.get(s["name"].lower(), tex_path)
+        if p not in tiles:
+            try:
+                data[p] = get_bytes(p)      # 못 받는 텍스처(이펙트용 등) 는 몸 텍스처로 둔다
+            except (urllib.error.HTTPError, OSError):
+                continue
+            tiles.append(p)
+        s["tile"] = tiles.index(p)
+    cols = 1 if len(tiles) == 1 else 2 if len(tiles) <= 4 else 4
+    rows = 1 if len(tiles) == 1 else 1 if len(tiles) == 2 else 2 if len(tiles) <= 8 else 4
+    if len(tiles) > cols * rows:
+        tiles, cols, rows = tiles[:16], 4, 4
+    tile = TEX_SIZE if cols <= 2 else TEX_SIZE // 2
+    atlas = Image.new("RGBA", (tile * cols, tile * rows))
+    for i, p in enumerate(tiles):
+        img = Image.open(io.BytesIO(data[p])).convert("RGBA").resize((tile, tile), Image.LANCZOS)
+        atlas.paste(img, ((i % cols) * tile, (i // cols) * tile))
+    if len(tiles) > 1:
+        # 칸 가장자리에서 옆 칸 색이 번지지 않게 반 텍셀 안쪽으로
+        pad = 0.5 / tile
+        for s in skn["subs"]:
+            i = s.get("tile", 0)
+            if i >= len(tiles):
+                i = 0
+            v = slice(s["vstart"], s["vstart"] + s["vcount"])
+            u0 = np.clip(skn["uv"][v], 0, 1) * (1 - 2 * pad) + pad
+            uv[v, 0] = (i % cols + u0[:, 0]) / cols
+            uv[v, 1] = (i // cols + u0[:, 1]) / rows
+    atlas.save(os.path.join(OUT, key + ".webp"), "WEBP", quality=82)
 
     V, B = len(skn["pos"]), len(skl["influences"])
     # 체력바를 띄울 높이: 머리 관절(바인드 자세) 이 있으면 그 높이 + 여유, 없으면 정점 높이의 95%(정점 85% 보다는 높게).
@@ -513,7 +570,7 @@ def build(key, wad_dir, spells):
     buf.write(b"LMDL" + struct.pack("<I", 1))
     buf.write(struct.pack("<IIIIff", V, len(idx), B, len(anims), height, scale))
     buf.write(skn["pos"].astype("<f4").tobytes())
-    buf.write(np.clip(np.round(skn["uv"] * 65535), 0, 65535).astype("<u2").tobytes())
+    buf.write(np.clip(np.round(uv * 65535), 0, 65535).astype("<u2").tobytes())
     buf.write(skn["bones"].astype(np.uint8).tobytes())
     buf.write(w8.tobytes())
     buf.write(idx.astype("<u2").tobytes())
