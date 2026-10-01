@@ -34,6 +34,7 @@ import io
 import json
 import math
 import os
+import re
 import struct
 import sys
 import time
@@ -413,6 +414,20 @@ def clip_path(clips, name, depth=0):
     names = v.get("mClipNameList") or [x.get("mClipName") for x in v.get("mSelectorPairDataList") or []]
     if kind == "SequencerClipData":
         names = list(reversed(names))
+    elif kind == "ConditionBoolClipData":
+        # 대개 "귀환 중이면" 같은 조건이라 거짓 쪽(보통 동작) 을 먼저
+        names = [v.get("mFalseConditionClipName"), v.get("mTrueConditionClipName")]
+    elif kind == "ConditionFloatClipData":
+        # 이동 속도 구간마다 다른 동작(느린·빠른 달리기). 연습장 이동 속도(335) 에 맞는 구간을 먼저
+        pairs = sorted(v.get("mConditionFloatPairDataList") or [], key=lambda x: x.get("mValue", 0))
+        fit = [x for x in pairs if x.get("mValue", 0) <= 335]
+        order = (fit[-1:] + pairs) if fit else pairs
+        names = [x.get("mClipName") for x in order]
+    elif kind == "ParametricClipData":
+        # 이동 방향에 따라 앞·뒤·옆 동작을 섞는다(우르곳). 앞으로 가는 것(Fwd, 또는 값이 0 에 가장 가까운 것) 을 먼저
+        pairs = v.get("mParametricPairDataList") or []
+        pairs = sorted(pairs, key=lambda x: (0 if "fwd" in str(x.get("mClipName")).lower() else 1, abs(x.get("mValue", 0))))
+        names = [x.get("mClipName") for x in pairs]
     for n in names:
         if "additive" in str(n).lower():
             continue
@@ -468,7 +483,20 @@ def build(key, wad_dir, spells):
             a, dur = read_anm(w.read(path))
             anims[name] = bake(skl, a, max(dur, 1 / FPS))
 
-    tex = Image.open(io.BytesIO(get_bytes("game/" + mesh["texture"].lower().replace(".tex", ".png").replace(".dds", ".png"))))
+    tex_path = mesh.get("texture")
+    if tex_path:
+        tex_path = "game/" + tex_path.lower().replace(".tex", ".png").replace(".dds", ".png")
+    else:
+        # 재질(material) 에만 텍스처가 있는 챔피언(이블린 등): 스킨 폴더에서 기본 색 텍스처(*_tx_cm.png) 를 찾는다
+        folder = "game/" + os.path.dirname(mesh["simpleSkin"].lower()) + "/"
+        pngs = re.findall(r'href="([^"/]+\.png)"', get_bytes(folder).decode("utf-8", "replace"))
+        skip = ("loadscreen", "shade", "mask", "scroll", "_ult", "glow", "_fx", "particle")
+        names = [n for n in pngs if not any(k in n.lower() for k in skip) and ("tx" in n.lower() or "_cm" in n.lower())]
+        if not names:
+            raise FileNotFoundError("텍스처 없음")
+        names.sort(key=lambda n: (0 if n.lower().endswith("_tx_cm.png") else 1, len(n)))
+        tex_path = folder + names[0]
+    tex = Image.open(io.BytesIO(get_bytes(tex_path)))
     tex = tex.convert("RGBA").resize((TEX_SIZE, TEX_SIZE), Image.LANCZOS)
     tex.save(os.path.join(OUT, key + ".webp"), "WEBP", quality=82)
 
@@ -511,8 +539,9 @@ def main():
     wad_dir = os.path.join(a.game, "Game", "DATA", "FINAL", "Champions")
     os.makedirs(OUT, exist_ok=True)
     if a.all:
+        # 이벤트용 항목(jade_ahri 처럼 밑줄이 든 것) 은 챔피언이 아니라서 뺀다
         keys = sorted(str(c["alias"]).lower() for c in get_json(
-            "plugins/rcp-be-lol-game-data/global/default/v1/champion-summary.json") if c["id"] > 0)
+            "plugins/rcp-be-lol-game-data/global/default/v1/champion-summary.json") if 0 < c["id"] < 10000 and "_" not in str(c["alias"]))
     else:
         keys = [k.lower() for k in a.champions] or sorted(CASTERS)
     index_path = os.path.join(OUT, "index.json")
