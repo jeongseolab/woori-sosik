@@ -408,6 +408,20 @@
       gl_FragColor = vec4(c * uAlpha, uAlpha);
     }`;
 
+  // 받은 모델 파일(.bin + 텍스처) 은 페이지에 남겨 둔다. 연습장을 나갔다(티어표·그룹방) 다시 와도 새로 받지 않는다.
+  // WebGL 버퍼는 연습장마다 새로 만들지만 그건 금방이다
+  const RAW = new Map();
+  function rawModel(key, base) {
+    if (RAW.has(key)) return RAW.get(key);
+    const p = Promise.all([
+      fetch(base + key + ".bin").then(r => { if (!r.ok) throw new Error(r.status); return r.arrayBuffer(); }),
+      new Promise((ok, no) => { const img = new Image(); img.onload = () => ok(img); img.onerror = no; img.src = base + key + ".webp"; }),
+    ]);
+    p.catch(() => RAW.delete(key));
+    RAW.set(key, p);
+    return p;
+  }
+
   function create(top) {
     const cv = document.createElement("canvas");
     cv.className = "lol-gl";
@@ -583,10 +597,7 @@
     const models = new Map(), asked = new Map();
     function loadModel(key, base) {
       if (asked.has(key)) return asked.get(key);
-      const p = Promise.all([
-        fetch(base + key + ".bin").then(r => { if (!r.ok) throw new Error(r.status); return r.arrayBuffer(); }),
-        new Promise((ok, no) => { const img = new Image(); img.onload = () => ok(img); img.onerror = no; img.src = base + key + ".webp"; }),
-      ]).then(([buf, img]) => {
+      const p = rawModel(key, base).then(([buf, img]) => {
         if (lost) return null;
         const m = parseModel(buf);
         const mk = (kind, data) => { const b = gl.createBuffer(); gl.bindBuffer(kind, b); gl.bufferData(kind, data, gl.STATIC_DRAW); return b; };
