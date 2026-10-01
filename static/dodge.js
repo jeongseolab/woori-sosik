@@ -292,11 +292,12 @@
   }
   // 3D 챔피언 모델(tools/champ_models.py 가 롤 게임 파일에서 만든 것). 목록에 있는 챔피언만 3D 로, 나머지는 초상화로 그린다
   const MODELS = "dodge/models/";
-  let modelIndex = null, modelAsked = false;
+  let modelIndex = null, modelAsked = null;
   function loadModelIndex() {
-    if (modelAsked) return;
-    modelAsked = true;
-    fetch(MODELS + "index.json").then(r => (r.ok ? r.json() : {})).then(d => { modelIndex = d || {}; }, () => { modelIndex = {}; });
+    if (!modelAsked) {
+      modelAsked = fetch(MODELS + "index.json").then(r => (r.ok ? r.json() : {})).then(d => { modelIndex = d || {}; }, () => { modelIndex = {}; });
+    }
+    return modelAsked;
   }
   const modelKey = champ => String(champ || "").toLowerCase();
   // HUD(DOM) 초상화는 캔버스가 아니라서 OP.GG 그림을 그대로 쓴다
@@ -590,7 +591,9 @@
     const hud = name => root.querySelector(`[data-hud="${name}"]`);
     preload();
     loadArt();
-    loadModelIndex();
+    // 3D 모델을 판 시작 전에 미리 받아 둔다. 처음 나올 때 받기 시작하면 일찍 나오는 챔피언(모르가나·초가스 등) 은
+    // 다 받기 전까지 초상화로 보인다
+    loadModelIndex().then(() => { model(faceKey); SKILLS.forEach(s => model(s.champ)); });
     // 연습장에 들어온 것 자체가 클릭이라 소리를 미리 받아 풀어 둔다(첫 판 "환영합니다" 부터 나오게)
     if (soundOn()) loadSamples();
 
