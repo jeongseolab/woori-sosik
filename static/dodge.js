@@ -41,7 +41,7 @@
 
 (function () {
   // 게임 규칙이 바뀌면 올린다. 서버는 같은 버전의 기록끼리만 순위를 매긴다
-  const VERSION = 6;
+  const VERSION = 7;
 
   const ARENA = { w: 1400, h: 900 };
   const CHAMP = { radius: 65, speed: 335 };
@@ -62,6 +62,68 @@
   ];
   const spellById = id => SPELLS.find(sp => sp.id === id);
 
+  // 내 챔피언의 이동기(tools/champ_models.py 의 MOBILITY 와 같은 40명). 그 칸만 켜지고 나머지 칸은 어둡다.
+  //   slot: 0~3(Q W E R). kind: blink(순간이동) | dash(돌진)
+  //   range: 최대 거리. min: 커서가 더 가까워도 이만큼은 간다. fixed: 늘 range 만큼. back: 커서 반대쪽으로(뒤로 뛰기)
+  //   speed: 돌진 속도(유닛/초) 또는 dur: 걸리는 시간(초). untarget: 이 초 동안 스킬이 통과(피즈 E)
+  //   ret: 이 초 뒤 제자리로 돌아온다(조이 R). charges·gap·window: window 초 안에 gap 초 간격으로 charges 번(아리 R)
+  //   cd: 롤 최대 레벨 쿨타임(기본 스킬 5레벨, 궁극기 3레벨). 게임에서는 skillCd() 로 4~20초 안으로 맞춘다
+  //   src: 거리·속도의 출처. data = 롤 클라이언트 데이터(CommunityDragon, 2026-10-02 받음.
+  //   DashSpeed·DashDistance·castRangeDisplayOverride 등), 추정 = 데이터에 없어(챔피언 스크립트 안의 값) 롤 지식으로 적은 값.
+  //   "DashBonusSpeed"·"DashSpeedRatio" 는 이동 속도에 더하는 값이라 CHAMP.speed 를 더했다
+  const MOBILITY = {
+    ezreal: { slot: 2, kind: "blink", range: 475, cd: 14, src: "data" },
+    lucian: { slot: 2, kind: "dash", range: 425, min: 200, speed: 1350, cd: 14, src: "data" },
+    graves: { slot: 2, kind: "dash", range: 375, min: 275, speed: 750, cd: 12, src: "data" },
+    vayne: { slot: 0, kind: "dash", range: 300, fixed: true, speed: 900, cd: 2, src: "range: data, speed: 추정" },
+    corki: { slot: 1, kind: "dash", range: 600, min: 300, speed: 650 + CHAMP.speed, cd: 12, src: "data" },
+    tristana: { slot: 1, kind: "dash", range: 900, speed: 1100, cd: 14, src: "range: data, speed: 추정" },
+    gragas: { slot: 2, kind: "dash", range: 600, fixed: true, speed: 900, cd: 12, src: "data" },
+    gnar: { slot: 2, kind: "dash", range: 475, dur: 0.6, cd: 12, src: "data(TravelTime)" },
+    kindred: { slot: 0, kind: "dash", range: 340, fixed: true, speed: 500, cd: 9, src: "data" },
+    caitlyn: { slot: 2, kind: "dash", range: 390, fixed: true, back: true, speed: 1000, cd: 8, src: "추정" },
+    ahri: { slot: 3, kind: "dash", range: 500, speed: 1200, charges: 3, gap: 1, window: 10, cd: 100, src: "data" },
+    fizz: { slot: 2, kind: "dash", range: 400, dur: 0.75, untarget: 0.75, cd: 8, src: "range: data, dur·untarget: 추정" },
+    riven: { slot: 2, kind: "dash", range: 250, fixed: true, speed: 1450, cd: 6, src: "data(missileSpeed)" },
+    sejuani: { slot: 0, kind: "dash", range: 625, fixed: true, speed: 1000, cd: 12, src: "data" },
+    malphite: { slot: 3, kind: "dash", range: 1000, speed: 1835, cd: 100, src: "range: data, speed: 추정" },
+    sylas: { slot: 2, kind: "dash", range: 400, speed: 1450, cd: 9, src: "추정" },
+    zeri: { slot: 2, kind: "dash", range: 300, fixed: true, speed: 900, cd: 18, src: "range: data, speed: 추정" },
+    tryndamere: { slot: 2, kind: "dash", range: 650, speed: 1300, cd: 8, src: "range: data, speed: 추정" },
+    renekton: { slot: 2, kind: "dash", range: 450, fixed: true, speed: 750, cd: 10, src: "data" },
+    ornn: { slot: 2, kind: "dash", range: 650, fixed: true, speed: 1600, cd: 12, src: "data" },
+    rakan: { slot: 1, kind: "dash", range: 650, speed: 1700, cd: 10, src: "data" },
+    aatrox: { slot: 2, kind: "dash", range: 300, min: 75, speed: 800, cd: 5, src: "data" },
+    kled: { slot: 2, kind: "dash", range: 550, fixed: true, speed: 600, cd: 9, src: "data" },
+    kayn: { slot: 0, kind: "dash", range: 350, fixed: true, speed: 1000, cd: 5, src: "range: data, speed: 추정" },
+    khazix: { slot: 2, kind: "dash", range: 700, speed: 1000, cd: 12, src: "range: data, speed: 추정" },
+    naafiri: { slot: 2, kind: "dash", range: 450, min: 250, speed: 900, cd: 7, src: "data" },
+    aurora: { slot: 1, kind: "dash", range: 300, fixed: true, speed: 350 + CHAMP.speed, cd: 18, src: "data" },
+    belveth: { slot: 0, kind: "dash", range: 400, fixed: true, speed: 850, cd: 1, src: "data" },
+    gwen: { slot: 2, kind: "dash", range: 350, fixed: true, speed: 800, cd: 11, src: "data" },
+    fiora: { slot: 0, kind: "dash", range: 400, speed: 1000, cd: 6, src: "추정" },
+    pyke: { slot: 2, kind: "dash", range: 550, fixed: true, speed: 1000, cd: 11, src: "range: data, speed: 추정" },
+    shen: { slot: 2, kind: "dash", range: 600, min: 300, speed: 800 + CHAMP.speed, cd: 10, src: "data" },
+    urgot: { slot: 2, kind: "dash", range: 450, fixed: true, speed: 1200, cd: 14, src: "data" },
+    galio: { slot: 2, kind: "dash", range: 650, min: 250, speed: 1400, cd: 7, src: "range: data, speed: 추정" },
+    zoe: { slot: 3, kind: "blink", range: 575, ret: 1, cd: 5, src: "range: data, ret: 추정" },
+    kassadin: { slot: 3, kind: "blink", range: 500, cd: 2, src: "data" },
+    shaco: { slot: 0, kind: "blink", range: 400, cd: 11, src: "data" },
+    leblanc: { slot: 1, kind: "dash", range: 600, speed: 1450, cd: 10, src: "range: data, speed: 추정" },
+    ekko: { slot: 2, kind: "dash", range: 350, fixed: true, speed: 1150, cd: 7, src: "range: data, speed: 추정" },
+    akali: { slot: 2, kind: "dash", range: 400, fixed: true, back: true, speed: 1000, cd: 10, src: "range: data, speed: 추정" },
+  };
+  // 롤 쿨타임 그대로면 궁극기(100초) 는 한 판에 한 번, 벨베스 Q(1초) 는 쉬지 않고 쓴다. 소환사 주문(15·20초) 쪽으로 맞춘다
+  const skillCd = sk => Math.min(20, Math.max(4, sk.cd));
+  // 시작 창·칸 설명에 쓰는 한 줄
+  function skillText(sk) {
+    const how = sk.kind === "blink" ? `커서 쪽으로 최대 ${sk.range} 순간이동`
+      : sk.back ? `커서 반대쪽으로 ${sk.range} 뛰어 물러남`
+      : `커서 쪽으로 ${sk.fixed ? "" : "최대 "}${sk.range} 돌진`;
+    return how + (sk.ret ? `, ${sk.ret}초 뒤 제자리로` : "") + (sk.untarget ? ", 그동안 스킬이 통과" : "")
+      + (sk.charges ? `, ${sk.window}초 안에 ${sk.charges}번` : "");
+  }
+
   // 조작 설정: 이동 방식(mouse | wasd), 모드(normal | hard), 모드마다 주문 두 칸(slots: [앞 키 칸, 뒤 키 칸]).
   // 롤처럼 칸을 눌러 주문을 바꾼다(spellPopup). 브라우저에 기억한다
   const CONTROL_KEY = "tiergg-dodge-controls";
@@ -79,6 +141,10 @@
   function spellsOf(c) { return c.slots[c.mode]; }
   // 이동 방식에 따른 주문 두 키
   function keyPair(move) { return move === "wasd" ? ["V", "F"] : ["D", "F"]; }
+  // 스킬 Q W E R 칸의 입력 코드와 화면에 보일 글자. WASD 는 W 가 이동이라 Q·W 를 우클릭·왼쪽 Shift 로 옮긴다.
+  // "Mouse2" 는 우클릭을 뜻하는 이 게임만의 코드(키보드 e.code 에는 없다)
+  function skillKeys(move) { return move === "wasd" ? ["Mouse2", "ShiftLeft", "KeyE", "KeyR"] : ["KeyQ", "KeyW", "KeyE", "KeyR"]; }
+  function skillLabels(move) { return move === "wasd" ? ["Mb2", "Shift", "E", "R"] : ["Q", "W", "E", "R"]; }
   function spellKeys(c) {
     const [a, b] = keyPair(c.move), [s1, s2] = spellsOf(c);
     return { [s1]: a, [s2]: b };
@@ -266,16 +332,39 @@
   // 캔버스에 그리는 초상화는 CommunityDragon 의 챔피언 아이콘(CORS 허용)을 crossOrigin 으로 받는다.
   // CORS 없는 그림(OP.GG) 을 캔버스에 그리면 캔버스가 "오염" 돼서 효과층(WebGL) 이 그 캔버스를 못 올린다.
   // 아이콘은 숫자 ID 로만 있어서 이름 → ID 표(champion-summary.json) 를 한 번 받는다. 받기 전에는 원으로 그린다
-  const CDRAGON = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/";
+  const CD_ROOT = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/";
+  const CDRAGON = CD_ROOT + "v1/";
   const CHAMP_IDS = {};
-  let idsAsked = false;
+  let idsAsked = null;
+  // 받은 뒤(또는 못 받은 뒤) 풀리는 약속을 돌려준다. 못 받으면 다음에 다시 받는다
   function loadChampIds() {
-    if (idsAsked) return;
-    idsAsked = true;
-    fetch(CDRAGON + "champion-summary.json")
-      .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
-      .then(list => { list.forEach(c => { if (c.id > 0) CHAMP_IDS[String(c.alias).toLowerCase()] = c.id; }); preload(); })
-      .catch(() => { idsAsked = false; });
+    if (!idsAsked) {
+      idsAsked = fetch(CDRAGON + "champion-summary.json")
+        .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+        .then(list => { list.forEach(c => { if (c.id > 0) CHAMP_IDS[String(c.alias).toLowerCase()] = c.id; }); preload(); })
+        .catch(() => { idsAsked = null; });
+    }
+    return idsAsked;
+  }
+  // HUD 스킬 칸(Q W E R) 아이콘과 한국어 이름. 챔피언 JSON(ko_kr) 의 abilityIconPath("/lol-game-data/assets/ASSETS/...")를
+  // CD_ROOT + "assets/..."(소문자) 로 바꾼다. 챔피언마다 한 번만 받고, 못 받으면 null(칸에 글자만)
+  const SKILL_ICONS = new Map();
+  function skillIcons(key) {
+    return loadChampIds().then(() => {
+      const id = CHAMP_IDS[String(key).toLowerCase()];
+      if (!id) return null;
+      if (!SKILL_ICONS.has(id)) {
+        SKILL_ICONS.set(id, fetch(CD_ROOT.replace("/default/", "/ko_kr/") + "v1/champions/" + id + ".json")
+          .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+          .then(d => ["q", "w", "e", "r"].map(k => {
+            const s = (d.spells || []).find(x => x.spellKey === k) || {};
+            return { icon: s.abilityIconPath ? CD_ROOT + s.abilityIconPath.replace(/^\/lol-game-data\/assets\//i, "").toLowerCase() : "",
+                     name: s.name || "" };
+          }))
+          .catch(() => { SKILL_ICONS.delete(id); return null; }));
+      }
+      return SKILL_ICONS.get(id);
+    });
   }
   const IMG = {};
   const NO_IMG = new Image();      // 아직 ID 를 모를 때(그리는 쪽이 원으로 대신한다)
@@ -556,11 +645,19 @@
           <div class="lol-hud">
             <div class="lol-face"><img data-hud="face" alt=""><span data-hud="level">1</span></div>
             <div class="lol-main">
+              <div class="lol-slots">
+              <div class="lol-skills">
+                ${[0, 1, 2, 3].map(i => `
+                  <button type="button" class="lol-skill off" data-skill="${i}" data-letter="${"QWER"[i]}">
+                    <img alt=""><i></i><b></b><kbd></kbd>
+                  </button>`).join("")}
+              </div>
               <div class="lol-spells">
                 ${[0, 1].map(i => `
                   <button type="button" class="lol-spell" data-slot="${i}">
                     <img alt=""><i></i><b></b><kbd></kbd>
                   </button>`).join("")}
+              </div>
               </div>
               <div class="lol-hp"><i data-hud="hpfill"></i><span data-hud="hptext"></span></div>
             </div>
@@ -592,6 +689,7 @@
     let faceKey = opts.champ || "Ezreal";      // 내 챔피언(그릴 때마다 champImage 로 찾는다. ID 표가 늦게 와도 바로 바뀐다)
     const over = root.querySelector("[data-over]");
     const hud = name => root.querySelector(`[data-hud="${name}"]`);
+    const skillBtns = [...root.querySelectorAll("[data-skill]")];
     preload();
     loadArt();
     // 3D 모델을 판 시작 전에 미리 받아 둔다. 처음 나올 때 받기 시작하면 일찍 나오는 챔피언(모르가나·초가스 등) 은
@@ -622,6 +720,7 @@
     let cds, ghostLeft, cursor, facing, prevFacing, facingAt, viewAngle, level, pops, lastSpree, lastMark;
     let mode, spells;                    // 이번 판의 모드(normal | hard) 와 주문 두 개
     let effects, tenacity, ablaze, marked, tethers;   // 하드 모드 CC(applyCC)
+    let skillLeft, skillMax, charges, dash, untarget, ret, skillAt;   // 내 챔피언 이동기(useSkill)
     let bannerTimer = 0, overTimer = 0;
     let controls = loadControls();
     const keyOf = id => spellKeys(controls)[id];
@@ -658,7 +757,14 @@
       marked = -1;             // 진 W 표식이 끝나는 시각(맞은 뒤 4초. 그 안에 진 W 를 맞으면 속박)
       tethers = [];            // 블리츠·쓰레쉬 사슬 {c, skill, until}
       ghostLeft = 0;           // 유체화 남은 시간
-      cursor = null;           // 마우스가 가리키는 바닥(점멸 방향)
+      skillLeft = 0;           // 이동기 남은 쿨타임과 그 쿨타임의 처음 길이(칸의 부채꼴)
+      skillMax = 1;
+      charges = null;          // 여러 번 쓰는 이동기(아리 R) {left, until}
+      dash = null;             // 돌진 중 {fx, fy, tx, ty, t0, dur}
+      untarget = -1;           // 이 시각까지 스킬이 통과(피즈 E)
+      ret = null;              // 돌아올 자리와 시각(조이 R) {x, y, at}
+      skillAt = -9;            // 이동기를 쓴 시각(3D 동작)
+      cursor = null;          // 마우스가 가리키는 바닥(점멸 방향)
       facing = { x: 0, y: -1 };    // 마지막으로 움직인 방향(커서가 없을 때 점멸 방향)
       prevFacing = null;       // 바로 전 방향과 바뀐 시각(STOP_GRACE)
       facingAt = 0;
@@ -938,15 +1044,10 @@
       if (id === "flash" && held()) { sfx("deny"); return; }
       cds[id] = sp.cd;
       if (id === "flash") {
-        // 커서 쪽으로 최대 400. 커서를 모르면(휴대폰·WASD) 가던 방향으로
-        let dx = facing.x, dy = facing.y, len = sp.range;
-        if (cursor) {
-          const d = Math.hypot(cursor.x - player.x, cursor.y - player.y);
-          if (d > 1) { dx = (cursor.x - player.x) / d; dy = (cursor.y - player.y) / d; len = Math.min(sp.range, d); }
-        }
+        // 커서 쪽으로 최대 400
+        const { dx, dy, len } = aim(sp.range);
         const from = { x: player.x, y: player.y };
-        player.x = Math.min(ARENA.w - CHAMP.radius, Math.max(CHAMP.radius, player.x + dx * len));
-        player.y = Math.min(ARENA.h - CHAMP.radius, Math.max(CHAMP.radius, player.y + dy * len));
+        Object.assign(player, inArena(player.x + dx * len, player.y + dy * len));
         target = null;
         flashFx(from, player);
         fx.push({ kind: "ring", x: player.x, y: player.y, r: CHAMP.radius + 20, color: "#ffe066", life: 0.35, max: 0.35 });
@@ -963,6 +1064,53 @@
       }
     }
 
+    // 커서 쪽 방향과 거리(최대 range, 최소 min. fixed 면 늘 range). 커서를 모르면(휴대폰·WASD) 가던 방향으로 range
+    function aim(range, min = 0, fixed = false) {
+      let dx = facing.x, dy = facing.y, len = range;
+      if (cursor) {
+        const d = Math.hypot(cursor.x - player.x, cursor.y - player.y);
+        if (d > 1) { dx = (cursor.x - player.x) / d; dy = (cursor.y - player.y) / d; if (!fixed) len = Math.max(min, Math.min(range, d)); }
+      }
+      return { dx, dy, len };
+    }
+    const inArena = (x, y) => ({ x: Math.min(ARENA.w - CHAMP.radius, Math.max(CHAMP.radius, x)),
+                                 y: Math.min(ARENA.h - CHAMP.radius, Math.max(CHAMP.radius, y)) });
+    // 내 챔피언의 이동기(없으면 null)
+    const mySkill = () => MOBILITY[modelKey(faceKey)] || null;
+
+    // 이동기. 점멸처럼 이동 불가 효과 중에는 못 쓰고, 돌진 중에도 못 쓴다
+    function useSkill(i) {
+      const sk = mySkill();
+      if (state !== "play" || !sk || sk.slot !== i) return;
+      if (skillLeft > 0 || held() || dash) { sfx("deny"); return; }
+      // 쿨타임: 여러 번 쓰는 것은 마지막 번(또는 window 가 끝날 때, step) 에 돌기 시작한다
+      if (sk.charges) {
+        if (!charges) charges = { left: sk.charges, until: t + sk.window };
+        charges.left -= 1;
+        skillMax = skillLeft = charges.left > 0 ? sk.gap : skillCd(sk);
+        if (charges.left <= 0) charges = null;
+      } else {
+        skillMax = skillLeft = skillCd(sk);
+      }
+      let { dx, dy, len } = aim(sk.range, sk.min, sk.fixed || sk.back);
+      if (sk.back) { dx = -dx; dy = -dy; }
+      const from = { x: player.x, y: player.y }, to = inArena(player.x + dx * len, player.y + dy * len);
+      target = null;
+      skillAt = t;
+      if (sk.untarget) untarget = t + sk.untarget;
+      if (sk.kind === "blink") {
+        Object.assign(player, to);
+        if (sk.ret) ret = { x: from.x, y: from.y, at: t + sk.ret };
+        flashFx(from, player);
+        sfx("flash");
+      } else {
+        const d = Math.hypot(to.x - from.x, to.y - from.y);
+        dash = { fx: from.x, fy: from.y, tx: to.x, ty: to.y, t0: t, dur: Math.max(0.05, sk.dur || d / sk.speed) };
+        facing = sk.back ? { x: -dx, y: -dy } : { x: dx, y: dy };     // 뒤로 뛸 때는 커서 쪽을 본 채로
+        sfx("ghost");
+      }
+    }
+
     // 화면 가운데 안내 문구(롤의 알림처럼 잠깐 떴다 사라진다)
     function announce(text, kind = "gold", ms = 1800, voice = "") {
       banner.innerHTML = "<b>" + esc(text) + "</b>";
@@ -975,7 +1123,7 @@
     // 맞았다. 무적 중이면 없던 일로(false). 목숨을 다 잃으면 끝.
     // 하드 모드는 무적이 없고, 맞은 스킬의 CC 를 그대로 당한다(how: applyCC 참고)
     function hit(s, how = {}) {
-      if (dead || (mode !== "hard" && safe > 0)) return false;
+      if (dead || untarget > t || (mode !== "hard" && safe > 0)) return false;
       lives -= 1;
       hits.push(s.name);
       lastHit = s;
@@ -1054,6 +1202,18 @@
       // 소환사 주문 쿨타임, 유체화
       for (const sp of SPELLS) cds[sp.id] = Math.max(0, cds[sp.id] - dt);
       ghostLeft = Math.max(0, ghostLeft - dt);
+      // 이동기 쿨타임. 여러 번 쓰는 것을 다 안 쓰고 window 가 지나면 그때부터 쿨타임
+      skillLeft = Math.max(0, skillLeft - dt);
+      if (charges && t >= charges.until) { charges = null; skillMax = skillLeft = skillCd(mySkill()); }
+      // 조이 R: 정해진 시간 뒤 제자리로(CC 중이어도)
+      if (ret && t >= ret.at) {
+        const from = { x: player.x, y: player.y };
+        player.x = ret.x; player.y = ret.y;
+        ret = null;
+        dash = null;
+        target = null;
+        flashFx(from, player);
+      }
       const base = CHAMP.speed * (ghostLeft > 0 ? 1 + spellById("ghost").bonus : 1);
       // 둔화: 가장 센 것 하나만. 줄어드는 둔화(to) 는 시간에 따라 pct → to. 이동 속도는 110 아래로 안 내려간다
       let slow = 0;
@@ -1076,7 +1236,14 @@
         player.vx = dx / d * v; player.vy = dy / d * v;
         return false;
       };
-      if (air && air.pull) {
+      if (dash) {
+        // 이동기 돌진: 정해진 시간 동안 곧게 간다. 그사이 걸린 CC 는 돌진이 끝난 뒤에 느낀다
+        const k = Math.min(1, (t - dash.t0) / dash.dur);
+        player.vx = player.vy = 0;
+        player.x = dash.fx + (dash.tx - dash.fx) * k;
+        player.y = dash.fy + (dash.ty - dash.fy) * k;
+        if (k >= 1) dash = null;
+      } else if (air && air.pull) {
         // 블리츠 Q: 블리츠 앞까지 끌려간다. 닿으면 공중에 뜸이 끝난다
         if (toward(air.pull, air.speed)) air.end = t;
       } else if (stun || root || air) {
@@ -1513,9 +1680,12 @@
       if (!player) return out;
       if (model(faceKey)) {
         const moving = (player.vx || player.vy) && !(mode === "hard" && held());
+        // 이동기를 쓰면 그 스킬 동작(spell1~4) 을 한 번. 돌진이 길면 돌진이 끝날 때까지
+        const sk = mySkill(), since = t - skillAt;
+        const casting = sk && (dash || since < 0.5);
         out.push({ key: modelKey(faceKey), x: player.x, y: player.y, z: lift(), angle: viewAngle,
-                   anim: moving ? "run" : "idle", time: animClock, loop: true,
-                   alpha: safe > 0 && Math.floor(safe * 10) % 2 ? 0.45 : 1,
+                   anim: casting ? "spell" + (sk.slot + 1) : moving ? "run" : "idle", time: casting ? since : animClock, loop: !casting,
+                   alpha: untarget > t ? 0.4 : safe > 0 && Math.floor(safe * 10) % 2 ? 0.45 : 1,
                    tint: hurt > 0 ? [1, 1, 1, hurt / 0.4 * 0.55] : ghostLeft > 0 ? [0.4, 0.85, 0.95, 0.22] : null });
       }
       for (const c of casters) {
@@ -2818,15 +2988,25 @@
       root.querySelectorAll("[data-slot]").forEach(b => {
         const sp = spellById(b.dataset.spell);
         if (!sp) return;
-        const left = cds[sp.id];
-        // 쿨타임은 시계 방향으로 걷히는 그림자와 남은 초
-        b.querySelector("i").style.background = left > 0
-          ? "conic-gradient(rgba(1, 10, 19, .78) " + (left / sp.cd * 360) + "deg, transparent 0)" : "none";
-        b.querySelector("b").textContent = left > 0 ? Math.ceil(left) : "";
+        paintCd(b, cds[sp.id], sp.cd);
         b.classList.toggle("active", (sp.id === "ghost" && ghostLeft > 0) || (sp.id === "cleanse" && tenacity > t));
         // CC 때문에 못 쓰는 주문(이동 불가 중의 점멸) 은 어둡게
         b.classList.toggle("locked", sp.id === "flash" && !!blocked);
       });
+      const sk = mySkill();
+      if (sk) {
+        const b = skillBtns[sk.slot];
+        paintCd(b, skillLeft, skillMax);
+        // 쓰는 중(돌진·스킬 통과·돌아오기 전·남은 횟수가 있음) 은 빛나고, CC 중에는 잠긴다
+        b.classList.toggle("active", !!(dash || untarget > t || ret || charges));
+        b.classList.toggle("locked", !!blocked);
+      }
+    }
+    // 쿨타임은 시계 방향으로 걷히는 그림자와 남은 초
+    function paintCd(b, left, max) {
+      b.querySelector("i").style.background = left > 0
+        ? "conic-gradient(rgba(1, 10, 19, .78) " + (left / max * 360) + "deg, transparent 0)" : "none";
+      b.querySelector("b").textContent = left > 0 ? Math.ceil(left) : "";
     }
     // HUD 주문 칸에 이번 판의 주문 두 개를 넣는다(키 순서대로)
     function paintSpells() {
@@ -2840,6 +3020,27 @@
         b.querySelector("kbd").textContent = k[sp.id];
         b.title = sp.name + " (" + k[sp.id] + ")";
       });
+    }
+    // HUD 스킬 칸: 키 글자와 내 챔피언의 Q W E R 아이콘·이름. 이동기 칸만 켜고 나머지는 롤의 "못 씀" 처럼 어둡게.
+    // 아이콘은 늦게 오므로 그사이 챔피언이 바뀌었으면 버린다
+    let skillNames = null;     // 내 챔피언의 Q W E R 한국어 이름(받기 전엔 null)
+    function paintSkills() {
+      const champ = faceKey, sk = mySkill(), labels = skillLabels(controls.move);
+      const show = list => {
+        if (champ !== faceKey) return;
+        skillNames = list && list.map(x => x.name);
+        skillBtns.forEach((b, i) => {
+          const img = b.querySelector("img"), on = !!sk && sk.slot === i;
+          const name = (list && list[i].name) || "QWER"[i] + " 스킬";
+          if (list && list[i].icon) { img.src = list[i].icon; b.classList.remove("noimg"); }
+          else { img.removeAttribute("src"); b.classList.add("noimg"); }
+          b.classList.toggle("off", !on);
+          b.querySelector("kbd").textContent = labels[i];
+          b.title = name + " (" + labels[i] + ") · " + (on ? skillText(sk) + ". 쿨타임 " + skillCd(sk) + "초" : "연습장에서는 못 써요");
+        });
+      };
+      show(null);
+      skillIcons(champ).then(show);
     }
 
     // ── 흐름 ──
@@ -2863,6 +3064,7 @@
       if (loading) return;      // 모델을 다 받을 때까지(로딩 화면) 기다린다
       reset();
       paintSpells();
+      paintSkills();
       state = "play";
       over.hidden = true;
       clearTimeout(overTimer);
@@ -2925,7 +3127,12 @@
       if (state !== "play") return;
       e.preventDefault();
       // WASD 방식이면 마우스 클릭으로는 움직이지 않는다(커서는 점멸 방향으로만). 터치는 늘 움직인다
-      if (controls.move === "wasd" && e.pointerType === "mouse") { cursor = toArena(e); return; }
+      // 우클릭은 Q 스킬(커서 쪽으로 나가야 하니 커서를 먼저 갱신)
+      if (controls.move === "wasd" && e.pointerType === "mouse") {
+        cursor = toArena(e);
+        if (e.button === 2) useSkill(0);
+        return;
+      }
       // 우클릭이 기본. 왼쪽 클릭·터치도 받아 준다(트랙패드·휴대폰)
       holding = true;
       target = toArena(e);
@@ -2940,7 +3147,11 @@
     function onKeyDown(e) {
       if (e.target.closest && e.target.closest("input, textarea, select")) return;
       const sp = SPELLS.find(x => "Key" + keyOf(x.id) === e.code);
-      if (sp && state === "play") {
+      const si = skillKeys(controls.move).indexOf(e.code);
+      if (si >= 0 && state === "play") {
+        e.preventDefault();
+        if (!e.repeat) useSkill(si);
+      } else if (sp && state === "play") {
         e.preventDefault();
         if (!e.repeat) useSpell(sp.id);
       } else if (controls.move === "wasd" && MOVE_KEYS.includes(e.code)) {
@@ -2969,6 +3180,11 @@
       e.stopPropagation();
       useSpell(b.dataset.spell);
     }));
+    skillBtns.forEach((b, i) => b.addEventListener("pointerdown", e => {
+      e.preventDefault();
+      e.stopPropagation();
+      useSkill(i);
+    }));
     const paintSound = () => {
       const on = soundOn();
       soundBtn.textContent = on ? "효과음 켜짐" : "효과음 꺼짐";
@@ -2987,6 +3203,7 @@
     reset();
     fit();
     paintSpells();
+    paintSkills();
     hudUpdate();
 
     // 시작 창. 모드·이동 방식·주문을 고르면 바로 다시 그린다
@@ -3036,10 +3253,12 @@
       <ul class="dodge-keys">
         ${controls.move === "mouse"
           ? `<li><b>우클릭</b> 찍은 곳으로 이동 (누른 채 끌면 계속 따라가요)</li>`
-          : `<li><b>WASD</b> 누른 쪽으로 이동 (방향키도 돼요). 마우스는 점멸 방향만 정해요</li>`}
+          : `<li><b>WASD</b> 누른 쪽으로 이동 (방향키도 돼요). 마우스는 점멸·이동기 방향만 정해요</li>`}
+        ${mySkill() ? `<li><b>${skillLabels(controls.move)[mySkill().slot]}</b> ${skillNames && skillNames[mySkill().slot] ? esc(skillNames[mySkill().slot]) + ". " : ""}${skillText(mySkill())}. 쿨타임 ${skillCd(mySkill())}초 (나머지 스킬 칸은 못 써요)</li>`
+          : `<li><b>${skillLabels(controls.move).join(" ")}</b> 스킬 칸. 이 챔피언은 연습장에서 쓸 이동기가 없어요</li>`}
         <li><b>${k[s1.id]} · ${k[s2.id]}</b> ${s1.name} · ${s2.name}. 쿨타임 ${s1.cd}초 · ${s2.cd}초
           (점멸은 커서 쪽 400, 유체화는 3초 동안 이동 속도 +40%)</li>
-        <li><b>휴대폰</b> 화면을 누른 곳으로 이동, 주문은 아래 칸을 눌러요</li>
+        <li><b>휴대폰</b> 화면을 누른 곳으로 이동, 주문·스킬은 아래 칸을 눌러요</li>
       </ul>
       <p class="note">이동 속도 ${CHAMP.speed}. 스킬 수치·CC·그림은 롤 클라이언트, 소리는 롤 위키 것이에요.</p>
       <div class="dodge-actions"><button type="button" data-start>시작 <small>Space</small></button>${opts.links || ""}</div>`);
@@ -3049,6 +3268,7 @@
         keys.clear();
         reset();          // 모드·주문이 바뀌면 HUD 도 새 주문으로
         paintSpells();
+        paintSkills();
         hudUpdate();
         showIntro();
         if (opts.onMode) opts.onMode(controls.mode);
@@ -3114,7 +3334,7 @@
 
     // 내 챔피언을 나중에 바꾼다(티어표를 늦게 받았을 때)
     function setChamp(key, name) {
-      if (key) { faceKey = key; root.querySelector('[data-hud="face"]').src = hudFace(key); }
+      if (key) { faceKey = key; root.querySelector('[data-hud="face"]').src = hudFace(key); paintSkills(); }
       if (name) opts.name = name;
     }
 
