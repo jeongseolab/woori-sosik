@@ -59,6 +59,12 @@
   const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
   // Y 축(위) 으로 돌리기: 앞(+z) 이 (sin, 0, cos) 로
   const yaw = (p, s, c) => [p[0] * c + p[2] * s, p[1], -p[0] * s + p[2] * c];
+  // 투사체에 붙은 이펙트의 축: 롤은 투사체 이펙트를 X 오른쪽 · Y 날아가는 쪽 · Z 위 로 만든다
+  // (니달리 창·애쉬 화살 메시, 꼬리가 -Y 로 뻗는 브랜드·모르가나 메시, 럭스 Q 바닥 빛(0, -260, -120) 이 투사체 뒤 바닥).
+  // 그래서 투사체 이펙트는 Y 와 Z 를 바꿔 읽는다. 장판·시전·맞음 이펙트는 Y 가 위 그대로
+  const misAxes = p => [p[0], p[2], p[1]];
+  // 이 시스템의 로컬 벡터 → 롤 세상 방향(붙은 것의 방향으로 돌린다)
+  const toWorld = (inst, p) => yaw(inst.mis ? misAxes(p) : p, inst.sin, inst.cos);
   // 오일러 각(도) → 3×3 행렬(열: X, Y, Z 축). 롤 스타일 Y·X·Z 순
   function euler(r) {
     const x = r[0] * D2R, y = r[1] * D2R, z = r[2] * D2R;
@@ -122,7 +128,7 @@
   function play(name, o = {}) {
     if (!FX || !FX.systems[name]) return null;
     const s = FX.systems[name];
-    const inst = { s, name, age: 0, stopped: false, done: false, scale: o.scale || 1, ems: [], odom: 0, gain: o.gain || 0 };
+    const inst = { s, name, age: 0, stopped: false, done: false, scale: o.scale || 1, ems: [], odom: 0, gain: o.gain || 0, mis: !!o.missile };
     place(inst, o);
     inst.prev = inst.pos.slice();
     for (const e of s.emitters) inst.ems.push({ e, age: 0, acc: 0, ps: [], single: false, emitted: 0, path: 0 });
@@ -213,7 +219,7 @@
           p.vel[0] += a[0] * dt; p.vel[1] += a[1] * dt; p.vel[2] += a[2] * dt;
         }
         let vx = p.vel[0], vy = p.vel[1], vz = p.vel[2];
-        if (e.velocity) { const v = life(e.velocity, f, [0, 0, 0]); const w = p.local ? yaw(v, inst.sin, inst.cos) : v; vx += w[0]; vy += w[1]; vz += w[2]; }
+        if (e.velocity) { const v = life(e.velocity, f, [0, 0, 0]); const w = p.local ? toWorld(inst, v) : v; vx += w[0]; vy += w[1]; vz += w[2]; }
         p.pos[0] += vx * dt; p.pos[1] += vy * dt; p.pos[2] += vz * dt;
         p.v = [vx, vy, vz];
         // 발생기 둘레로 돌기(도/초)
@@ -241,7 +247,7 @@
   function spawn(inst, em, frac) {
     const e = em.e, sc = inst.scale;
     const local = e.isLocalOrientation !== false;
-    const turn = p => (local ? yaw(p, inst.sin, inst.cos) : p);
+    const turn = p => (local ? toWorld(inst, p) : p);
     // 자리: 발생기 위치 + 모양 안의 한 점
     let off = ev(e.EmitterPosition, frac, [0, 0, 0]);
     let vel = ev(e.birthVelocity, frac, [0, 0, 0]);
@@ -320,7 +326,7 @@
     if (ev(c.chance, 0, 1) < Math.random()) return;
     for (const k of c.kids) {
       const ci = play(k, { scale: inst.scale });
-      if (ci) { ci.pos = p.pos.slice(); ci.prev = ci.pos.slice(); ci.sin = inst.sin; ci.cos = inst.cos; ci.target = inst.target; ci.gain = inst.gain; }
+      if (ci) { ci.pos = p.pos.slice(); ci.prev = ci.pos.slice(); ci.sin = inst.sin; ci.cos = inst.cos; ci.target = inst.target; ci.gain = inst.gain; ci.mis = inst.mis; }
     }
   }
 
@@ -365,7 +371,7 @@
         const dir = norm([b[0] - a[0], b[1] - a[1], b[2] - a[2]]);
         let side;
         if (T === "VfxPrimitiveArbitraryTrail") {
-          side = norm(mv(euler(p.rot), [1, 0, 0]));
+          side = norm(toWorld(inst, mv(euler(p.rot), [1, 0, 0])));
         } else {
           const toCam = norm([cs.C[0] - p.pos[0], cs.C[1] - p.pos[1], cs.C[2] - p.pos[2]]);
           side = norm(cross(dir, toCam));
@@ -392,8 +398,8 @@
       if (T === "VfxPrimitiveBeam") {
         if (!inst.target) continue;
         const bm = prim.mBeam || {};
-        const so = bm.mLocalSpaceSourceOffset ? yaw(bm.mLocalSpaceSourceOffset, inst.sin, inst.cos) : [0, 0, 0];
-        const to = bm.mLocalSpaceTargetOffset ? yaw(bm.mLocalSpaceTargetOffset, inst.sin, inst.cos) : [0, 0, 0];
+        const so = bm.mLocalSpaceSourceOffset ? toWorld(inst, bm.mLocalSpaceSourceOffset) : [0, 0, 0];
+        const to = bm.mLocalSpaceTargetOffset ? toWorld(inst, bm.mLocalSpaceTargetOffset) : [0, 0, 0];
         const A = add(inst.pos, so), B = add(inst.target, to), AB = [B[0] - A[0], B[1] - A[1], B[2] - A[2]];
         const L = len(AB);
         if (L < 1) continue;
@@ -513,8 +519,7 @@
       return [mv(base, m[0]), mv(base, m[1]), mv(base, m[2])];
     }
     if (e.particleIsLocalOrientation !== false && e.isLocalOrientation !== false) {
-      const s = inst.sin, c = inst.cos;
-      m = [yaw(m[0], s, c), yaw(m[1], s, c), yaw(m[2], s, c)];
+      m = [toWorld(inst, m[0]), toWorld(inst, m[1]), toWorld(inst, m[2])];
     }
     return m;
   }

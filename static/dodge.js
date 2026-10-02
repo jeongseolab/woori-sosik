@@ -1938,7 +1938,7 @@
       // 롤 창 이펙트(Kalista_Q_mis) 가 있으면 그것을 날린다(빠르기 1200, 사거리 1150)
       const mis = myPart({ slot: 0 }, "mis");
       if (mis && fxgl && fxgl.gl) {
-        const list = fxPlay(mis, { x, y, h: FX_H, dir: { x: cx, y: cy } }, 1.2);
+        const list = fxPlay(mis, { x, y, h: FX_H, missile: true, dir: { x: cx, y: cy } }, 1.2);
         if (list) myFx.push({ list, fly: { x, y, vx: cx * 1200, vy: cy * 1200, t0: t }, until: t + 1150 / 1200 });
         sfx("ambWhip");
         return;
@@ -2139,7 +2139,7 @@
       if (lf) fxPlay(lf.splitfx, { x: m.x, y: m.y, h: FX_H, gain: ENEMY_GAIN, dir: { x: m.dx, y: m.dy } });
       for (const side of [1, -1]) {
         const q = { skill: piece, x: m.x, y: m.y, ox: m.x, oy: m.y, dx: -m.dy * side, dy: m.dx * side, speed: sp.speed, left: sp.range, flown: 0, caster: m.caster };
-        if (lf) { q.vfx = fxPlay(lf.split, { x: q.x, y: q.y, h: FX_H, gain: ENEMY_GAIN, dir: { x: q.dx, y: q.dy } }, 10); q.fx = !!q.vfx; }
+        if (lf) { q.vfx = fxPlay(lf.split, { x: q.x, y: q.y, h: FX_H, gain: ENEMY_GAIN, missile: true, dir: { x: q.dx, y: q.dy } }, 10); q.fx = !!q.vfx; }
         missiles.push(q);
       }
       burst(m.x, m.y, MISSILE_Z, m.skill.color, 14, 300);
@@ -2239,7 +2239,7 @@
         const m = { skill: s, x: c.x, y: c.y, ox: c.x, oy: c.y, dx: c.dx, dy: c.dy, speed: s.speed, left: s.range, flown: 0, caster: c };
         if (lf) {
           // 투사체 이펙트의 빔 끝은 시전자(쓰레쉬 Q 사슬이 갈고리에서 쓰레쉬까지)
-          m.vfx = fxPlay(lf.mis, { x: m.x, y: m.y, h: FX_H, gain: ENEMY_GAIN, dir, target: { x: c.x, y: c.y, h: FX_H } }, 30);
+          m.vfx = fxPlay(lf.mis, { x: m.x, y: m.y, h: FX_H, gain: ENEMY_GAIN, missile: true, dir, target: { x: c.x, y: c.y, h: FX_H } }, 30);
           m.fx = !!m.vfx;
         }
         missiles.push(m);
