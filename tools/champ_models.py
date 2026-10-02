@@ -25,7 +25,7 @@
 쓰는 법:
   pip install xxhash zstandard numpy pillow
   python tools/champ_models.py                      # 연습장에 나오는 챔피언(스킬 쓰는 적) + 이즈리얼
-  python tools/champ_models.py --mobility           # 이동기가 있는 챔피언(MOBILITY, PASSIVE)
+  python tools/champ_models.py --mobility           # 내 챔피언으로 고르는 챔피언(MOBILITY, PASSIVE, GUARD)
   python tools/champ_models.py ahri jinx            # 고른 챔피언만(내 챔피언으로 쓰려면)
   python tools/champ_models.py --all                # 모든 챔피언
   python tools/champ_models.py --game "D:/Riot Games/League of Legends"
@@ -63,6 +63,9 @@ MOBILITY = {"ezreal": 3, "lucian": 3, "graves": 3, "vayne": 1, "corki": 2, "tris
             "urgot": 3, "galio": 3, "zoe": 4, "kassadin": 4, "shaco": 1, "leblanc": 2, "ekko": 3, "akali": 3}
 # 패시브로 움직이는 챔피언(스킬을 쓰면 패시브 돌진이 따라 나온다) 과 그 스킬(Q=1 … R=4)
 PASSIVE = {"kalista": [1], "ambessa": [1, 2, 3, 4]}
+# 움직이지 않고 적 스킬을 막는 스킬(피오라 W 응수, 시비르 E 주문 보호막, 야스오 W 바람 장막 …) 과 그 스킬(Q=1 … R=4)
+GUARD = {"fiora": [2], "tryndamere": [4], "kindred": [4], "sivir": [3], "nocturne": [2], "yasuo": [2], "samira": [2],
+         "vladimir": [2], "olaf": [4]}
 # 스킬 말고 따로 굽는 동작: 이름 → 클립 이름 후보(칼리스타 Q 뒤의 패시브 돌진).
 # 암베사는 스킬마다 패시브 돌진 동작이 따로 있다(해시로만 적힌 클립: passivedash_spell1a·1b·2·3·4·4_fail.anm),
 # Q2(Spell1B), R 내려찍기(spell4_hit). spell4 는 R 시전(Spell4_Windup)
@@ -621,7 +624,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("champions", nargs="*", help="챔피언 영문 이름(소문자). 비우면 연습장 챔피언")
     ap.add_argument("--all", action="store_true", help="모든 챔피언")
-    ap.add_argument("--mobility", action="store_true", help="이동기가 있는 챔피언(MOBILITY, PASSIVE)")
+    ap.add_argument("--mobility", action="store_true", help="내 챔피언으로 고르는 챔피언(MOBILITY, PASSIVE, GUARD)")
     ap.add_argument("--game", default=r"C:\Riot Games\League of Legends", help="롤 설치 폴더")
     a = ap.parse_args()
     wad_dir = os.path.join(a.game, "Game", "DATA", "FINAL", "Champions")
@@ -631,7 +634,7 @@ def main():
         keys = sorted(str(c["alias"]).lower() for c in get_json(
             "plugins/rcp-be-lol-game-data/global/default/v1/champion-summary.json") if 0 < c["id"] < 10000 and "_" not in str(c["alias"]))
     elif a.mobility:
-        keys = sorted(set(MOBILITY) | set(PASSIVE))
+        keys = sorted(set(MOBILITY) | set(PASSIVE) | set(GUARD))
     else:
         keys = [k.lower() for k in a.champions] or sorted(CASTERS)
     index_path = os.path.join(OUT, "index.json")
@@ -640,7 +643,7 @@ def main():
         try:
             # 체력바 높이(h) 는 손으로 고친 챔피언이 있다(커밋 bf8d43a). 다시 만들어도 있던 값은 지킨다(새로 재려면 그 h 를 지운다)
             old_h = index.get(k, {}).get("h")
-            index[k] = build(k, wad_dir, sorted(set(CASTERS.get(k, [])) | ({MOBILITY[k]} if k in MOBILITY else set()) | set(PASSIVE.get(k, []))))
+            index[k] = build(k, wad_dir, sorted(set(CASTERS.get(k, [])) | ({MOBILITY[k]} if k in MOBILITY else set()) | set(PASSIVE.get(k, [])) | set(GUARD.get(k, []))))
             if old_h is not None:
                 index[k]["h"] = old_h
             index[k]["v"] = file_version(k)

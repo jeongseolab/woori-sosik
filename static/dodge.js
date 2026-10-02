@@ -62,7 +62,7 @@
   ];
   const spellById = id => SPELLS.find(sp => sp.id === id);
 
-  // 내 챔피언의 이동기(tools/champ_models.py 의 MOBILITY·PASSIVE 와 같은 42명). 그 칸만 켜지고 나머지 칸은 어둡다.
+  // 내 챔피언의 이동기와 막기 스킬(tools/champ_models.py 의 MOBILITY·PASSIVE·GUARD 와 같은 48명). 그 칸만 켜지고 나머지 칸은 어둡다.
   // 여러 칸을 쓰는 챔피언(암베사 Q·W·E) 은 배열로 적는다
   //   slot: 0~3(Q W E R). kind: blink(순간이동) | dash(돌진)
   //   range: 최대 거리. min: 커서가 더 가까워도 이만큼은 간다. fixed: 늘 range 만큼. back: 커서 반대쪽으로(뒤로 뛰기)
@@ -78,6 +78,13 @@
   //   steady: 시전 중에도 CC 로 끊기지 않고 저지 불가(암베사 R). anim: 시전 동작(없으면 spell1~4). desc: 설명을 통째로
   //   amb: 암베사 스킬(q·w·e·r). 시전·돌진·도착 때 그 스킬의 효과를 낸다(ambStrike·ambLand)
   //   cd: 롤 최대 레벨 쿨타임(기본 스킬 5레벨, 궁극기 3레벨). 게임에서는 skillCd() 로 4~20초 안으로 맞춘다
+  // kind: guard 는 움직이지 않고 적 스킬을 막는다
+  //   parry: 이 초 동안 모든 스킬을 막고 그동안 못 움직인다(피오라 W 응수). shield: 이 초 안에 처음 맞는 스킬 하나를 막는다(주문 보호막)
+  //   wall: 앞에 바람 장막 {width, life, range, thick}(야스오 W). 날아오는 투사체만 막는다(장판·레이저는 못 막는다)
+  //   blades: {dur, radius} 동안 내 둘레로 들어오는 투사체를 없앤다(사미라 W)
+  //   ccImmune: 이 초 동안 CC 를 받지 않고 걸린 CC 도 풀린다(올라프 R). whileCC: CC 중에도 쓸 수 있다
+  //   undying: 이 초 동안 죽지 않는다(트린다미어 R). lambs: {radius, dur} 그 자리 둘레 안에서는 죽지 않는다(킨드레드 R)
+  //   untarget·haste·hasteDur: 이 초 동안 스킬이 통과, 그리고 hasteDur 초 동안 이동 속도 +haste(블라디미르 W)
   //   src: 거리·속도의 출처. data = 롤 클라이언트 데이터(CommunityDragon, 2026-10-02 받음.
   //   DashSpeed·DashDistance·castRangeDisplayOverride 등), 추정 = 데이터에 없어(챔피언 스크립트 안의 값) 롤 지식으로 적은 값.
   //   "DashBonusSpeed"·"DashSpeedRatio" 는 이동 속도에 더하는 값이라 CHAMP.speed 를 더했다
@@ -90,7 +97,10 @@
     tristana: { slot: 1, kind: "dash", range: 900, speed: 1100, cd: 14, src: "range: data, speed: 추정" },
     gragas: { slot: 2, kind: "dash", range: 600, fixed: true, speed: 900, cd: 12, src: "data" },
     gnar: { slot: 2, kind: "dash", range: 475, dur: 0.6, cd: 12, src: "data(TravelTime)" },
-    kindred: { slot: 0, kind: "dash", range: 340, fixed: true, speed: 500, cd: 9, src: "data" },
+    kindred: [
+      { slot: 0, kind: "dash", range: 340, fixed: true, speed: 500, cd: 9, src: "data" },
+      { slot: 3, kind: "guard", lambs: { radius: 530, dur: 4 }, cd: 120, src: "data(AoERadius·BuffDuration)" },
+    ],
     caitlyn: { slot: 2, kind: "dash", range: 390, fixed: true, back: true, speed: 1000, cd: 8, src: "추정" },
     ahri: { slot: 3, kind: "dash", range: 500, speed: 1200, charges: 3, gap: 1, window: 10, cd: 100, src: "data" },
     fizz: { slot: 2, kind: "dash", range: 400, dur: 0.25, untarget: 0.75, recast: { range: 400, dur: 0.25 }, cd: 8,
@@ -100,7 +110,10 @@
     malphite: { slot: 3, kind: "dash", range: 1000, speed: 1835, unstoppable: true, cd: 100, src: "range: data, speed: 추정" },
     sylas: { slot: 2, kind: "dash", range: 400, speed: 1450, cd: 9, src: "추정" },
     zeri: { slot: 2, kind: "dash", range: 300, fixed: true, speed: 900, cd: 18, src: "range: data, speed: 추정" },
-    tryndamere: { slot: 2, kind: "dash", range: 650, speed: 1300, cd: 8, src: "range: data, speed: 추정" },
+    tryndamere: [
+      { slot: 2, kind: "dash", range: 650, speed: 1300, cd: 8, src: "range: data, speed: 추정" },
+      { slot: 3, kind: "guard", undying: 5, cd: 80, src: "data(TryndRDuration)" },
+    ],
     renekton: { slot: 2, kind: "dash", range: 450, fixed: true, speed: 750, cd: 10, src: "data" },
     ornn: { slot: 2, kind: "dash", range: 650, fixed: true, speed: 1600, cd: 12, src: "data" },
     rakan: { slot: 1, kind: "dash", range: 650, speed: 1700, cd: 10, src: "data" },
@@ -113,7 +126,10 @@
               src: "data(JumpDistance·DashBonusSpeed·InvisDuration·MoveSpeedBonus)" },
     belveth: { slot: 0, kind: "dash", range: 400, fixed: true, speed: 850, dirs: 4, cd: 1, src: "data" },
     gwen: { slot: 2, kind: "dash", range: 350, fixed: true, speed: 800, cd: 11, src: "data" },
-    fiora: { slot: 0, kind: "dash", range: 400, speed: 1000, cd: 6, src: "추정" },
+    fiora: [
+      { slot: 0, kind: "dash", range: 400, speed: 1000, cd: 6, src: "추정" },
+      { slot: 1, kind: "guard", parry: 0.75, cd: 16, src: "data(ParryDuration)" },
+    ],
     pyke: { slot: 2, kind: "dash", range: 550, fixed: true, speed: 1000, cd: 11, src: "range: data, speed: 추정" },
     shen: { slot: 2, kind: "dash", range: 600, min: 300, speed: 800 + CHAMP.speed, cd: 10, src: "data" },
     urgot: { slot: 2, kind: "dash", range: 450, fixed: true, speed: 1200, cd: 14, src: "data" },
@@ -124,6 +140,15 @@
     leblanc: { slot: 1, kind: "dash", range: 600, speed: 1450, recall: 4, cd: 10, src: "range·recall: data(SnapbackTimeAllowed), speed: 추정" },
     ekko: { slot: 2, kind: "dash", range: 350, fixed: true, speed: 1150, cd: 7, src: "range: data, speed: 추정" },
     akali: { slot: 2, kind: "dash", range: 400, fixed: true, back: true, speed: 1000, cd: 10, src: "range: data, speed: 추정" },
+    // 스킬 막기: 움직이지 않고 적 스킬을 무효로 만드는 챔피언
+    sivir: { slot: 2, kind: "guard", shield: 1.5, cd: 18, src: "data(SpellShieldDuration)" },
+    nocturne: { slot: 1, kind: "guard", shield: 1.5, cd: 12, src: "data(ShieldDuration)" },
+    yasuo: { slot: 1, kind: "guard", wall: { width: 600, life: 4, range: 450, thick: 100 }, cd: 17,
+             src: "data(Width·WallLife·TravelRange·Thickness), 장막이 나아가는 빠르기: 추정" },
+    samira: { slot: 1, kind: "guard", blades: { dur: 0.75, radius: 325 }, cd: 22, src: "data(SlashDuration·castRange)" },
+    vladimir: { slot: 1, kind: "guard", untarget: 2, haste: 0.375, hasteDur: 1, cd: 16,
+                src: "haste: data(HasteBoost·HasteDuration), untarget: 추정(데이터에 없다)" },
+    olaf: { slot: 3, kind: "guard", ccImmune: 3, whileCC: true, cd: 80, src: "data(Duration), CC 중 사용: 추정" },
     // 패시브 돌진: 칼리스타는 Q(꿰뚫기) 를 던진 뒤 커서 쪽으로 뛴다(전투 태세). 거리는 신발에 따라 달라서 데이터에 없다
     kalista: { slot: 0, kind: "dash", range: 250, dur: 0.3, windup: 0.25, dashAnim: "dash", passive: true, cd: 9,
                src: "cd·windup: data, range·dur: 추정" },
@@ -147,7 +172,7 @@
   };
   // 그 챔피언의 이동기 칸들(없으면 빈 배열)
   const skillsOf = key => { const v = MOBILITY[String(key).toLowerCase()]; return !v ? [] : Array.isArray(v) ? v : [v]; };
-  // 고를 수 있는 내 챔피언은 이동기와 그 3D 동작이 다 들어간 이 42명. 키(소문자) → OP.GG·모델에 쓰는 이름(첫 글자만 대문자)
+  // 고를 수 있는 내 챔피언은 이동기·막기 스킬과 그 3D 동작이 다 들어간 이 48명. 키(소문자) → OP.GG·모델에 쓰는 이름(첫 글자만 대문자)
   const champAlias = k => k[0].toUpperCase() + k.slice(1);
   const champName = key => CHAMP_NAMES[String(key).toLowerCase()] || key;
   // 롤 쿨타임 그대로면 궁극기(100초) 는 한 판에 한 번, 벨베스 Q(1초) 는 쉬지 않고 쓴다. 소환사 주문(15·20초) 쪽으로 맞춘다
@@ -155,6 +180,16 @@
   // 시작 창·칸 설명에 쓰는 한 줄
   function skillText(sk) {
     if (sk.desc) return sk.desc;
+    if (sk.kind === "guard") {
+      return sk.parry ? `${sk.parry}초 동안 모든 스킬을 막는다(그동안 못 움직임)`
+        : sk.shield ? `${sk.shield}초 안에 처음 맞는 스킬 하나를 막는다`
+        : sk.wall ? `앞에 폭 ${sk.wall.width} 바람 장막을 ${sk.wall.life}초 동안 세워 날아오는 투사체를 막는다(장판·레이저는 못 막음)`
+        : sk.blades ? `${sk.blades.dur}초 동안 내 둘레 ${sk.blades.radius} 안으로 들어오는 투사체를 없앤다`
+        : sk.ccImmune ? `${sk.ccImmune}초 동안 CC 를 받지 않는다. 걸린 CC 도 풀리고, CC 중에도 쓸 수 있다`
+        : sk.undying ? `${sk.undying}초 동안 죽지 않는다(목숨이 1 아래로 안 내려감)`
+        : sk.lambs ? `그 자리 둘레 ${sk.lambs.radius} 안에서 ${sk.lambs.dur}초 동안 죽지 않는다`
+        : `${sk.untarget}초 동안 모든 스킬이 통과` + (sk.haste ? `, 처음 ${sk.hasteDur}초는 이동 속도 +${Math.round(sk.haste * 100)}%` : "");
+    }
     const how = sk.kind === "blink" ? `커서 쪽으로 최대 ${sk.range} 순간이동`
       : sk.back ? `커서 반대쪽으로 ${sk.range} 뛰어 물러남`
       : `커서 쪽으로 ${sk.fixed ? "" : "최대 "}${sk.range} 돌진`;
@@ -816,6 +851,8 @@
     let cdLeft, cdMax, dirLeft, charges, dash, untarget, ret, recall, pole;   // 내 챔피언 이동기(useSkill)
     let hidden, seen, haste, realm, skillAt, skillUsed;
     let amb, act;      // 암베사 스킬 상태, 내 3D 동작을 정해 두는 것(act: {anim, t0, hold, until})
+    let parry, shieldUp, wall, blades, ccImmune, undying, lambs;     // 막기 스킬(kind: guard)
+    let lastGuardFx = -1;
     let bannerTimer = 0, overTimer = 0;
     let controls = loadControls();
     // 내 챔피언: 시작 창에서 고른 챔피언. 고른 적이 없으면 앱이 넘긴 챔피언이 고를 수 있는 42명 안에 있을 때 그 챔피언, 아니면 이즈리얼
@@ -875,6 +912,14 @@
       skillUsed = null;
       amb = { q2: null, shield: null, brace: null, arcs: [], aimR: null };
       act = null;
+      parry = -1;              // 이 시각까지 모든 스킬을 막는다(피오라 W)
+      shieldUp = null;         // 처음 맞는 스킬 하나를 막는 보호막 {until, color}(시비르 E·녹턴 W)
+      wall = null;             // 바람 장막(야스오 W) {x, y, nx, ny, born, until, ...sk.wall}
+      blades = null;           // 투사체를 없애는 칼날(사미라 W) {until, radius}
+      ccImmune = -1;           // 이 시각까지 CC 를 받지 않는다(올라프 R)
+      undying = -1;            // 이 시각까지 죽지 않는다(트린다미어 R)
+      lambs = null;            // 이 둘레 안에서는 죽지 않는다(킨드레드 R) {x, y, radius, until}
+      lastGuardFx = -1;
       cursor = null;          // 마우스가 가리키는 바닥(점멸 방향)
       facing = { x: 0, y: -1 };    // 마지막으로 움직인 방향(커서가 없을 때 점멸 방향)
       prevFacing = null;       // 바로 전 방향과 바뀐 시각(STOP_GRACE)
@@ -1198,8 +1243,14 @@
     function useSkill(i) {
       const sk = mySkills().find(x => x.slot === i);
       if (state !== "play" || !sk) return;
-      if (held() || dash) { sfx("deny"); return; }
+      if ((held() && !sk.whileCC) || dash) { sfx("deny"); return; }
       if (sk.amb) { ambCast(sk, i); return; }
+      if (sk.kind === "guard") {
+        if (cdLeft[i] > 0) { sfx("deny"); return; }
+        cdMax[i] = cdLeft[i] = skillCd(sk);
+        guard(sk);
+        return;
+      }
       // 르블랑 W: 정해진 시간 안에 다시 누르면 처음 자리로(쿨타임과 상관없이)
       if (recall && recall.slot === i) {
         const from = { x: player.x, y: player.y };
@@ -1233,6 +1284,56 @@
         cdMax[i] = cdLeft[i] = skillCd(sk);
       }
       go(sk, dx, dy, len, { wind: sk.windup || 0 });
+    }
+    // 막기 스킬을 켠다
+    function guard(sk) {
+      skillAt = t; skillUsed = sk;
+      target = null;
+      if (sk.parry) { parry = t + sk.parry; emit({ x: player.x, y: player.y, z: 90, size: 200, size1: 120, color: "#ffffff", color1: "#a5d8ff", shape: "glow", life: 0.3 }); sfx("cleanse"); }
+      if (sk.shield) { shieldUp = { until: t + sk.shield, color: modelKey(faceKey) === "nocturne" ? "#7048e8" : "#ffc078" }; sfx("cleanse"); }
+      if (sk.wall) {
+        const { dx, dy } = aim(1);
+        wall = { ...sk.wall, x: player.x, y: player.y, nx: dx, ny: dy, born: t, until: t + sk.wall.life };
+        sfx("ghost");
+      }
+      if (sk.blades) { blades = { until: t + sk.blades.dur, radius: sk.blades.radius }; sfx("ghost"); }
+      if (sk.ccImmune) {
+        // 걸린 CC 도 푼다(정화처럼 공중에 뜸만 빼고)
+        ccImmune = t + sk.ccImmune;
+        effects = effects.filter(e => e.type === "air" || e.start > t);
+        flashGround(player.x, player.y, 150, "#ff6b6b", 0.5);
+        sfx("cleanse");
+      }
+      if (sk.undying) { undying = t + sk.undying; flashGround(player.x, player.y, 140, "#fa5252", 0.5); sfx("cleanse"); }
+      if (sk.lambs) { lambs = { x: player.x, y: player.y, radius: sk.lambs.radius, until: t + sk.lambs.dur }; flashGround(player.x, player.y, sk.lambs.radius, "#91a7ff", 0.6); sfx("cleanse"); }
+      if (sk.untarget) {
+        untarget = t + sk.untarget;
+        if (sk.haste) haste = { pct: sk.haste, until: t + sk.hasteDur };
+        flashGround(player.x, player.y, 120, "#c92a2a", 0.5);
+        sfx("ghost");
+      }
+    }
+    // 바람 장막의 지금 가운데(range 까지 나아간다)
+    const wallAt = w => { const k = Math.min(w.range, 100 + (t - w.born) * 900); return { x: w.x + w.nx * k, y: w.y + w.ny * k }; };
+    // 장막·칼날이 이 투사체를 막는지
+    function blocksMissile(m) {
+      if (blades && t < blades.until && dist(m, player) < blades.radius + m.skill.radius) return true;
+      if (wall && t < wall.until) {
+        const c = wallAt(wall), ox = m.x - c.x, oy = m.y - c.y;
+        const along = ox * wall.nx + oy * wall.ny, side = -ox * wall.ny + oy * wall.nx;
+        if (Math.abs(along) < wall.thick / 2 + m.skill.radius && Math.abs(side) < wall.width / 2) return true;
+      }
+      return false;
+    }
+    // 스킬을 막았다(응수·주문 보호막). 피한 것으로 센다
+    function blocked() {
+      const word = parry > t ? "응수" : "막음";
+      if (!(parry > t)) shieldUp = null;        // 보호막은 한 번 막으면 사라진다
+      dodged += 1;
+      pops.push({ x: player.x, y: player.y, text: word, life: 1, max: 1 });
+      emit({ x: player.x, y: player.y, z: 80, size: 190, size1: 70, color: "#ffffff", color1: "#74c0fc", shape: "star", life: 0.3, spin: 4 });
+      burst(player.x, player.y, 70, "#d0ebff", 14, 260);
+      sfx("cleanse");
     }
     // 움직임을 예약한다. 시전 시간(wind) 동안은 제자리에서 스킬 동작, 그 뒤 돌진하거나 순간이동(step)
     function go(sk, dx, dy, len, o) {
@@ -1511,6 +1612,7 @@
     function ambBlock() {
       if (!amb.shield || t >= amb.shield.until) return false;
       amb.shield = null;
+      dodged += 1;           // 막기 스킬처럼 막은 스킬은 피한 수로 센다
       if (amb.brace) amb.brace.parried = true;
       emit({ x: player.x, y: player.y, z: 90, size: 200, size1: 260, color: "#ffffff", color1: AMB.gold, shape: "amb_w_shield", life: 0.3 });
       burst(player.x, player.y, 90, AMB.gold, 20, 420);
@@ -1533,8 +1635,12 @@
     // 하드 모드는 무적이 없고, 맞은 스킬의 CC 를 그대로 당한다(how: applyCC 참고)
     function hit(s, how = {}) {
       if (dead || untarget > t || (mode !== "hard" && safe > 0)) return false;
+      // 응수·주문 보호막은 스킬을 막는다. 맞힌 투사체처럼 사라진다
+      if (parry > t || (shieldUp && t < shieldUp.until)) { blocked(); return true; }
       if (ambBlock()) return true;         // 막았다: 투사체·장판은 맞은 것처럼 끝나지만 목숨은 그대로
       lives -= 1;
+      // 트린다미어 R·킨드레드 R: 목숨이 1 아래로 내려가지 않는다
+      if (lives <= 0 && (undying > t || (lambs && t < lambs.until && dist(player, lambs) < lambs.radius))) lives = 1;
       hits.push(s.name);
       lastHit = s;
       safe = mode === "hard" ? 0 : SAFE_AFTER_HIT;
@@ -1548,7 +1654,7 @@
       if (lives === 1) announce("체력이 낮습니다", "warn");
       if (lives <= 0) dead = true;
       // 말파이트 R 처럼 저지 불가인 돌진 중에는 CC 를 받지 않는다(암베사 R 은 겨눌 때부터)
-      else if (mode === "hard" && !(dash && (dash.started || dash.sk.steady) && dash.sk.unstoppable)) applyCC(s, how);
+      else if (mode === "hard" && !(dash && (dash.started || dash.sk.steady) && dash.sk.unstoppable) && !(ccImmune > t)) applyCC(s, how);
       return true;
     }
 
@@ -1631,6 +1737,46 @@
           emit({ x: m.x, y: m.y, ground: 1, size: 60, size1: 95, color: "#f3d9fa", color1: m === recall ? "#9c36b5" : "#cc5de8", shape: "ring", life: 0.6, a: 0.85 });
         }
       }
+      // 막기 스킬의 그림: 바람 장막은 벽을 따라 바람이 일고, 칼날은 둘레를 돌고, 보호막·안식처는 테두리가 숨 쉰다
+      if (!(t - (lastGuardFx || -1) < 0.05)) {
+        lastGuardFx = t;
+        if (wall && t < wall.until) {
+          // 장막: 여러 높이로 겹친 빛줄기(벽) + 그 위로 흩날리는 바람
+          const c = wallAt(wall), hx = -wall.ny * wall.width / 2, hy = wall.nx * wall.width / 2;
+          const fade = Math.min(1, (wall.until - t) / 0.4);
+          // 빛기둥 그림은 양 끝이 흐려서 장막을 세 토막으로 나눠 그린다(끝까지 보이게)
+          for (const z of [20, 75, 130]) {
+            for (let n = -1; n <= 1; n++) {
+              const ax = c.x + hx * (n * 2 / 3 - 0.45), ay = c.y + hy * (n * 2 / 3 - 0.45);
+              const bx = c.x + hx * (n * 2 / 3 + 0.45), by = c.y + hy * (n * 2 / 3 + 0.45);
+              emit({ x: c.x, y: c.y, z, line: [ax, ay, bx, by], size: 70 * fade, size1: 50 * fade,
+                     color: "#e7f5ff", color1: "#4dabf7", shape: "beam", life: 0.15, a: 0.5 });
+            }
+          }
+          for (let n = 0; n < 5; n++) {
+            const k = rand(-0.5, 0.5) * wall.width;
+            emit({ x: c.x - wall.ny * k, y: c.y + wall.nx * k, z: rand(0, 170), vz: 60, size: 30, size1: 8,
+                   color: "#ffffff", color1: "#a5d8ff", shape: "glow", life: 0.45 });
+          }
+        }
+        if (blades && t < blades.until) {
+          emit({ x: player.x, y: player.y, ground: 1, size: blades.radius * 0.95, size1: blades.radius, color: "#fff3bf", color1: "#e03131", shape: "ring", life: 0.12, a: 0.8 });
+          const a = t * 18;
+          for (let n = 0; n < 3; n++) {
+            const q = a + n * Math.PI * 2 / 3;
+            emit({ x: player.x + Math.cos(q) * blades.radius * 0.8, y: player.y + Math.sin(q) * blades.radius * 0.8, z: 60,
+                   size: 70, size1: 20, color: "#fff3bf", color1: "#e03131", shape: "spark", life: 0.2 });
+          }
+        }
+        if (shieldUp && t < shieldUp.until) emit({ x: player.x, y: player.y, z: 80, size: 150, size1: 160, color: "#ffffff", color1: shieldUp.color, shape: "ring", life: 0.12, a: 0.6 });
+        if (parry > t) emit({ x: player.x, y: player.y, z: 80, size: 130, size1: 140, color: "#ffffff", color1: "#a5d8ff", shape: "ring", life: 0.1, a: 0.8 });
+        if (lambs && t < lambs.until && !(t - (lambs.fxAt || -1) < 0.3)) {
+          lambs.fxAt = t;
+          emit({ x: lambs.x, y: lambs.y, ground: 1, size: lambs.radius * 0.95, size1: lambs.radius, color: "#e7f5ff", color1: "#91a7ff", shape: "ring", life: 0.6, a: 0.7 });
+        }
+        if (undying > t || ccImmune > t) emit({ x: player.x + rand(-40, 40), y: player.y + rand(-40, 40), z: rand(20, 140), vz: 120, size: 18, size1: 4, color: "#ffffff", color1: "#fa5252", shape: "glow", life: 0.5 });
+        if (untarget > t && skillUsed && skillUsed.kind === "guard") emit({ x: player.x, y: player.y, ground: 1, size: 110, size1: 130, color: "#ff8787", color1: "#a51111", shape: "glow", life: 0.2, a: 0.8 });
+      }
       // 다른 차원(오로라 W): 몸 둘레로 영혼 빛이 피어오른다
       if (realm && t < realm.until && !(t - (realm.fxAt || -1) < 0.05)) {
         realm.fxAt = t;
@@ -1673,7 +1819,10 @@
         // 시전 중에 CC 를 맞으면 끊긴다(쿨타임은 그대로 돈다)
         dash = null;
       }
-      if (dash) {
+      if (parry > t) {
+        // 응수하는 동안은 제자리
+        player.vx = player.vy = 0;
+      } else if (dash) {
         // 이동기: 시전 시간에는 제자리, 그 뒤 정해진 시간 동안 곧게 가거나 순간이동. 돌진 중에 걸린 CC 는 끝난 뒤에 느낀다
         player.vx = player.vy = 0;
         if (t >= dash.t0) {
@@ -1796,6 +1945,13 @@
         const d = m.speed * dt;
         m.x += m.dx * d; m.y += m.dy * d;
         m.left -= d; m.flown += d;
+        // 야스오 W 바람 장막·사미라 W 칼날에 닿은 투사체는 사라진다(피한 것으로 센다)
+        if (blocksMissile(m)) {
+          m.gone = true;
+          dodged += 1;
+          burst(m.x, m.y, 60, "#d0ebff", 8, 200);
+          continue;
+        }
         const reach = CHAMP.radius + m.skill.radius;
         if ((m.x - player.x) ** 2 + (m.y - player.y) ** 2 < reach * reach && hit(m.skill, { m, c: m.caster })) {
           m.gone = true;          // 맞힌 투사체는 사라진다
@@ -2143,14 +2299,16 @@
         // 돌진 동작이 따로 있으면(칼리스타 패시브) 시전 뒤 돌진하는 동안은 그 동작
         const sk = skillUsed, since = t - skillAt;
         const acting = act && t < act.until && (t < act.hold || !moving);
-        const casting = !acting && sk && (dash || since < 0.5);
+        const casting = !acting && sk && (dash || since < (sk.parry || 0.5));
         const leaping = casting && dash && dash.started && sk.dashAnim;
         out.push({ key: modelKey(faceKey), x: player.x, y: player.y, z: lift(), angle: viewAngle,
                    anim: acting ? act.anim : leaping ? sk.dashAnim : casting ? "spell" + (sk.slot + 1) : moving ? "run" : "idle",
                    time: acting ? t - act.t0 : leaping ? t - dash.t0 : casting ? since : animClock, loop: !casting && !acting,
                    // 투명하면 내 화면에서만 흐리게 보인다(롤에서 내 챔피언이 반투명해지는 것처럼)
-                   alpha: hidden > t ? 0.35 : untarget > t ? 0.4 : safe > 0 && Math.floor(safe * 10) % 2 ? 0.45 : 1,
+                   // 블라디미르 W 는 핏물 웅덩이로 가라앉아 거의 안 보인다
+                   alpha: untarget > t && skillUsed && skillUsed.kind === "guard" ? 0.15 : hidden > t ? 0.35 : untarget > t ? 0.4 : safe > 0 && Math.floor(safe * 10) % 2 ? 0.45 : 1,
                    tint: hurt > 0 ? [1, 1, 1, hurt / 0.4 * 0.55] : realm && t < realm.until ? [0.6, 0.5, 1, 0.35]
+                     : parry > t ? [0.75, 0.9, 1, 0.45] : undying > t || ccImmune > t ? [1, 0.25, 0.2, 0.3]
                      : ghostLeft > 0 ? [0.4, 0.85, 0.95, 0.22] : null });
       }
       for (const c of casters) {
@@ -3540,9 +3698,12 @@
         // 쓰는 중(시전·돌진·스킬 통과·투명·돌아갈 수 있음·남은 횟수가 있음) 은 빛나고, CC 중에는 잠긴다
         const using = (dash && dash.sk === sk) || (recall && recall.slot === sk.slot) || (sk.untarget && untarget > t)
           || (sk.stealth && hidden > t) || (sk.ret && ret) || (charges && charges.slot === sk.slot)
-          || (sk.amb === "w" && amb.shield) || (sk.amb === "q" && amb.q2);
+          || (sk.amb === "w" && amb.shield) || (sk.amb === "q" && amb.q2)
+          || (sk.parry && parry > t) || (sk.shield && shieldUp && t < shieldUp.until) || (sk.wall && wall && t < wall.until)
+          || (sk.blades && blades && t < blades.until) || (sk.ccImmune && ccImmune > t) || (sk.undying && undying > t)
+          || (sk.lambs && lambs && t < lambs.until);
         b.classList.toggle("active", !!using);
-        b.classList.toggle("locked", !!blocked);
+        b.classList.toggle("locked", !!blocked && !sk.whileCC);     // 올라프 R 은 CC 중에도 쓴다
         // 다시 누를 수 있으면(르블랑 W·피즈 E) 쿨타임이 돌아도 밝게
         b.classList.toggle("recast", !dash && !!((recall && recall.slot === sk.slot) || (sk.recast && pole) || (sk.amb === "q" && ambQ2())));
       }
