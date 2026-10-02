@@ -62,12 +62,16 @@ MOBILITY = {"ezreal": 3, "lucian": 3, "graves": 3, "vayne": 1, "corki": 2, "tris
             "khazix": 3, "naafiri": 3, "aurora": 2, "belveth": 1, "gwen": 3, "fiora": 1, "pyke": 3, "shen": 3,
             "urgot": 3, "galio": 3, "zoe": 4, "kassadin": 4, "shaco": 1, "leblanc": 2, "ekko": 3, "akali": 3}
 # 패시브로 움직이는 챔피언(스킬을 쓰면 패시브 돌진이 따라 나온다) 과 그 스킬(Q=1 … R=4)
-PASSIVE = {"kalista": [1], "ambessa": [1, 2, 3]}
+PASSIVE = {"kalista": [1], "ambessa": [1, 2, 3, 4]}
 # 움직이지 않고 적 스킬을 막는 스킬(피오라 W 응수, 시비르 E 주문 보호막, 야스오 W 바람 장막 …) 과 그 스킬(Q=1 … R=4)
 GUARD = {"fiora": [2], "tryndamere": [4], "kindred": [4], "sivir": [3], "nocturne": [2], "yasuo": [2], "samira": [2],
          "vladimir": [2], "olaf": [4]}
-# 스킬 말고 따로 굽는 동작: 이름 → 클립 이름 후보(칼리스타 Q 뒤의 패시브 돌진)
-EXTRA_CLIPS = {"kalista": {"dash": ["Spell1_Dash_0", "Attack1_Dash_0"]}}
+# 스킬 말고 따로 굽는 동작: 이름 → 클립 이름 후보(칼리스타 Q 뒤의 패시브 돌진).
+# 암베사는 스킬마다 패시브 돌진 동작이 따로 있다(해시로만 적힌 클립: passivedash_spell1a·1b·2·3·4·4_fail.anm),
+# Q2(Spell1B), R 내려찍기(spell4_hit). spell4 는 R 시전(Spell4_Windup)
+EXTRA_CLIPS = {"kalista": {"dash": ["Spell1_Dash_0", "Attack1_Dash_0"]},
+               "ambessa": {"spell1b": ["Spell1B"], "dash1": ["{99834a45}"], "dash1b": ["{6e4a0e24}"], "dash2": ["{5ed08d9d}"],
+                           "dash3": ["{ed14ca10}"], "miss4": ["{0e9701b2}"], "hit4": ["Spell4_Hit_ToIdle"]}}
 FPS = 15
 TEX_SIZE = 512
 
@@ -637,7 +641,11 @@ def main():
     index = json.load(open(index_path, encoding="utf-8")) if os.path.exists(index_path) else {}
     for k in keys:
         try:
+            # 체력바 높이(h) 는 손으로 고친 챔피언이 있다(커밋 bf8d43a). 다시 만들어도 있던 값은 지킨다(새로 재려면 그 h 를 지운다)
+            old_h = index.get(k, {}).get("h")
             index[k] = build(k, wad_dir, sorted(set(CASTERS.get(k, [])) | ({MOBILITY[k]} if k in MOBILITY else set()) | set(PASSIVE.get(k, [])) | set(GUARD.get(k, []))))
+            if old_h is not None:
+                index[k]["h"] = old_h
             index[k]["v"] = file_version(k)
             print(k, index[k], flush=True)
         except Exception as e:      # 한 챔피언이 안 돼도 나머지는 만든다
