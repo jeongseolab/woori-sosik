@@ -113,7 +113,9 @@ FastAPI 로 만든 롤 전적 서비스. 데이터는 OP.GG 가 공개한 MCP �
   바닥층(isGroundLayer) 은 캐릭터보다 먼저 깊이 검사 없이. 값의 뜻은 LeagueToolkit lol-meta-wiki
   (github.com/LeagueToolkit/lol-meta-wiki) 를 따랐다. 롤 좌표(y 위) 로 계산하고 모델과 같은 카메라로 3D 로 그린다
   - 적 스킬 26개: 스킬 데이터의 `mMissileEffectKey`·`mHitEffectKey` 와 스킨의 `resourceMap` 으로 시전(cast)·투사체(mis)·
-    맞음(hit)·경고(warn, 적 쪽 빨간 표시)·터짐(boom)·빔·감옥 이펙트를 짝지었다(`lol_vfx.py` 의 `SKILLS`). 판정 그림자 원은 그대로 둔다
+    맞음(hit)·경고(warn, 적 쪽 빨간 표시)·터짐(boom)·빔·감옥 이펙트를 짝지었다(`lol_vfx.py` 의 `SKILLS`). 투사체 밑 판정 원은 롤처럼 그리지 않는다.
+    장판은 판정 반지름 그대로 빨간 위험 표시(옅은 바닥 + 터질 때까지 차오르는 안쪽 + 테두리, 감옥은 빨간 점선 고리, `dangerZone`) 를 깐다.
+    적 이펙트는 롤보다 멀리서 내려다봐 작고 어둡게 보여서 밝기를 1.5배로(`ENEMY_GAIN`, 크기는 판정 그대로)
   - 내 챔피언(71명): 그 스킬 애니메이션(SpellN) 에 박힌 이펙트 + 이름 규칙(`<챔피언>_<칸>_cas`·`dash/trail/jump`·`land`·`buf`)
     + 손으로 고른 것(`MINE_EXTRA`). 고른 챔피언 것만 `vfx/mine/<챔피언>.json` 으로 받고 몸에 붙여 따라다니게 한다.
     롤 스킬 스크립트가 클라이언트에 없어서 언제 어떤 이펙트를 켜는지는 이름으로 고른 것이다(킨드레드는 못 찾음)
