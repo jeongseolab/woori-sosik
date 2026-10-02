@@ -41,7 +41,7 @@
 
 (function () {
   // 게임 규칙이 바뀌면 올린다. 서버는 같은 버전의 기록끼리만 순위를 매긴다
-  const VERSION = 11;
+  const VERSION = 12;
 
   const ARENA = { w: 1400, h: 900 };
   const CHAMP = { radius: 65, speed: 335 };
@@ -79,7 +79,9 @@
   //   amb: 암베사 스킬(q·w·e·r). 시전·돌진·도착 때 그 스킬의 효과를 낸다(ambStrike·ambLand)
   //   cd: 롤 최대 레벨 쿨타임(기본 스킬 5레벨, 궁극기 3레벨). 게임에서는 skillCd() 로 4~20초 안으로 맞춘다
   // kind: guard 는 움직이지 않고 적 스킬을 막는다
-  //   parry: 이 초 동안 모든 스킬을 막고 그동안 못 움직인다(피오라 W 응수). shield: 이 초 안에 처음 맞는 스킬 하나를 막는다(주문 보호막)
+  //   parry: 이 초 동안 모든 스킬을 막고 그동안 못 움직인다(피오라 W 응수).
+  //   spellShield: 이 초 안에 처음 맞는 스킬 하나를 피해·CC(공중에 뜸 포함) 모두 막는다(주문 보호막).
+  //   barrier: 이 초 동안 보호막. 처음 맞는 스킬의 피해(목숨) 만 막고 CC 는 맞는다. ccShield 면 CC 도 막는다(모르가나 E). color: 보호막 빛깔
   //   wall: 앞에 바람 장막 {width, life, range, thick}(야스오 W). 날아오는 투사체만 막는다(장판·레이저는 못 막는다)
   //   blades: {dur, radius} 동안 내 둘레로 들어오는 투사체를 없앤다(사미라 W)
   //   ccImmune: 이 초 동안 CC 를 받지 않고 걸린 CC 도 풀린다(올라프 R). whileCC: CC 중에도 쓸 수 있다
@@ -105,7 +107,7 @@
     ahri: { slot: 3, kind: "dash", range: 500, speed: 1200, charges: 3, gap: 1, window: 10, cd: 100, src: "data" },
     fizz: { slot: 2, kind: "dash", range: 400, dur: 0.25, untarget: 0.75, recast: { range: 400, dur: 0.25 }, cd: 8,
             src: "range·recast.range: data(FizzE·FizzETwo), dur·untarget: 추정" },
-    riven: { slot: 2, kind: "dash", range: 250, fixed: true, speed: 1450, cd: 6, src: "data(missileSpeed)" },
+    riven: { slot: 2, kind: "dash", range: 250, fixed: true, speed: 1450, barrier: 1.5, color: "#c3fae8", cd: 6, src: "data(missileSpeed·ShieldDuration)" },
     sejuani: { slot: 0, kind: "dash", range: 625, fixed: true, speed: 1000, cd: 12, src: "data" },
     malphite: { slot: 3, kind: "dash", range: 1000, speed: 1835, unstoppable: true, cd: 100, src: "range: data, speed: 추정" },
     sylas: { slot: 2, kind: "dash", range: 400, speed: 1450, cd: 9, src: "추정" },
@@ -132,7 +134,7 @@
     ],
     pyke: { slot: 2, kind: "dash", range: 550, fixed: true, speed: 1000, cd: 11, src: "range: data, speed: 추정" },
     shen: { slot: 2, kind: "dash", range: 600, min: 300, speed: 800 + CHAMP.speed, cd: 10, src: "data" },
-    urgot: { slot: 2, kind: "dash", range: 450, fixed: true, speed: 1200, cd: 14, src: "data" },
+    urgot: { slot: 2, kind: "dash", range: 450, fixed: true, speed: 1200, barrier: 4, color: "#ff8787", cd: 14, src: "data(EShieldDuration)" },
     galio: { slot: 2, kind: "dash", range: 650, min: 250, speed: 1400, cd: 7, src: "range: data, speed: 추정" },
     zoe: { slot: 3, kind: "blink", range: 575, ret: 1, cd: 5, src: "range: data, ret: 추정" },
     kassadin: { slot: 3, kind: "blink", range: 500, cd: 2, src: "data" },
@@ -141,8 +143,17 @@
     ekko: { slot: 2, kind: "dash", range: 350, fixed: true, speed: 1150, cd: 7, src: "range: data, speed: 추정" },
     akali: { slot: 2, kind: "dash", range: 400, fixed: true, back: true, speed: 1000, cd: 10, src: "range: data, speed: 추정" },
     // 스킬 막기: 움직이지 않고 적 스킬을 무효로 만드는 챔피언
-    sivir: { slot: 2, kind: "guard", shield: 1.5, cd: 18, src: "data(SpellShieldDuration)" },
-    nocturne: { slot: 1, kind: "guard", shield: 1.5, cd: 12, src: "data(ShieldDuration)" },
+    sivir: { slot: 2, kind: "guard", spellShield: 1.5, color: "#ffc078", cd: 18, src: "data(SpellShieldDuration)" },
+    nocturne: { slot: 1, kind: "guard", spellShield: 1.5, color: "#7048e8", cd: 12, src: "data(ShieldDuration)" },
+    // 보호막: 맞아도 피해(목숨) 는 막지만 CC 는 그대로 맞는다. 롤은 보호막 양만큼 피해를 막지만 여기서는 스킬 하나를 막는다(추정).
+    // 모르가나 E(칠흑의 방패) 는 보호막이 있는 동안 CC 도 막는다(ccShield)
+    lux: { slot: 1, kind: "guard", barrier: 2.5, color: "#fff3bf", cd: 10, src: "data(ShieldDuration)" },
+    karma: { slot: 2, kind: "guard", barrier: 2.5, haste: 0.4, hasteDur: 2, color: "#63e6be", cd: 8, src: "data(ShieldDuration·MoveSpeed·MoveSpeedDuration)" },
+    janna: { slot: 2, kind: "guard", barrier: 4, color: "#a5d8ff", cd: 12, src: "data(ShieldDuration)" },
+    lulu: { slot: 2, kind: "guard", barrier: 2.5, color: "#e599f7", cd: 8, src: "data(ShieldDuration)" },
+    diana: { slot: 1, kind: "guard", barrier: 5, color: "#b197fc", cd: 9, src: "data(ShieldDuration)" },
+    orianna: { slot: 2, kind: "guard", barrier: 2.5, color: "#ffd43b", cd: 9, src: "data(ShieldDuration)" },
+    morgana: { slot: 2, kind: "guard", barrier: 5, ccShield: true, color: "#9775fa", cd: 16, src: "data(ShieldDuration), CC 를 막는 것: 롤 칠흑의 방패" },
     yasuo: { slot: 1, kind: "guard", wall: { width: 600, life: 4, range: 450, thick: 100 }, cd: 17,
              src: "data(Width·WallLife·TravelRange·Thickness), 장막이 나아가는 빠르기: 추정" },
     samira: { slot: 1, kind: "guard", blades: { dur: 0.75, radius: 325 }, cd: 22, src: "data(SlashDuration·castRange)" },
@@ -184,7 +195,9 @@
     if (sk.desc) return sk.desc;
     if (sk.kind === "guard") {
       return sk.parry ? `${sk.parry}초 동안 모든 스킬을 막는다(그동안 못 움직임)`
-        : sk.shield ? `${sk.shield}초 안에 처음 맞는 스킬 하나를 막는다`
+        : sk.spellShield ? `주문 보호막 ${sk.spellShield}초: 처음 맞는 스킬 하나를 피해·CC(공중에 뜸까지) 모두 막는다`
+        : sk.barrier ? `보호막 ${sk.barrier}초: 처음 맞는 스킬의 피해를 막는다(` + (sk.ccShield ? "CC 도 막는다" : "CC 는 맞는다") + ")"
+            + (sk.haste ? `, ${sk.hasteDur}초 동안 이동 속도 +${Math.round(sk.haste * 100)}%` : "")
         : sk.wall ? `앞에 폭 ${sk.wall.width} 바람 장막을 ${sk.wall.life}초 동안 세워 날아오는 투사체를 막는다(장판·레이저는 못 막음)`
         : sk.blades ? `${sk.blades.dur}초 동안 내 둘레 ${sk.blades.radius} 안으로 들어오는 투사체를 없앤다`
         : sk.ccImmune ? `${sk.ccImmune}초 동안 CC 를 받지 않는다. 걸린 CC 도 풀리고, CC 중에도 쓸 수 있다`
@@ -201,7 +214,8 @@
       + (sk.stealth ? `. ${sk.stealth}초 동안 투명(적은 마지막으로 본 자리를 노린다)` : "")
       + (sk.haste ? `, 이동 속도 +${Math.round(sk.haste * 100)}%` : "")
       + (sk.charges ? `, ${sk.window}초 안에 ${sk.charges}번` : "")
-      + (sk.dirs ? ". 네 방향마다 쿨타임이 따로" : "") + (sk.unstoppable ? ". 돌진 중에는 CC 를 받지 않음" : "");
+      + (sk.dirs ? ". 네 방향마다 쿨타임이 따로" : "") + (sk.unstoppable ? ". 돌진 중에는 CC 를 받지 않음" : "")
+      + (sk.barrier ? `. 보호막 ${sk.barrier}초(피해만 막고 CC 는 맞는다)` : "");
   }
 
   // 조작 설정: 이동 방식(mouse | wasd), 모드(normal | hard), 모드마다 주문 두 칸(slots: [앞 키 칸, 뒤 키 칸]).
@@ -853,7 +867,7 @@
     let cdLeft, cdMax, dirLeft, charges, dash, untarget, ret, recall, pole;   // 내 챔피언 이동기(useSkill)
     let hidden, seen, haste, realm, skillAt, skillUsed;
     let amb, act;      // 암베사 스킬 상태, 내 3D 동작을 정해 두는 것(act: {anim, t0, hold, until})
-    let parry, shieldUp, wall, blades, ccImmune, undying, lambs;     // 막기 스킬(kind: guard)
+    let parry, shieldUp, barrier, wall, blades, ccImmune, undying, lambs;     // 막기 스킬(kind: guard)
     let lastGuardFx = -1;
     let bannerTimer = 0, overTimer = 0;
     let controls = loadControls();
@@ -915,7 +929,8 @@
       amb = { q2: null, shield: null, brace: null, arcs: [], aimR: null, step: null, buf: null };
       act = null;
       parry = -1;              // 이 시각까지 모든 스킬을 막는다(피오라 W)
-      shieldUp = null;         // 처음 맞는 스킬 하나를 막는 보호막 {until, color}(시비르 E·녹턴 W)
+      shieldUp = null;         // 주문 보호막: 처음 맞는 스킬 하나를 피해·CC 모두 막는다 {until, color}(시비르 E·녹턴 W)
+      barrier = null;          // 보호막: 처음 맞는 스킬의 피해만 막는다 {until, color, cc}(럭스 W·리븐 E …)
       wall = null;             // 바람 장막(야스오 W) {x, y, nx, ny, born, until, ...sk.wall}
       blades = null;           // 투사체를 없애는 칼날(사미라 W) {until, radius}
       ccImmune = -1;           // 이 시각까지 CC 를 받지 않는다(올라프 R)
@@ -1292,7 +1307,8 @@
       skillAt = t; skillUsed = sk;
       target = null;
       if (sk.parry) { parry = t + sk.parry; emit({ x: player.x, y: player.y, z: 90, size: 200, size1: 120, color: "#ffffff", color1: "#a5d8ff", shape: "glow", life: 0.3 }); sfx("cleanse"); }
-      if (sk.shield) { shieldUp = { until: t + sk.shield, color: modelKey(faceKey) === "nocturne" ? "#7048e8" : "#ffc078" }; sfx("cleanse"); }
+      if (sk.spellShield) { shieldUp = { until: t + sk.spellShield, color: sk.color }; sfx("cleanse"); }
+      if (sk.barrier) giveBarrier(sk);
       if (sk.wall) {
         const { dx, dy } = aim(1);
         wall = { ...sk.wall, x: player.x, y: player.y, nx: dx, ny: dy, born: t, until: t + sk.wall.life };
@@ -1308,12 +1324,30 @@
       }
       if (sk.undying) { undying = t + sk.undying; flashGround(player.x, player.y, 140, "#fa5252", 0.5); sfx("cleanse"); }
       if (sk.lambs) { lambs = { x: player.x, y: player.y, radius: sk.lambs.radius, until: t + sk.lambs.dur }; flashGround(player.x, player.y, sk.lambs.radius, "#91a7ff", 0.6); sfx("cleanse"); }
+      if (sk.haste && !sk.untarget) haste = { pct: sk.haste, until: t + sk.hasteDur };
       if (sk.untarget) {
         untarget = t + sk.untarget;
         if (sk.haste) haste = { pct: sk.haste, until: t + sk.hasteDur };
         flashGround(player.x, player.y, 120, "#c92a2a", 0.5);
         sfx("ghost");
       }
+    }
+    // 보호막을 건다(막기 스킬, 또는 돌진과 함께: 리븐 E·우르곳 E)
+    function giveBarrier(sk) {
+      barrier = { until: t + sk.barrier, color: sk.color || "#ffd8a8", cc: !!sk.ccShield };
+      emit({ x: player.x, y: player.y, z: 90, size: 230, size1: 170, color: "#ffffff", color1: barrier.color, shape: "glow", life: 0.3 });
+      sfx("cleanse");
+    }
+    // 보호막이 맞은 스킬의 피해를 받아 낸다(그리고 깨진다). 받았으면 true, CC 까지 막으면 "cc"
+    function barrierTake() {
+      if (!barrier || t >= barrier.until) return false;
+      const b = barrier;
+      barrier = null;
+      pops.push({ x: player.x, y: player.y, text: "보호막", life: 1, max: 1 });
+      emit({ x: player.x, y: player.y, z: 90, size: 220, size1: 280, color: "#ffffff", color1: b.color, shape: "ring", life: 0.3 });
+      burst(player.x, player.y, 80, b.color, 14, 300);
+      sfx("cleanse");
+      return b.cc ? "cc" : true;
     }
     // 바람 장막의 지금 가운데(range 까지 나아간다)
     const wallAt = w => { const k = Math.min(w.range, 100 + (t - w.born) * 900); return { x: w.x + w.nx * k, y: w.y + w.ny * k }; };
@@ -1357,6 +1391,7 @@
       if (!m.blink && !sk.amb) sfx("ghost");
       if (sk.untarget && !m.again) { untarget = t + sk.untarget; if (sk.recast) pole = { until: untarget }; }
       if (sk.recall) recall = { slot: sk.slot, x: m.fx, y: m.fy, until: t + sk.recall };
+      if (sk.barrier && !m.again) giveBarrier(sk);
       if (sk.amb) { if (m.ambStep) ambStepStart(m); else ambStrike(m); }
     }
     // 도착했을 때: 순간이동 효과, 조이 R 돌아오기, 투명·다른 차원
@@ -1656,16 +1691,15 @@
       }
       if (amb.arcs.length) amb.arcs = amb.arcs.filter(o => t - o.born < o.max);
     }
-    // 보호막이 스킬 하나를 막는다(맞은 것을 없던 일로). 버티는 동안 막으면 응수(더 센 내려찍기)
+    // 거부(W) 의 보호막이 스킬 하나의 피해를 받아 낸다. 보호막이라 CC 는 그대로 맞는다(hit). 버티는 동안 받으면 응수(더 센 내려찍기)
     function ambBlock() {
       if (!amb.shield || t >= amb.shield.until) return false;
       amb.shield = null;
-      dodged += 1;           // 막기 스킬처럼 막은 스킬은 피한 수로 센다
       if (amb.brace) amb.brace.parried = true;
       emit({ x: player.x, y: player.y, z: 90, size: 200, size1: 260, color: "#ffffff", color1: AMB.gold, shape: "amb_w_shield", life: 0.3 });
       burst(player.x, player.y, 90, AMB.gold, 20, 420);
       wave(player.x, player.y, 40, 220, 0.35, 10);
-      pops.push({ x: player.x, y: player.y, text: "막음", color: AMB.gold, life: 1, max: 1 });
+      pops.push({ x: player.x, y: player.y, text: "보호막", color: AMB.gold, life: 1, max: 1 });
       sfx("ambShield");
       return true;
     }
@@ -1683,9 +1717,16 @@
     // 하드 모드는 무적이 없고, 맞은 스킬의 CC 를 그대로 당한다(how: applyCC 참고)
     function hit(s, how = {}) {
       if (dead || untarget > t || (mode !== "hard" && safe > 0)) return false;
-      // 응수·주문 보호막은 스킬을 막는다. 맞힌 투사체처럼 사라진다
+      // 응수·주문 보호막: 피해도 CC(공중에 뜸 포함) 도 받지 않는다. 맞힌 투사체처럼 사라진다
       if (parry > t || (shieldUp && t < shieldUp.until)) { blocked(); return true; }
-      if (ambBlock()) return true;         // 막았다: 투사체·장판은 맞은 것처럼 끝나지만 목숨은 그대로
+      // 저지 불가 돌진(말파이트 R, 암베사 R 은 겨눌 때부터) 이나 CC 면역(올라프 R) 이면 CC 를 받지 않는다
+      const ccOk = !(dash && (dash.started || dash.sk.steady) && dash.sk.unstoppable) && !(ccImmune > t);
+      // 보호막: 피해(목숨) 는 막지만 CC 는 그대로 맞는다(모르가나 E 는 CC 도 막는다). 맞은 것이라 피한 수로 세지 않는다
+      const took = ambBlock() || barrierTake();
+      if (took) {
+        if (mode === "hard" && ccOk && took !== "cc") applyCC(s, how);
+        return true;
+      }
       lives -= 1;
       // 트린다미어 R·킨드레드 R: 목숨이 1 아래로 내려가지 않는다
       if (lives <= 0 && (undying > t || (lambs && t < lambs.until && dist(player, lambs) < lambs.radius))) lives = 1;
@@ -1701,8 +1742,7 @@
       skillSound(s, "hit");
       if (lives === 1) announce("체력이 낮습니다", "warn");
       if (lives <= 0) dead = true;
-      // 말파이트 R 처럼 저지 불가인 돌진 중에는 CC 를 받지 않는다(암베사 R 은 겨눌 때부터)
-      else if (mode === "hard" && !(dash && (dash.started || dash.sk.steady) && dash.sk.unstoppable) && !(ccImmune > t)) applyCC(s, how);
+      else if (mode === "hard" && ccOk) applyCC(s, how);
       return true;
     }
 
@@ -1817,6 +1857,8 @@
                    size: 70, size1: 20, color: "#fff3bf", color1: "#e03131", shape: "spark", life: 0.2 });
           }
         }
+        // 보호막: 몸을 감싼 옅은 빛(주문 보호막은 테두리)
+        if (barrier && t < barrier.until) emit({ x: player.x, y: player.y, z: 90, size: 200, size1: 205, color: "#ffffff", color1: barrier.color, shape: "glow", life: 0.1, a: 0.3 });
         if (shieldUp && t < shieldUp.until) emit({ x: player.x, y: player.y, z: 80, size: 150, size1: 160, color: "#ffffff", color1: shieldUp.color, shape: "ring", life: 0.12, a: 0.6 });
         if (parry > t) emit({ x: player.x, y: player.y, z: 80, size: 130, size1: 140, color: "#ffffff", color1: "#a5d8ff", shape: "ring", life: 0.1, a: 0.8 });
         if (lambs && t < lambs.until && !(t - (lambs.fxAt || -1) < 0.3)) {
@@ -3750,7 +3792,7 @@
         const using = (dash && dash.sk === sk) || (recall && recall.slot === sk.slot) || (sk.untarget && untarget > t)
           || (sk.stealth && hidden > t) || (sk.ret && ret) || (charges && charges.slot === sk.slot)
           || (sk.amb === "w" && amb.shield) || (sk.amb === "q" && amb.q2) || (amb.step && amb.step.sk === sk)
-          || (sk.parry && parry > t) || (sk.shield && shieldUp && t < shieldUp.until) || (sk.wall && wall && t < wall.until)
+          || (sk.parry && parry > t) || (sk.spellShield && shieldUp && t < shieldUp.until) || (sk.barrier && barrier && t < barrier.until) || (sk.wall && wall && t < wall.until)
           || (sk.blades && blades && t < blades.until) || (sk.ccImmune && ccImmune > t) || (sk.undying && undying > t)
           || (sk.lambs && lambs && t < lambs.until);
         b.classList.toggle("active", !!using);
