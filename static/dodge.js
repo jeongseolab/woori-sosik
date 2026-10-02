@@ -41,7 +41,7 @@
 
 (function () {
   // 게임 규칙이 바뀌면 올린다. 서버는 같은 버전의 기록끼리만 순위를 매긴다
-  const VERSION = 8;
+  const VERSION = 10;
 
   const ARENA = { w: 1400, h: 900 };
   const CHAMP = { radius: 65, speed: 335 };
@@ -75,6 +75,8 @@
   //   charges·gap·window: window 초 안에 gap 초 간격으로 charges 번(아리 R). dirs: 위·아래·왼쪽·오른쪽 방향마다 쿨타임이 따로(벨베스 Q)
   //   unstoppable: 돌진 중에 맞아도 CC 를 받지 않는다(말파이트 R). dashAnim: 돌진 중 3D 동작(없으면 그 스킬 동작)
   //   passive: 스킬을 쓰면 패시브 돌진이 따라 나오는 챔피언(칼리스타·암베사). 설명에 "패시브" 를 붙인다
+  //   steady: 시전 중에도 CC 로 끊기지 않고 저지 불가(암베사 R). anim: 시전 동작(없으면 spell1~4). desc: 설명을 통째로
+  //   amb: 암베사 스킬(q·w·e·r). 시전·돌진·도착 때 그 스킬의 효과를 낸다(ambStrike·ambLand)
   //   cd: 롤 최대 레벨 쿨타임(기본 스킬 5레벨, 궁극기 3레벨). 게임에서는 skillCd() 로 4~20초 안으로 맞춘다
   //   src: 거리·속도의 출처. data = 롤 클라이언트 데이터(CommunityDragon, 2026-10-02 받음.
   //   DashSpeed·DashDistance·castRangeDisplayOverride 등), 추정 = 데이터에 없어(챔피언 스크립트 안의 값) 롤 지식으로 적은 값.
@@ -125,11 +127,22 @@
     // 패시브 돌진: 칼리스타는 Q(꿰뚫기) 를 던진 뒤 커서 쪽으로 뛴다(전투 태세). 거리는 신발에 따라 달라서 데이터에 없다
     kalista: { slot: 0, kind: "dash", range: 250, dur: 0.3, windup: 0.25, dashAnim: "dash", passive: true, cd: 9,
                src: "cd·windup: data, range·dur: 추정" },
-    // 암베사는 스킬을 쓸 때마다 패시브로 짧게 돌진한다(AmbessaPassive 의 Buffer_Dash_*: 175~350 을 0.3초)
+    // 암베사: 스킬을 쓰면 시전이 끝난 뒤 패시브(용견의 걸음) 로 커서 쪽 175~350 을 0.3초에 돌진한다(AmbessaPassive Buffer_Dash_*).
+    // 스킬마다 자기 효과(amb, 아래 "암베사" 부분) 와 자기 돌진 동작(passivedash_spell*.anm) 이 있다. 값은 롤 클라이언트 데이터(AmbessaQ1·Q2·W·E·R)
     ambessa: [
-      { slot: 0, kind: "dash", range: 350, min: 175, dur: 0.3, passive: true, cd: 10, src: "data" },
-      { slot: 1, kind: "dash", range: 350, min: 175, dur: 0.3, windup: 0.225, passive: true, cd: 14, src: "data(Dash_Delay)" },
-      { slot: 2, kind: "dash", range: 350, min: 175, dur: 0.3, windup: 0.225, passive: true, cd: 9, src: "data" },
+      { slot: 0, kind: "dash", range: 350, min: 175, dur: 0.3, windup: 0.25, passive: true, amb: "q", anim: "spell1", dashAnim: "dash1", cd: 10,
+        desc: "교활한 일격: 앞쪽 반원(375) 을 휩쓸고 커서 쪽으로 돌진. 적을 맞히면 4초 안에 한 번 더 눌러 앞으로 내려찍는다(파열의 강타)",
+        src: "data(AmbessaQ1·Q2 mCastTime·castRange, AmbessaQ Swap_Duration·Swap_Static_Cooldown), 내려찍기 폭: 추정" },
+      { slot: 1, kind: "dash", range: 350, min: 175, dur: 0.3, windup: 0.225, passive: true, amb: "w", anim: "spell2", dashAnim: "dash2", cd: 14,
+        desc: "거부: 1.5초 동안 보호막(스킬 한 번을 막는다). 0.5초 동안 버티며 그사이 돌진해(0.225초 뒤) 내려앉으며 둘레 325 를 내리친다. 버티는 동안 막으면 더 세게",
+        src: "data(Dash_Delay·Buff_Duration·Shield_Duration·castRange), 보호막이 스킬 한 번을 막는 것: 추정(롤은 피해량만큼)" },
+      { slot: 2, kind: "dash", range: 350, min: 175, dur: 0.3, windup: 0.225, passive: true, amb: "e", anim: "spell3", dashAnim: "dash3", cd: 9,
+        desc: "열상: 사슬을 휘둘러 둘레 325 를 베고(맞은 적 1초 둔화) 커서 쪽으로 돌진, 내려앉으며 한 번 더 벤다",
+        src: "data(spellCastTime·castRange·Slow_Amount·Slow_Duration)" },
+      { slot: 3, kind: "blink", range: 1250, windup: 0.7, unstoppable: true, steady: true, amb: "r", anim: "spell4", cd: 100,
+        desc: "공개 처형: 0.7초 동안 커서 쪽 1250 줄을 겨눈 뒤(저지 불가) 줄 안에서 가장 먼 적 뒤로 순간이동해 0.75초 제압, 내려찍어 기절. "
+          + "제압된 적은 시전이 끊긴다. 적이 없으면 짧게 돌진",
+        src: "data(AmbessaR castRange·mCastTime·Suppress_Duration·Stun_Duration), 줄 폭·적이 없을 때 돌진: 추정" },
     ],
   };
   // 그 챔피언의 이동기 칸들(없으면 빈 배열)
@@ -141,6 +154,7 @@
   const skillCd = sk => Math.min(20, Math.max(4, sk.cd));
   // 시작 창·칸 설명에 쓰는 한 줄
   function skillText(sk) {
+    if (sk.desc) return sk.desc;
     const how = sk.kind === "blink" ? `커서 쪽으로 최대 ${sk.range} 순간이동`
       : sk.back ? `커서 반대쪽으로 ${sk.range} 뛰어 물러남`
       : `커서 쪽으로 ${sk.fixed ? "" : "최대 "}${sk.range} 돌진`;
@@ -495,6 +509,33 @@
     vel_aoe: [0, 258, 256, 256],
     vel_cracks: [258, 258, 256, 256],
     vel_ring: [0, 1032, 128, 128],
+    // 암베사(tools/fx_atlas.py 가 붙인다). 휘두르기 텍스처(q_slash·q_body·e_ring·w_shock) 는 롤처럼 부채꼴 띠에 입힌다(ambArc)
+    amb_w_ring: [0, 1570, 256, 256],
+    amb_r_decal: [258, 1570, 256, 256],
+    amb_r_marker: [516, 1570, 256, 256],
+    amb_q_sweet: [260, 1828, 256, 128],
+    amb_w_shock: [518, 1828, 256, 128],
+    amb_r_lines: [774, 1570, 128, 256],
+    amb_q_tar: [0, 1828, 128, 256],
+    amb_e_trail: [130, 1828, 128, 256],
+    amb_q_slash: [776, 1828, 128, 128],
+    amb_q_body: [0, 2086, 128, 128],
+    amb_q_crescent: [130, 2086, 128, 128],
+    amb_q_chain: [260, 2086, 128, 128],
+    amb_q2_impact: [390, 2086, 128, 128],
+    amb_q2_wave: [520, 2086, 128, 128],
+    amb_q2_explo: [650, 2086, 128, 128],
+    amb_q2_swipe: [780, 2086, 128, 128],
+    amb_w_shield: [0, 2216, 128, 128],
+    amb_w_flash: [130, 2216, 128, 128],
+    amb_w_wind: [260, 2216, 128, 128],
+    amb_e_ring: [390, 2216, 128, 128],
+    amb_e_edge: [520, 2216, 128, 128],
+    amb_r_impact: [650, 2216, 128, 128],
+    amb_r_residual: [780, 2216, 128, 128],
+    amb_dash: [0, 2346, 128, 128],
+    amb_motes: [130, 2346, 128, 128],
+    amb_q2_decal: [260, 2346, 64, 128],
   };
   const fxImg = new Image(), groundImg = new Image();
   let fxReady = false, groundReady = false;
@@ -647,6 +688,12 @@
       else if (kind === "thump") { noise(0.3, 0.08, 500, 90); tone("sine", 110, 45, 0.3, 0.1); }
       // 정화: 맑게 올라가는 종소리. CC 에 걸림: 둔탁하게 묶이는 소리
       else if (kind === "cleanse") { tone("sine", 660, 1320, 0.25, 0.09); tone("triangle", 990, 1980, 0.3, 0.06, 0.05); noise(0.3, 0.04, 6000, 2500); }
+      // 암베사: 칼날이 바람을 가르는 소리, 땅을 내려찍는 소리, 금속 막, 사슬, 처형 전의 낮은 울림
+      else if (kind === "ambSlash") { noise(0.2, 0.07, 3200, 600); tone("sawtooth", 520, 160, 0.14, 0.03); }
+      else if (kind === "ambSlam") { noise(0.4, 0.1, 700, 70); tone("sine", 120, 38, 0.4, 0.16); }
+      else if (kind === "ambShield") { tone("triangle", 880, 1320, 0.18, 0.06); tone("sine", 440, 660, 0.25, 0.05); noise(0.15, 0.03, 5000, 2500); }
+      else if (kind === "ambWhip") { noise(0.3, 0.07, 1800, 4200); tone("square", 300, 900, 0.12, 0.02, 0.05); }
+      else if (kind === "ambR") { tone("sawtooth", 80, 140, 0.7, 0.05); noise(0.7, 0.04, 300, 1200); }
       else if (kind === "cc") { tone("square", 220, 110, 0.14, 0.06); noise(0.18, 0.06, 1200, 300); }
     } catch {}
   }
@@ -768,6 +815,7 @@
     let effects, tenacity, ablaze, marked, tethers;   // 하드 모드 CC(applyCC)
     let cdLeft, cdMax, dirLeft, charges, dash, untarget, ret, recall, pole;   // 내 챔피언 이동기(useSkill)
     let hidden, seen, haste, realm, skillAt, skillUsed;
+    let amb, act;      // 암베사 스킬 상태, 내 3D 동작을 정해 두는 것(act: {anim, t0, hold, until})
     let bannerTimer = 0, overTimer = 0;
     let controls = loadControls();
     // 내 챔피언: 시작 창에서 고른 챔피언. 고른 적이 없으면 앱이 넘긴 챔피언이 고를 수 있는 42명 안에 있을 때 그 챔피언, 아니면 이즈리얼
@@ -825,6 +873,8 @@
       realm = null;            // 오로라 W 의 "다른 차원" {from, until}
       skillAt = -9;            // 이동기를 쓴 시각과 그 이동기(3D 동작)
       skillUsed = null;
+      amb = { q2: null, shield: null, brace: null, arcs: [], aimR: null };
+      act = null;
       cursor = null;          // 마우스가 가리키는 바닥(점멸 방향)
       facing = { x: 0, y: -1 };    // 마지막으로 움직인 방향(커서가 없을 때 점멸 방향)
       prevFacing = null;       // 바로 전 방향과 바뀐 시각(STOP_GRACE)
@@ -1149,6 +1199,7 @@
       const sk = mySkills().find(x => x.slot === i);
       if (state !== "play" || !sk) return;
       if (held() || dash) { sfx("deny"); return; }
+      if (sk.amb) { ambCast(sk, i); return; }
       // 르블랑 W: 정해진 시간 안에 다시 누르면 처음 자리로(쿨타임과 상관없이)
       if (recall && recall.slot === i) {
         const from = { x: player.x, y: player.y };
@@ -1203,11 +1254,13 @@
       if (!m.blink) sfx("ghost");
       if (sk.untarget && !m.again) { untarget = t + sk.untarget; if (sk.recast) pole = { until: untarget }; }
       if (sk.recall) recall = { slot: sk.slot, x: m.fx, y: m.fy, until: t + sk.recall };
+      if (sk.amb) ambStrike(m);
     }
     // 도착했을 때: 순간이동 효과, 조이 R 돌아오기, 투명·다른 차원
     function moveEnds(m) {
       const sk = m.sk;
-      if (m.blink) { flashFx({ x: m.fx, y: m.fy }, player); sfx("flash"); }
+      if (sk.amb) ambLand(m);
+      else if (m.blink) { flashFx({ x: m.fx, y: m.fy }, player); sfx("flash"); }
       if (m.again) { untarget = t; pole = null; }
       if (sk.ret) ret = { x: m.fx, y: m.fy, at: t + sk.ret };
       if (sk.stealth) {
@@ -1217,6 +1270,254 @@
         if (sk.haste) haste = { pct: sk.haste, until: hidden };
         if (sk.realm) { realm = { from: t, until: hidden }; flashGround(player.x, player.y, 150, "#9775fa", 0.5); }
       }
+    }
+
+    // ── 암베사 ──
+    // 롤 순서 그대로: 누르면 시전 동작(windup) → 스킬이 나가고(ambStrike) → 용견의 걸음으로 돌진 → 내려앉음(ambLand).
+    // 적은 경기장 가장자리에서 시전 중인 챔피언(casters). 맞히면 하얗게 번쩍이고, R 은 제압해 시전을 끊는다
+    const AMB = { gold: "#ffd8a8", orange: "#ff922b", ember: "#fd7e14", red: "#e8590c", blood: "#c92a2a", dark: "#5c2b12" };
+    const ambQ2 = () => amb.q2 && t < amb.q2.until && t >= amb.q2.ready;
+    function ambCast(sk, i) {
+      const q2 = sk.amb === "q" && ambQ2();
+      if (cdLeft[i] > 0 && !q2) { sfx("deny"); return; }
+      if (q2) amb.q2 = null;
+      cdMax[i] = cdLeft[i] = skillCd(sk);
+      if (sk.amb === "r") {
+        // R: 겨누는 0.7초 동안 제자리(저지 불가). 방향은 누른 순간 커서 쪽
+        const { dx, dy } = aim(sk.range, 0, true);
+        dash = { sk, fx: player.x, fy: player.y, tx: player.x, ty: player.y, t0: t + sk.windup, blink: true, dur: 0, dx, dy };
+        target = null;
+        skillAt = t; skillUsed = sk;
+        facing = { x: dx, y: dy };
+        act = { anim: sk.anim, t0: t, hold: t + sk.windup, until: t + sk.windup };
+        amb.aimR = { dx, dy, from: t, until: t + sk.windup };
+        sfx("ambR");
+        return;
+      }
+      const { dx, dy, len } = aim(sk.range, sk.min);
+      go(sk, dx, dy, len, { wind: sk.windup });
+      dash.q2 = q2;
+      dash.a = Math.atan2(dy, dx);      // 스킬은 커서 쪽으로 나가고, 돌진(용견의 걸음) 도 커서 쪽
+      act = { anim: q2 ? "spell1b" : sk.anim, t0: t, hold: t + sk.windup, until: t + sk.windup };
+      if (sk.amb === "w") {
+        amb.shield = { until: t + 1.5 };
+        amb.brace = { until: t + 0.5, parried: false };
+        emit({ x: player.x, y: player.y, ground: 1, size: 70, size1: 150, color: "#ffffff", color1: AMB.gold, shape: "amb_w_shield", life: 0.35, a: 0.9 });
+        sfx("ambShield");
+      } else {
+        sfx("ghost");
+      }
+    }
+    // 적 고르기: 둘레 r 안, line 이면 그 선분에서 hw 안. dir 를 주면 그 방향 앞쪽만. 제압된 적은 빼고
+    function ambTargets(x, y, r, o = {}) {
+      return casters.filter(c => {
+        if (c.supUntil > t) return false;
+        const dx = c.x - x, dy = c.y - y;
+        if (o.dir != null && dx * Math.cos(o.dir) + dy * Math.sin(o.dir) <= -CHAMP.radius) return false;     // 등 뒤는 안 맞는다
+        if (o.line) return segDist(c, o.line[0], o.line[1]) < o.hw + CHAMP.radius;
+        return Math.hypot(dx, dy) <= r + CHAMP.radius;
+      });
+    }
+    function ambHit(c, color = AMB.orange) {
+      c.ambHit = t;
+      burst(c.x, c.y, 90, color, 16, 380);
+      emit({ x: c.x, y: c.y, z: 90, size: 150, size1: 60, color: "#ffffff", color1: color, shape: "amb_q_tar", life: 0.3 });
+    }
+    // 휘두른 자국: 부채꼴 띠(바닥 위 z 높이) 에 휘두르기 텍스처를 입힌다. 텍스처 가로가 휘두르는 방향, 세로가 밖→안.
+    // sweep 초 동안 a0 에서 a1 까지 펼쳐진다(drawAmb). uFix 면 텍스처의 세로 한 줄만 쓴다(둥근 빛을 띠 모양 그대로 고르게 깔 때)
+    function ambArc(o) {
+      const life = o.life || 0.4;
+      amb.arcs.push({ z: 0, add: 1, a: 1, sweep: 0.12, col: "#ffffff", grow: 0, ...o, max: life, born: t });
+    }
+    // 스킬이 나가는 순간(시전 끝, 돌진 시작)
+    function ambStrike(m) {
+      const sk = m.sk, x = player.x, y = player.y, a = m.a;
+      if (sk.amb !== "r") {
+        act = { anim: m.q2 ? "dash1b" : sk.dashAnim, t0: t, hold: t + m.dur, until: t + m.dur + 0.45 };
+        ambDashFx(m);
+      }
+      if (sk.amb === "q" && !m.q2) {
+        // 교활한 일격: 앞쪽 반원(375). 끝자락이 더 아프다(sweetspot). 적을 맞히면 0.5초 뒤부터 4초 동안 파열의 강타
+        const R = 375;
+        ambArc({ x, y, r0: R * 0.35, r1: R * 1.05, a0: a - Math.PI / 2, a1: a + Math.PI / 2, f: "amb_q_slash", life: 0.45, sweep: 0.24, trail: 2.2, z: 40 });
+        ambArc({ x, y, r0: R * 0.55, r1: R * 1.12, a0: a - Math.PI / 2, a1: a + Math.PI / 2, f: "amb_q_body", col: AMB.gold, life: 0.4, sweep: 0.22, trail: 1.6, z: 55, a: 0.8 });
+        ambArc({ x, y, r0: R * 0.2, r1: R, a0: a - Math.PI / 2, a1: a + Math.PI / 2, f: "glow", uFix: 0.5, col: AMB.ember, life: 0.5, sweep: 0.2, a: 0.55 });
+        for (let k = -2; k <= 2; k++) {
+          const b = a + k * 0.55;
+          emit({ x: x + Math.cos(b) * R * 0.92, y: y + Math.sin(b) * R * 0.92, ground: 1, size: 70, size1: 95, color: "#ffffff", color1: AMB.gold,
+                 shape: "amb_q_sweet", rot: b + Math.PI / 2, life: 0.7, add: 0.4, a: 0.8, erode: 1 });
+        }
+        wave(x + Math.cos(a) * R * 0.5, y + Math.sin(a) * R * 0.5, 60, R, 0.35, 10);
+        const got = ambTargets(x, y, R, { dir: a });
+        got.forEach(c => ambHit(c));
+        if (got.length) {
+          amb.q2 = { ready: t + 0.5, until: t + 4 };
+          cdMax[sk.slot] = cdLeft[sk.slot] = 0.5;
+        }
+        sfx("ambSlash");
+      } else if (sk.amb === "q") {
+        // 파열의 강타: 앞으로 375 를 내려찍는다(폭 200 추정)
+        const L = 375, end = inArena(x + Math.cos(a) * L, y + Math.sin(a) * L);
+        ambArc({ x, y, r0: 40, r1: L, a0: a - 0.16, a1: a + 0.16, f: "amb_q2_swipe", col: AMB.gold, life: 0.35, sweep: 0.06, z: 30 });
+        for (let k = 0; k < 5; k++) {
+          const u = (k + 0.5) / 5;
+          emit({ x: x + Math.cos(a) * L * u, y: y + Math.sin(a) * L * u, ground: 1, size: 70, size1: 80, color: "#ffffff", color1: AMB.gold,
+                 shape: "amb_q2_decal", rot: a + Math.PI / 2, life: 1.1, add: 0, a: 0.9, erode: 1 });
+        }
+        emit({ x: end.x, y: end.y, z: 40, size: 200, size1: 280, color: "#fff3bf", color1: AMB.red, shape: "amb_q2_impact", life: 0.4 });
+        emit({ x: end.x, y: end.y, z: 30, size: 240, size1: 300, color: "#ffffff", color1: AMB.ember, shape: "amb_q2_explo", life: 0.45 });
+        emit({ x: end.x, y: end.y, ground: 1, size: 110, size1: 230, color: AMB.gold, color1: AMB.red, shape: "amb_q2_wave", rot: a + Math.PI / 2, life: 0.4 });
+        burst(end.x, end.y, 30, AMB.orange, 22, 420);
+        wave(end.x, end.y, 40, 300, 0.45, 18);
+        shake = Math.max(shake, 0.12);
+        ambTargets(x, y, 0, { line: [{ x, y }, end], hw: 100, dir: a }).forEach(c => ambHit(c, AMB.red));
+        sfx("ambSlam");
+      } else if (sk.amb === "e") {
+        ambWhip(x, y, a, 1);
+      } else if (sk.amb === "w") {
+        // 버티기(0.5초) 가 돌진에 이어진다. 바람이 몸으로 모인다
+        for (let k = 0; k < 6; k++) {
+          const b = Math.random() * Math.PI * 2;
+          emit({ x: x + Math.cos(b) * 140, y: y + Math.sin(b) * 140, z: rand(30, 120), vx: -Math.cos(b) * 380, vy: -Math.sin(b) * 380,
+                 size: 90, size1: 30, color: "#ffffff", color1: AMB.gold, shape: "amb_w_wind", life: 0.35, a: 0.6, drag: 2 });
+        }
+      } else if (sk.amb === "r") {
+        // 겨눈 줄(1250, 폭 300 추정) 안에서 가장 먼 적 뒤로 순간이동해 제압. 없으면 커서 쪽으로 짧게 돌진(추정)
+        const ex = x + m.dx * sk.range, ey = y + m.dy * sk.range;
+        amb.aimR = null;
+        const along = c => (c.x - x) * m.dx + (c.y - y) * m.dy;
+        const far = ambTargets(x, y, 0, { line: [{ x, y }, { x: ex, y: ey }], hw: 150, dir: Math.atan2(m.dy, m.dx) }).reduce((b, c) => (!b || along(c) > along(b) ? c : b), null);
+        if (far) {
+          const to = inArena(far.x + m.dx * 110, far.y + m.dy * 110);
+          m.tx = to.x; m.ty = to.y; m.victim = far;
+          facing = { x: -m.dx, y: -m.dy };       // 뒤에 내려서 적을 본다
+          viewAngle = Math.atan2(-m.dy, -m.dx);
+        } else {
+          const to = inArena(x + m.dx * 350, y + m.dy * 350);
+          m.blink = false; m.dur = 0.3; m.tx = to.x; m.ty = to.y;
+          act = { anim: "miss4", t0: t, hold: t + 0.3, until: t + 0.8 };
+          ambDashFx(m);
+        }
+        // 지나간 자리에 핏빛 잔상
+        emit({ x, y, z: 80, line: [x, y, m.tx, m.ty], size: 90, size1: 10, color: "#ffffff", color1: AMB.blood, shape: "spark", life: 0.35 });
+        emit({ x, y, z: 80, size: 200, size1: 60, color: AMB.gold, color1: AMB.blood, shape: "star", life: 0.3, spin: 3 });
+      }
+    }
+    // 내려앉는 순간
+    function ambLand(m) {
+      const sk = m.sk, x = player.x, y = player.y;
+      if (sk.amb === "w") {
+        // 거부: 둘레 325 를 내리친다. 버티는 동안 스킬을 막았으면(응수) 더 세게(HighDamageMultiplier 1.5)
+        const big = amb.brace && amb.brace.parried ? 1.5 : 1, R = 325;
+        amb.brace = null;
+        emit({ x, y, ground: 1, size: R * 0.6, size1: R * 1.25, color: "#ffffff", color1: AMB.orange, shape: "amb_w_ring", life: 0.55, add: 0.6 });
+        ambArc({ x, y, r0: R * 0.75, r1: R * 1.15, a0: 0, a1: Math.PI * 2, f: "amb_w_shock", col: AMB.gold, life: 0.5, sweep: 0.001, rep: 5, grow: 0.5 });
+        emit({ x, y, ground: 1, size: R * 0.8, size1: R * 0.9, color: "#ffffff", color1: AMB.dark, shape: "amb_r_residual", life: 1.2, add: 0, a: 0.75, erode: 1 });
+        emit({ x, y, z: 60, size: 220 * big, size1: 320 * big, color: "#fff3bf", color1: AMB.ember, shape: "amb_w_flash", life: 0.35 });
+        emit({ x, y, pillar: 300 * big, size: 160, size1: 60, color: "#ffffff", color1: AMB.orange, shape: "beam", life: 0.35 });
+        burst(x, y, 30, AMB.orange, Math.round(26 * big), 520);
+        ambRocks(x, y, 10);
+        wave(x, y, 60, R * 1.6 * big, 0.5, 16 * big);
+        shake = Math.max(shake, 0.15 * big);
+        ambTargets(x, y, R).forEach(c => ambHit(c));
+        sfx("ambSlam");
+      } else if (sk.amb === "e") {
+        // 용견의 걸음을 E 로 시작하면 내려앉으며 한 번 더 벤다
+        ambWhip(x, y, m.a + Math.PI, 0.85);
+      } else if (sk.amb === "r" && m.victim) {
+        // 공개 처형: 제압(0.75초) 한 적을 내려찍어 기절(0.4초). 시전 중이었으면 끊긴다
+        const c = m.victim;
+        c.supUntil = t + 0.75;
+        c.stunUntil = t + 1.15;
+        if (c.wind > 0) { c.wind = 0; c.cancelled = true; }
+        c.fade = Math.max(c.fade, 1.6);
+        act = { anim: "hit4", t0: t - 0.2, hold: t + 0.75, until: t + 1.3 };     // 첫 0.2초는 몸이 뒤에서 날아오는 자세라 건너뛴다
+        amb.slam = { c, at: t + 0.75 };
+        emit({ x: c.x, y: c.y, z: 150, size: 180, size1: 120, color: "#ffffff", color1: AMB.blood, shape: "amb_r_marker", life: 0.75 });
+        flashGround(c.x, c.y, 120, AMB.blood, 0.4);
+        sfx("ambSlash");
+      }
+    }
+    function ambRocks(x, y, n) {
+      for (let i = 0; i < n; i++) {
+        const b = Math.random() * Math.PI * 2, v = rand(150, 420);
+        emit({ x, y, z: 10, vx: Math.cos(b) * v, vy: Math.sin(b) * v, vz: rand(300, 700), grav: 1600, size: rand(16, 30),
+               color: "#ffffff", color1: AMB.dark, shape: "shard", add: 0.3, life: rand(0.5, 0.85), spin: rand(-10, 10) });
+      }
+    }
+    // 열상: 사슬을 한 바퀴 휘둘러 둘레 325 를 벤다(맞은 적은 1초 둔화)
+    function ambWhip(x, y, a, k) {
+      const R = 325;
+      ambArc({ x, y, r0: R * 0.45, r1: R * 1.08, a0: a, a1: a + Math.PI * 2, f: "amb_e_ring", col: AMB.gold, life: 0.42, sweep: 0.3, trail: 3.2, z: 50, a: 0.9 * k });
+      ambArc({ x, y, r0: R * 0.82, r1: R * 1.04, a0: a, a1: a + Math.PI * 2, f: "amb_q_chain", life: 0.4, sweep: 0.3, trail: 2.4, z: 60, add: 0, a: k });
+      ambArc({ x, y, r0: R * 0.2, r1: R, a0: a, a1: a + Math.PI * 2, f: "glow", uFix: 0.5, col: AMB.ember, life: 0.5, sweep: 0.25, a: 0.5 * k });
+      for (let i = 0; i < 6; i++) {
+        const b = a + i * Math.PI / 3;
+        emit({ x: x + Math.cos(b) * R * 0.8, y: y + Math.sin(b) * R * 0.8, z: 55, vx: -Math.sin(b) * 500, vy: Math.cos(b) * 500,
+               size: 120, size1: 60, color: "#ffffff", color1: AMB.orange, shape: "amb_e_edge", rot: b, life: 0.3, drag: 2 });
+      }
+      burst(x, y, 50, AMB.orange, 12, 380);
+      ambTargets(x, y, R).forEach(c => { ambHit(c); c.slowUntil = t + 1; });
+      sfx("ambWhip");
+    }
+    // 용견의 걸음: 바닥에 금빛 화살표가 돌진 방향으로 흐르고, 지나간 자리에 불씨
+    function ambDashFx(m) {
+      const dx = m.tx - m.fx, dy = m.ty - m.fy, a = Math.atan2(dy, dx);
+      for (let k = 0; k < 3; k++) {
+        const u = (k + 1) / 4;
+        emit({ x: m.fx + dx * u, y: m.fy + dy * u, ground: 1, size: 55, size1: 70, color: "#ffffff", color1: AMB.gold, shape: "amb_dash",
+               rot: a + Math.PI / 2, life: 0.3 + k * 0.08, a: 0.85 });
+      }
+      for (let k = 0; k < 10; k++) {
+        const u = Math.random();
+        emit({ x: m.fx + dx * u + rand(-25, 25), y: m.fy + dy * u + rand(-25, 25), z: rand(20, 120), vz: rand(30, 120),
+               size: rand(30, 50), size1: 6, color: AMB.gold, color1: AMB.red, shape: "amb_motes", life: rand(0.4, 0.7), drag: 1 });
+      }
+      emit({ x: m.fx, y: m.fy, ground: 1, size: 60, size1: 110, color: AMB.gold, color1: AMB.dark, shape: "ring", life: 0.3, erode: 1 });
+    }
+    // 매 틀: 파열의 강타 시간이 지나면 쿨타임. 보호막·버티기 끝, R 내려찍기, 보호막 빛
+    function ambTick() {
+      if (amb.q2 && t >= amb.q2.until) {
+        amb.q2 = null;
+        const q = mySkills().find(x => x.amb === "q");
+        if (q) cdMax[q.slot] = cdLeft[q.slot] = skillCd(q);
+      }
+      if (amb.shield && t >= amb.shield.until) amb.shield = null;
+      if (amb.brace && t >= amb.brace.until && !(dash && dash.sk.amb === "w")) amb.brace = null;
+      if (amb.slam && t >= amb.slam.at) {
+        const c = amb.slam.c;
+        amb.slam = null;
+        emit({ x: c.x, y: c.y, ground: 1, size: 170, size1: 210, color: "#ffffff", color1: AMB.dark, shape: "amb_r_decal", life: 1.6, add: 0, erode: 1 });
+        emit({ x: c.x, y: c.y, z: 40, size: 200, size1: 300, color: "#ffffff", color1: AMB.blood, shape: "amb_r_impact", life: 0.4 });
+        emit({ x: c.x, y: c.y, pillar: 420, size: 170, size1: 50, color: "#ffffff", color1: AMB.blood, shape: "beam", life: 0.4 });
+        burst(c.x, c.y, 30, AMB.red, 30, 560);
+        ambRocks(c.x, c.y, 14);
+        wave(c.x, c.y, 50, 420, 0.55, 24);
+        shake = Math.max(shake, 0.3);
+        ambHit(c, AMB.blood);
+        sfx("ambSlam");
+      }
+      // 보호막: 몸 둘레로 금빛이 피어오르고, 버티는 동안은 바람이 감긴다
+      if (amb.shield && !(t - (amb.shield.fxAt || -1) < 0.06)) {
+        amb.shield.fxAt = t;
+        const b = Math.random() * Math.PI * 2;
+        emit({ x: player.x + Math.cos(b) * 60, y: player.y + Math.sin(b) * 60, z: rand(20, 140), vz: 60, size: 26, size1: 6,
+               color: "#ffffff", color1: AMB.gold, shape: "glow", life: 0.5 });
+        if (amb.brace) emit({ x: player.x, y: player.y, z: 80, size: 170, size1: 120, color: "#ffffff", color1: AMB.gold, shape: "amb_w_wind", life: 0.25, a: 0.45 });
+      }
+      if (amb.arcs.length) amb.arcs = amb.arcs.filter(o => t - o.born < o.max);
+    }
+    // 보호막이 스킬 하나를 막는다(맞은 것을 없던 일로). 버티는 동안 막으면 응수(더 센 내려찍기)
+    function ambBlock() {
+      if (!amb.shield || t >= amb.shield.until) return false;
+      amb.shield = null;
+      if (amb.brace) amb.brace.parried = true;
+      emit({ x: player.x, y: player.y, z: 90, size: 200, size1: 260, color: "#ffffff", color1: AMB.gold, shape: "amb_w_shield", life: 0.3 });
+      burst(player.x, player.y, 90, AMB.gold, 20, 420);
+      wave(player.x, player.y, 40, 220, 0.35, 10);
+      pops.push({ x: player.x, y: player.y, text: "막음", color: AMB.gold, life: 1, max: 1 });
+      sfx("ambShield");
+      return true;
     }
 
     // 화면 가운데 안내 문구(롤의 알림처럼 잠깐 떴다 사라진다)
@@ -1232,6 +1533,7 @@
     // 하드 모드는 무적이 없고, 맞은 스킬의 CC 를 그대로 당한다(how: applyCC 참고)
     function hit(s, how = {}) {
       if (dead || untarget > t || (mode !== "hard" && safe > 0)) return false;
+      if (ambBlock()) return true;         // 막았다: 투사체·장판은 맞은 것처럼 끝나지만 목숨은 그대로
       lives -= 1;
       hits.push(s.name);
       lastHit = s;
@@ -1245,8 +1547,8 @@
       skillSound(s, "hit");
       if (lives === 1) announce("체력이 낮습니다", "warn");
       if (lives <= 0) dead = true;
-      // 말파이트 R 처럼 저지 불가인 돌진 중에는 CC 를 받지 않는다
-      else if (mode === "hard" && !(dash && dash.started && dash.sk.unstoppable)) applyCC(s, how);
+      // 말파이트 R 처럼 저지 불가인 돌진 중에는 CC 를 받지 않는다(암베사 R 은 겨눌 때부터)
+      else if (mode === "hard" && !(dash && (dash.started || dash.sk.steady) && dash.sk.unstoppable)) applyCC(s, how);
       return true;
     }
 
@@ -1321,6 +1623,7 @@
       if (recall && t >= recall.until) recall = null;
       if (pole && t >= pole.until) pole = null;
       if (haste && t >= haste.until) haste = null;
+      ambTick();
       // 르블랑 W·조이 R 이 돌아갈 자리는 바닥에 보라 표식이 숨 쉰다
       for (const m of [recall, ret]) {
         if (m && !(t - (m.fxAt || -1) < 0.3)) {
@@ -1366,7 +1669,7 @@
         player.vx = dx / d * v; player.vy = dy / d * v;
         return false;
       };
-      if (dash && t < dash.t0 && (stun || root || air || charm)) {
+      if (dash && t < dash.t0 && !dash.sk.steady && (stun || root || air || charm)) {
         // 시전 중에 CC 를 맞으면 끊긴다(쿨타임은 그대로 돈다)
         dash = null;
       }
@@ -1472,6 +1775,7 @@
         } else {
           c.fade -= dt;
         }
+        if (c.dash && c.supUntil > t) c.dash.t0 += dt;     // 제압(암베사 R) 중에는 돌진이 멈춘다
         if (c.dash) {
           // 레오나 E 돌진
           const k = Math.min(1, (t - c.dash.t0) / c.dash.dur);
@@ -1838,11 +2142,12 @@
         // 이동기를 쓰면 그 스킬 동작(spell1~4) 을 한 번. 돌진이 길면 돌진이 끝날 때까지.
         // 돌진 동작이 따로 있으면(칼리스타 패시브) 시전 뒤 돌진하는 동안은 그 동작
         const sk = skillUsed, since = t - skillAt;
-        const casting = sk && (dash || since < 0.5);
+        const acting = act && t < act.until && (t < act.hold || !moving);
+        const casting = !acting && sk && (dash || since < 0.5);
         const leaping = casting && dash && dash.started && sk.dashAnim;
         out.push({ key: modelKey(faceKey), x: player.x, y: player.y, z: lift(), angle: viewAngle,
-                   anim: leaping ? sk.dashAnim : casting ? "spell" + (sk.slot + 1) : moving ? "run" : "idle",
-                   time: leaping ? t - dash.t0 : casting ? since : animClock, loop: !casting,
+                   anim: acting ? act.anim : leaping ? sk.dashAnim : casting ? "spell" + (sk.slot + 1) : moving ? "run" : "idle",
+                   time: acting ? t - act.t0 : leaping ? t - dash.t0 : casting ? since : animClock, loop: !casting && !acting,
                    // 투명하면 내 화면에서만 흐리게 보인다(롤에서 내 챔피언이 반투명해지는 것처럼)
                    alpha: hidden > t ? 0.35 : untarget > t ? 0.4 : safe > 0 && Math.floor(safe * 10) % 2 ? 0.45 : 1,
                    tint: hurt > 0 ? [1, 1, 1, hurt / 0.4 * 0.55] : realm && t < realm.until ? [0.6, 0.5, 1, 0.35]
@@ -1852,9 +2157,12 @@
         if (!model(c.skill.champ)) continue;
         const since = c.skill.cast - c.wind;            // 시전을 시작한 뒤 흐른 시간(풀린 뒤에도 계속 는다)
         const casting = c.wind > 0 || c.fade > 0.25;
-        out.push({ key: modelKey(c.skill.champ), x: c.x, y: c.y, z: 0, angle: Math.atan2(c.dy, c.dx),
-                   anim: c.dash ? "run" : casting ? spellAnim(c.skill) : "idle", time: c.dash ? animClock : Math.max(0, since + (c.wind > 0 ? 0 : 0.5 - c.fade)),
-                   loop: !!c.dash, alpha: c.wind > 0 ? 1 : Math.min(1, Math.max(0, c.fade / 0.5)) });
+        const froze = c.stunUntil > t, struck = t - (c.ambHit || -9);
+        out.push({ key: modelKey(c.skill.champ), x: c.x, y: c.y, z: c.supUntil > t ? 25 : 0, angle: Math.atan2(c.dy, c.dx),
+                   anim: froze || c.cancelled ? "idle" : c.dash ? "run" : casting ? spellAnim(c.skill) : "idle",
+                   time: froze || c.cancelled ? 0 : c.dash ? animClock : Math.max(0, since + (c.wind > 0 ? 0 : 0.5 - c.fade)),
+                   loop: !!c.dash, alpha: c.wind > 0 ? 1 : Math.min(1, Math.max(0, c.fade / 0.5)),
+                   tint: struck < 0.25 ? [1, 1, 1, (0.25 - struck) / 0.25 * 0.7] : froze ? [0.75, 0.1, 0.05, 0.35] : null });
       }
       return out;
     }
@@ -2047,13 +2355,84 @@
         if (cc("slow")) floorQ(L, frameOf("swirl"), player.x, player.y, 85, -now * 3, rgb("#74c0fc"), 0.55, 1);
         if (tenacity > t) floorQ(L, frameOf("ring"), player.x, player.y, 110, 0, rgb("#99e9f2"), 0.35 + 0.15 * Math.sin(now * 8), 1);
       }
+      drawAmb(L, true, now);
       drawParts(L, true);
+    }
+
+    // 암베사 그림. ground: 바닥 층(휘두른 자국 중 바닥에 붙은 것, R 겨누는 줄, 둔화된 적) / 공중 층(공중 휘두르기, 보호막)
+    function drawAmb(L, ground, now) {
+      if (!amb || !player) return;
+      // 2D 로 물러났을 때는 띠 조각 사이 이음매가 갈라져 보여서 휘두른 자국은 빼고 파티클만 둔다
+      for (const o of fxgl ? amb.arcs : []) {
+        if ((o.z === 0) !== ground) continue;
+        const f = frameOf(o.f);
+        if (!f) continue;
+        const age = t - o.born, k = age / o.max, g = 1 + o.grow * k, span = o.a1 - o.a0, dir = Math.sign(span) || 1;
+        const r0 = o.r0 * g, r1 = o.r1 * g, al = o.a * (1 - k * k), col = rgb(o.col);
+        const P = (a, r) => (o.z ? upright(o.x + Math.cos(a) * r, o.y + Math.sin(a) * r, o.z) : proj(o.x + Math.cos(a) * r, o.y + Math.sin(a) * r));
+        // trail 이 있으면 휘두르는 머리(텍스처 오른쪽 끝) 가 a0 에서 a1 너머까지 sweep 초에 지나가고 꼬리가 trail 만큼 따른다.
+        // 없으면 a0 에서 a1 까지 펼쳐지며 텍스처를 rep 번 되풀이한다(고리)
+        let from, to, uOf;
+        if (o.trail) {
+          const head = o.a0 + (span + o.trail * 0.5 * dir) * Math.min(1, age / o.sweep);
+          const lo = Math.min(o.a0, o.a1), hi = Math.max(o.a0, o.a1), cl = a => Math.min(hi, Math.max(lo, a));
+          from = cl(head - o.trail * dir); to = cl(head);
+          uOf = a => 1 - (head - a) * dir / o.trail;
+        } else {
+          from = o.a0; to = o.a0 + span * Math.min(1, age / o.sweep);
+          uOf = a => (a - o.a0) / span * (o.rep || 1);
+        }
+        if (Math.abs(to - from) < 1e-3) continue;
+        const per = o.rep ? Math.ceil(Math.abs(span) / o.rep / 0.15) : 0;
+        const n = o.rep ? per * Math.round(Math.abs(to - from) / Math.abs(span) * o.rep) || per : Math.max(2, Math.ceil(Math.abs(to - from) / 0.15));
+        for (let i = 0; i < n; i++) {
+          const aA = from + (to - from) * i / n, aB = from + (to - from) * (i + 1) / n;
+          // 되풀이 경계에서 칸 밖을 읽지 않게 한 조각은 한 칸 안에서만
+          let uA = o.uFix != null ? o.uFix : uOf(aA), uB = o.uFix != null ? o.uFix : uOf(aB);
+          const tile = Math.floor(Math.min(uA, uB) + 1e-6);
+          uA -= tile; uB -= tile;
+          uA = Math.min(1, uA); uB = Math.min(1, uB);
+          const p0 = P(aA, r1), p1 = P(aB, r1), p2 = P(aB, r0), p3 = P(aA, r0);
+          L.quad([p0.x, p0.y, p1.x, p1.y, p2.x, p2.y, p3.x, p3.y], sub(f, Math.max(0, uA), 0, Math.max(0, uB), 1), col, al, o.add);
+        }
+      }
+      if (ground) {
+        // R: 겨누는 줄(1250, 폭 300). 양쪽 가장자리에 핏빛 금이 서고, 줄 안에서 가장 먼 적 머리 위에 표식
+        const r = amb.aimR;
+        if (r && t < r.until) {
+          const p = (t - r.from) / (r.until - r.from), a = { x: player.x, y: player.y }, b = { x: player.x + r.dx * 1250, y: player.y + r.dy * 1250 };
+          band(L, frameOf("beam"), a, b, 150, 0, rgb(AMB.blood), 0.18 + 0.2 * p, 1);
+          band(L, frameOf("amb_r_lines"), a, b, 150, 0, rgb("#ff8787"), 0.5 + 0.5 * p, 1, 0, 0, now * 0.6);
+          const along = c => (c.x - a.x) * r.dx + (c.y - a.y) * r.dy;
+          const far = ambTargets(a.x, a.y, 0, { line: [a, b], hw: 150, dir: Math.atan2(r.dy, r.dx) }).reduce((m, c) => (!m || along(c) > along(m) ? c : m), null);
+          if (far) floorQ(L, frameOf("ring"), far.x, far.y, 110, 0, rgb(AMB.blood), 0.5 + 0.4 * Math.sin(now * 14), 1);
+        }
+        for (const c of casters) {
+          if (c.slowUntil > t) floorQ(L, frameOf("swirl"), c.x, c.y, 90, -now * 3, rgb(AMB.orange), 0.5 * (c.slowUntil - t), 1);
+          if (c.supUntil > t) floorQ(L, frameOf("rune"), c.x, c.y, 120, now * 2, rgb(AMB.blood), 0.6, 1);
+        }
+      } else {
+        // W 보호막: 몸을 감싼 금빛 막. 사라지기 직전에 깜빡인다
+        const sh = amb.shield;
+        if (sh && t < sh.until) {
+          const q = upright(player.x, player.y, 95), left = sh.until - t, w = 230 * q.k * (1 + 0.04 * Math.sin(now * 9));
+          const al = left < 0.3 ? 0.5 * (Math.floor(left * 20) % 2) : 0.55;
+          rq(L, frameOf("amb_w_shield"), q.x, q.y, w, w * 1.1, 0, rgb(AMB.gold), al, 1);
+          rq(L, frameOf("glow"), q.x, q.y, w * 0.9, w, 0, rgb(AMB.orange), al * 0.25, 1);
+        }
+        const r = amb.aimR;
+        if (r && t < r.until) {
+          const q = upright(player.x, player.y, 120), p = (t - r.from) / (r.until - r.from);
+          rq(L, frameOf("amb_r_marker"), q.x, q.y, 260 * q.k * (0.6 + 0.4 * p), 260 * q.k * (0.6 + 0.4 * p), 0, rgb("#ffffff"), 0.4 + 0.4 * p, 1);
+        }
+      }
     }
 
     // 공중 층: 파티클, 투사체 빛, 레이저 빛줄기, 시전 중 모이는 빛, 사슬, CC 표시
     function buildAir(L) {
       const now = performance.now() / 1000;
       drawParts(L, false);
+      drawAmb(L, false, now);
       for (const m of missiles) missileFx(L, m, now);
       for (const f of flashes) {
         const al = Math.max(0, f.left / f.max), col = rgb(f.skill.color), w = f.skill.radius;
@@ -3024,9 +3403,9 @@
         ctx.font = "800 " + Math.round(26 * u * (1 + (1 - a) * 0.2)) + "px 'IBM Plex Sans KR', sans-serif";
         ctx.textAlign = "center";
         ctx.lineWidth = Math.max(2, 4 * u);
-        ctx.strokeStyle = "#1a0b2e";
+        ctx.strokeStyle = p.color ? "#2b1404" : "#1a0b2e";
         ctx.strokeText(p.text, q.x, q.y);
-        ctx.fillStyle = "#c084fc";
+        ctx.fillStyle = p.color || "#c084fc";
         ctx.fillText(p.text, q.x, q.y);
       }
       ctx.globalAlpha = 1;
@@ -3160,11 +3539,12 @@
         paintCd(b, left, cdMax[sk.slot]);
         // 쓰는 중(시전·돌진·스킬 통과·투명·돌아갈 수 있음·남은 횟수가 있음) 은 빛나고, CC 중에는 잠긴다
         const using = (dash && dash.sk === sk) || (recall && recall.slot === sk.slot) || (sk.untarget && untarget > t)
-          || (sk.stealth && hidden > t) || (sk.ret && ret) || (charges && charges.slot === sk.slot);
+          || (sk.stealth && hidden > t) || (sk.ret && ret) || (charges && charges.slot === sk.slot)
+          || (sk.amb === "w" && amb.shield) || (sk.amb === "q" && amb.q2);
         b.classList.toggle("active", !!using);
         b.classList.toggle("locked", !!blocked);
         // 다시 누를 수 있으면(르블랑 W·피즈 E) 쿨타임이 돌아도 밝게
-        b.classList.toggle("recast", !dash && !!((recall && recall.slot === sk.slot) || (sk.recast && pole)));
+        b.classList.toggle("recast", !dash && !!((recall && recall.slot === sk.slot) || (sk.recast && pole) || (sk.amb === "q" && ambQ2())));
       }
       // 오로라 W: 다른 차원에 들어가면 화면 색이 바뀐다
       view.classList.toggle("realm", !!(realm && t < realm.until && state === "play"));
