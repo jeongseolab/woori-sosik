@@ -711,6 +711,17 @@
     amb_motes: [130, 2346, 128, 128],
     amb_q2_decal: [260, 2346, 64, 128],
   };
+  // 전체 화면 바닥: 진짜 협곡 지형(Map11 의 base_srx.mapgeo 바탕 층 + 미드 1차 포탑 두 개) 을 롤 카메라
+  // (56° 내려다봄, 줌 2250, 경기장 가운데 = 협곡 (7400, 7400)) 로 구운 그림. 초점 거리 f 픽셀. 다시 굽기: tools/rift_bake.py
+  const RIFT_BAKE = { src: "rift.webp", w: 4400, h: 2400, f: 1600 };
+  const riftBakeImg = new Image();
+  let riftBakeReady = false;
+  // 전체 화면을 처음 켤 때만 받는다(600KB)
+  function loadRiftBake() {
+    if (riftBakeImg.src) return;
+    riftBakeImg.onload = () => { riftBakeReady = true; };
+    riftBakeImg.src = ART + RIFT_BAKE.src;
+  }
   // 전체 화면 미니맵: 소환사의 협곡 전체 지도(CommunityDragon game/assets/maps/info/map11/2dlevelminimap_base_baron1.png)
   const fxImg = new Image(), groundImg = new Image(), riftMapImg = new Image();
   let fxReady = false, groundReady = false, riftMapReady = false;
@@ -1200,6 +1211,10 @@
       stageEl.classList.toggle("full", on);
       fullBtn.textContent = on ? "전체 화면 끝내기 (Esc)" : "전체 화면";
       fullBtn.setAttribute("aria-pressed", String(on));
+      if (on && !riftBakeReady) {
+        loadRiftBake();
+        riftBakeImg.addEventListener("load", () => { if (isFull()) draw(0); }, { once: true });
+      }
       fit();
       canvas.focus({ preventScroll: true });
     }
@@ -3257,7 +3272,33 @@
       return c;
     })();
 
-    // 전체 화면에서 경기장 밖으로 이어지는 협곡 바닥. 바닥 텍스처를 좌우·위아래로 뒤집어 가며 이어 붙여
+    // 전체 화면 바닥: 진짜 소환사의 협곡 미드 한가운데를 롤 카메라 그대로 구운 그림(RIFT_BAKE).
+    // 그림 가운데가 경기장 가운데이고 카메라 위치·각도가 proj 와 같아서, 화면 초점 거리에 맞춰 키우기만 하면 겹친다.
+    // 다 받기 전이거나 그림이 화면을 다 못 덮으면(아주 세로로 긴 화면) false → 아래의 이어 붙인 바닥으로 그린다
+    function drawRiftBake() {
+      if (!riftBakeReady) { loadRiftBake(); return false; }
+      const k = FOCAL * S / RIFT_BAKE.f;
+      const x = OX - RIFT_BAKE.w / 2 * k, y = OY - RIFT_BAKE.h / 2 * k;
+      if (x > 0 || y > 0 || x + RIFT_BAKE.w * k < VW || y + RIFT_BAKE.h * k < VH) return false;
+      ctx.drawImage(riftBakeImg, x, y, RIFT_BAKE.w * k, RIFT_BAKE.h * k);
+      // 경기장 밖은 못 나가는 곳이라 아주 살짝만 어둡게 하고, 경계는 금빛 선으로
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, 0, VW, VH);
+      const q = [proj(0, 0), proj(ARENA.w, 0), proj(ARENA.w, ARENA.h), proj(0, ARENA.h)];
+      q.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+      ctx.closePath();
+      ctx.fillStyle = "rgba(1, 10, 19, .18)";
+      ctx.fill("evenodd");
+      ctx.restore();
+      arenaPath();
+      ctx.strokeStyle = "rgba(200, 170, 110, .55)";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      return true;
+    }
+
+    // 전체 화면에서 경기장 밖으로 이어지는 협곡 바닥(구운 그림을 받기 전에 쓴다). 바닥 텍스처를 좌우·위아래로 뒤집어 가며 이어 붙여
     // 이음매가 안 보이게 한다(절반 해상도. 어차피 전장의 안개로 어둡게 덮는다)
     let riftTiles = null;
     function drawRift() {
@@ -3312,6 +3353,7 @@
       bg.addColorStop(1, "#06141d");
       ctx.fillStyle = bg;
       ctx.fillRect(0, 0, VW, VH);
+      if (isFull() && drawRiftBake()) return;
       if (isFull()) drawRift();
 
       // 질감을 가로 띠로 잘라 원근에 맞게 깐다(한 줄 안에서는 가로 배율이 같아서 띠로 충분하다)
@@ -4103,7 +4145,8 @@
     const RIFT = 14870;
     function drawRiftMinimap() {
       const w = mini.width / DPR, h = mini.height / DPR, k = w / RIFT;
-      const mx = x => (RIFT / 2 + x - ARENA.w / 2) * k, my = y => (RIFT / 2 + y - ARENA.h / 2) * k;
+      // 경기장 가운데 = 협곡 (7400, 7400)(RIFT_BAKE 와 같은 자리). 지도 위쪽이 북쪽(z 큰 쪽)
+      const mx = x => (7400 + x - ARENA.w / 2) * k, my = y => (RIFT - 7400 + y - ARENA.h / 2) * k;
       mctx.setTransform(DPR, 0, 0, DPR, 0, 0);
       mctx.fillStyle = "#010a13";
       mctx.fillRect(0, 0, w, h);
