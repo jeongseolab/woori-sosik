@@ -811,6 +811,14 @@ table.dodge-table { min-width: 0; }
 }
 /* 처치당하면 롤처럼 회색 화면 */
 .lol-view > canvas.dead { filter: grayscale(1) brightness(.65); }
+/* 오로라 W "다른 차원": 세상이 바래고 보랏빛으로 물들며, 가장자리가 영혼 빛으로 어른거린다 */
+.lol-view > .lol-gl { transition: filter .3s; }
+.lol-view.realm > canvas:first-child, .lol-view.realm > .lol-gl { filter: saturate(.3) hue-rotate(-18deg) brightness(.92) contrast(1.08); }
+.lol-view::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none; opacity: 0; transition: opacity .3s;
+  background: radial-gradient(ellipse at center, rgba(151, 117, 250, 0) 45%, rgba(151, 117, 250, .22) 75%, rgba(208, 191, 255, .45) 100%);
+}
+.lol-view.realm::after { opacity: 1; }
 
 .lol-top {
   position: absolute; top: calc(var(--u) * 8); left: 50%; transform: translateX(-50%);
@@ -888,14 +896,18 @@ table.dodge-table { min-width: 0; }
   position: absolute; left: 1px; bottom: 1px; padding: 0 calc(var(--u) * 3); background: #010a13cc;
   color: #c8aa6e; font: 700 calc(var(--u) * 10)/1.3 "IBM Plex Sans KR", sans-serif;
 }
-.lol-spell.active { border-color: #66d9e8; box-shadow: 0 0 calc(var(--u) * 8) #66d9e8; }
+.lol-skill.active, .lol-spell.active { border-color: #66d9e8; box-shadow: 0 0 calc(var(--u) * 8) #66d9e8; }
 /* CC 때문에 지금 못 쓰는 주문(이동 불가 중의 점멸) */
-.lol-spell.locked img { filter: grayscale(1) brightness(.45); }
-.lol-spell.locked { border-color: #e84057; }
-/* 아직 기능이 없는 스킬 칸(롤의 "못 씀"). 아이콘을 못 받았으면 빈 칸에 Q W E R 글자 */
+.lol-skill.locked img, .lol-spell.locked img { filter: grayscale(1) brightness(.45); }
+.lol-skill.locked, .lol-spell.locked { border-color: #e84057; }
+/* 이 챔피언이 연습장에서 못 쓰는 스킬 칸(롤의 "못 씀"). 아이콘을 못 받았으면 빈 칸에 Q W E R 글자 */
 .lol-skill.off { cursor: default; }
 .lol-skill.off img { filter: grayscale(1) brightness(.45); }
 .lol-skill.off:hover { border-color: #785a28; }
+/* 다시 누를 수 있는 이동기(르블랑 W 로 돌아가기·피즈 E 한 번 더): 쿨타임 그림자를 걷고 금테 */
+.lol-skill.recast i { background: none !important; }
+.lol-skill.recast b { display: none; }
+.lol-skill.recast { border-color: #f0e6d2; box-shadow: 0 0 calc(var(--u) * 10) #c8aa6e; }
 .lol-skill.noimg::before {
   content: attr(data-letter); position: absolute; inset: 0; display: grid; place-items: center;
   color: #5b5a56; font: 700 calc(var(--u) * 18) Georgia, serif;

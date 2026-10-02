@@ -25,7 +25,7 @@
 쓰는 법:
   pip install xxhash zstandard numpy pillow
   python tools/champ_models.py                      # 연습장에 나오는 챔피언(스킬 쓰는 적) + 이즈리얼
-  python tools/champ_models.py --mobility           # 이동기가 있는 챔피언(MOBILITY)
+  python tools/champ_models.py --mobility           # 이동기가 있는 챔피언(MOBILITY, PASSIVE)
   python tools/champ_models.py ahri jinx            # 고른 챔피언만(내 챔피언으로 쓰려면)
   python tools/champ_models.py --all                # 모든 챔피언
   python tools/champ_models.py --game "D:/Riot Games/League of Legends"
@@ -61,6 +61,10 @@ MOBILITY = {"ezreal": 3, "lucian": 3, "graves": 3, "vayne": 1, "corki": 2, "tris
             "zeri": 3, "tryndamere": 3, "renekton": 3, "ornn": 3, "rakan": 2, "aatrox": 3, "kled": 3, "kayn": 1,
             "khazix": 3, "naafiri": 3, "aurora": 2, "belveth": 1, "gwen": 3, "fiora": 1, "pyke": 3, "shen": 3,
             "urgot": 3, "galio": 3, "zoe": 4, "kassadin": 4, "shaco": 1, "leblanc": 2, "ekko": 3, "akali": 3}
+# 패시브로 움직이는 챔피언(스킬을 쓰면 패시브 돌진이 따라 나온다) 과 그 스킬(Q=1 … R=4)
+PASSIVE = {"kalista": [1], "ambessa": [1, 2, 3]}
+# 스킬 말고 따로 굽는 동작: 이름 → 클립 이름 후보(칼리스타 Q 뒤의 패시브 돌진)
+EXTRA_CLIPS = {"kalista": {"dash": ["Spell1_Dash_0", "Attack1_Dash_0"]}}
 FPS = 15
 TEX_SIZE = 512
 
@@ -503,6 +507,8 @@ def build(key, wad_dir, spells):
     for n in spells:
         want["spell%d" % n] = pick_clip(clips, ["Spell%d" % n, "Spell%d_0" % n, "Spell%d_Base" % n], "spell%d" % n,
                                         avoid=("to", "run", "idle", "exit", "out"))
+    for name, names in EXTRA_CLIPS.get(key, {}).items():
+        want[name] = pick_clip(clips, names, name)
     for name, path in want.items():
         if path and w.has(path):
             a, dur = read_anm(w.read(path))
@@ -571,8 +577,12 @@ def build(key, wad_dir, spells):
     heads = [bind[i][1, 3] for i, j in enumerate(skl["joints"]) if j["name"].lower() in ("head", "c_head", "head_jnt", "c_head_jnt")]
     body = float(np.percentile(skn["pos"][:, 1], 85))       # 초가스처럼 웅크린 체형은 머리보다 등이 높다
     height = max(float(max(heads)) + 35 if heads else float(np.percentile(skn["pos"][:, 1], 95)), body) * scale
-    w8 = np.clip(np.round(skn["weights"] * 255), 0, 255).astype(np.uint8)
-    w8[:, 0] += (255 - w8.sum(1, dtype=np.int32)).astype(np.uint8)       # 합을 255 로
+    # 합을 255 로: 반올림 오차는 가장 큰 가중치에서 맞춘다. uint8 로 더하면 넘쳐서(0 + -1 → 255)
+    # 가중치 0 이던 뼈가 통째로 붙어 애니메이션 때 정점이 튀어 나간다(말파이트 등 뒤 가시)
+    w8 = np.clip(np.round(skn["weights"] * 255), 0, 255).astype(np.int32)
+    big = w8.argmax(1)
+    w8[np.arange(len(w8)), big] += 255 - w8.sum(1)
+    w8 = np.clip(w8, 0, 255).astype(np.uint8)
     buf = io.BytesIO()
     buf.write(b"LMDL" + struct.pack("<I", 1))
     buf.write(struct.pack("<IIIIff", V, len(idx), B, len(anims), height, scale))
@@ -607,7 +617,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("champions", nargs="*", help="챔피언 영문 이름(소문자). 비우면 연습장 챔피언")
     ap.add_argument("--all", action="store_true", help="모든 챔피언")
-    ap.add_argument("--mobility", action="store_true", help="이동기가 있는 챔피언(MOBILITY)")
+    ap.add_argument("--mobility", action="store_true", help="이동기가 있는 챔피언(MOBILITY, PASSIVE)")
     ap.add_argument("--game", default=r"C:\Riot Games\League of Legends", help="롤 설치 폴더")
     a = ap.parse_args()
     wad_dir = os.path.join(a.game, "Game", "DATA", "FINAL", "Champions")
@@ -617,14 +627,14 @@ def main():
         keys = sorted(str(c["alias"]).lower() for c in get_json(
             "plugins/rcp-be-lol-game-data/global/default/v1/champion-summary.json") if 0 < c["id"] < 10000 and "_" not in str(c["alias"]))
     elif a.mobility:
-        keys = sorted(MOBILITY)
+        keys = sorted(set(MOBILITY) | set(PASSIVE))
     else:
         keys = [k.lower() for k in a.champions] or sorted(CASTERS)
     index_path = os.path.join(OUT, "index.json")
     index = json.load(open(index_path, encoding="utf-8")) if os.path.exists(index_path) else {}
     for k in keys:
         try:
-            index[k] = build(k, wad_dir, sorted(set(CASTERS.get(k, [])) | ({MOBILITY[k]} if k in MOBILITY else set())))
+            index[k] = build(k, wad_dir, sorted(set(CASTERS.get(k, [])) | ({MOBILITY[k]} if k in MOBILITY else set()) | set(PASSIVE.get(k, []))))
             index[k]["v"] = file_version(k)
             print(k, index[k], flush=True)
         except Exception as e:      # 한 챔피언이 안 돼도 나머지는 만든다

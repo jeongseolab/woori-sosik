@@ -41,7 +41,7 @@
 
 (function () {
   // 게임 규칙이 바뀌면 올린다. 서버는 같은 버전의 기록끼리만 순위를 매긴다
-  const VERSION = 7;
+  const VERSION = 8;
 
   const ARENA = { w: 1400, h: 900 };
   const CHAMP = { radius: 65, speed: 335 };
@@ -62,17 +62,25 @@
   ];
   const spellById = id => SPELLS.find(sp => sp.id === id);
 
-  // 내 챔피언의 이동기(tools/champ_models.py 의 MOBILITY 와 같은 40명). 그 칸만 켜지고 나머지 칸은 어둡다.
+  // 내 챔피언의 이동기(tools/champ_models.py 의 MOBILITY·PASSIVE 와 같은 42명). 그 칸만 켜지고 나머지 칸은 어둡다.
+  // 여러 칸을 쓰는 챔피언(암베사 Q·W·E) 은 배열로 적는다
   //   slot: 0~3(Q W E R). kind: blink(순간이동) | dash(돌진)
   //   range: 최대 거리. min: 커서가 더 가까워도 이만큼은 간다. fixed: 늘 range 만큼. back: 커서 반대쪽으로(뒤로 뛰기)
   //   speed: 돌진 속도(유닛/초) 또는 dur: 걸리는 시간(초). untarget: 이 초 동안 스킬이 통과(피즈 E)
-  //   ret: 이 초 뒤 제자리로 돌아온다(조이 R). charges·gap·window: window 초 안에 gap 초 간격으로 charges 번(아리 R)
+  //   windup: 시전 시간. 이 동안 제자리에서 스킬 동작을 하고 그 뒤에 움직인다(방향은 누른 순간에 정해진다)
+  //   ret: 이 초 뒤 제자리로 돌아온다(조이 R). recall: 이 초 안에 다시 누르면 처음 자리로 돌아간다(르블랑 W)
+  //   recast: 스킬이 통과하는 동안 한 번 더 누르면 또 뛴다 {range, dur}(피즈 E 의 두 번째 뛰기)
+  //   stealth: 이 초 동안 투명. 적은 마지막으로 본 자리를 노린다. haste: 그동안 이동 속도 +비율.
+  //   realm: 오로라 W 처럼 "다른 차원" 에 들어간 연출(화면 색이 바뀐다)
+  //   charges·gap·window: window 초 안에 gap 초 간격으로 charges 번(아리 R). dirs: 위·아래·왼쪽·오른쪽 방향마다 쿨타임이 따로(벨베스 Q)
+  //   unstoppable: 돌진 중에 맞아도 CC 를 받지 않는다(말파이트 R). dashAnim: 돌진 중 3D 동작(없으면 그 스킬 동작)
+  //   passive: 스킬을 쓰면 패시브 돌진이 따라 나오는 챔피언(칼리스타·암베사). 설명에 "패시브" 를 붙인다
   //   cd: 롤 최대 레벨 쿨타임(기본 스킬 5레벨, 궁극기 3레벨). 게임에서는 skillCd() 로 4~20초 안으로 맞춘다
   //   src: 거리·속도의 출처. data = 롤 클라이언트 데이터(CommunityDragon, 2026-10-02 받음.
   //   DashSpeed·DashDistance·castRangeDisplayOverride 등), 추정 = 데이터에 없어(챔피언 스크립트 안의 값) 롤 지식으로 적은 값.
   //   "DashBonusSpeed"·"DashSpeedRatio" 는 이동 속도에 더하는 값이라 CHAMP.speed 를 더했다
   const MOBILITY = {
-    ezreal: { slot: 2, kind: "blink", range: 475, cd: 14, src: "data" },
+    ezreal: { slot: 2, kind: "blink", range: 475, windup: 0.25, cd: 14, src: "data(windup: spellCastTime)" },
     lucian: { slot: 2, kind: "dash", range: 425, min: 200, speed: 1350, cd: 14, src: "data" },
     graves: { slot: 2, kind: "dash", range: 375, min: 275, speed: 750, cd: 12, src: "data" },
     vayne: { slot: 0, kind: "dash", range: 300, fixed: true, speed: 900, cd: 2, src: "range: data, speed: 추정" },
@@ -83,10 +91,11 @@
     kindred: { slot: 0, kind: "dash", range: 340, fixed: true, speed: 500, cd: 9, src: "data" },
     caitlyn: { slot: 2, kind: "dash", range: 390, fixed: true, back: true, speed: 1000, cd: 8, src: "추정" },
     ahri: { slot: 3, kind: "dash", range: 500, speed: 1200, charges: 3, gap: 1, window: 10, cd: 100, src: "data" },
-    fizz: { slot: 2, kind: "dash", range: 400, dur: 0.75, untarget: 0.75, cd: 8, src: "range: data, dur·untarget: 추정" },
+    fizz: { slot: 2, kind: "dash", range: 400, dur: 0.25, untarget: 0.75, recast: { range: 400, dur: 0.25 }, cd: 8,
+            src: "range·recast.range: data(FizzE·FizzETwo), dur·untarget: 추정" },
     riven: { slot: 2, kind: "dash", range: 250, fixed: true, speed: 1450, cd: 6, src: "data(missileSpeed)" },
     sejuani: { slot: 0, kind: "dash", range: 625, fixed: true, speed: 1000, cd: 12, src: "data" },
-    malphite: { slot: 3, kind: "dash", range: 1000, speed: 1835, cd: 100, src: "range: data, speed: 추정" },
+    malphite: { slot: 3, kind: "dash", range: 1000, speed: 1835, unstoppable: true, cd: 100, src: "range: data, speed: 추정" },
     sylas: { slot: 2, kind: "dash", range: 400, speed: 1450, cd: 9, src: "추정" },
     zeri: { slot: 2, kind: "dash", range: 300, fixed: true, speed: 900, cd: 18, src: "range: data, speed: 추정" },
     tryndamere: { slot: 2, kind: "dash", range: 650, speed: 1300, cd: 8, src: "range: data, speed: 추정" },
@@ -98,8 +107,9 @@
     kayn: { slot: 0, kind: "dash", range: 350, fixed: true, speed: 1000, cd: 5, src: "range: data, speed: 추정" },
     khazix: { slot: 2, kind: "dash", range: 700, speed: 1000, cd: 12, src: "range: data, speed: 추정" },
     naafiri: { slot: 2, kind: "dash", range: 450, min: 250, speed: 900, cd: 7, src: "data" },
-    aurora: { slot: 1, kind: "dash", range: 300, fixed: true, speed: 350 + CHAMP.speed, cd: 18, src: "data" },
-    belveth: { slot: 0, kind: "dash", range: 400, fixed: true, speed: 850, cd: 1, src: "data" },
+    aurora: { slot: 1, kind: "dash", range: 300, fixed: true, speed: 350 + CHAMP.speed, stealth: 1.6, haste: 0.4, realm: true, cd: 18,
+              src: "data(JumpDistance·DashBonusSpeed·InvisDuration·MoveSpeedBonus)" },
+    belveth: { slot: 0, kind: "dash", range: 400, fixed: true, speed: 850, dirs: 4, cd: 1, src: "data" },
     gwen: { slot: 2, kind: "dash", range: 350, fixed: true, speed: 800, cd: 11, src: "data" },
     fiora: { slot: 0, kind: "dash", range: 400, speed: 1000, cd: 6, src: "추정" },
     pyke: { slot: 2, kind: "dash", range: 550, fixed: true, speed: 1000, cd: 11, src: "range: data, speed: 추정" },
@@ -108,12 +118,23 @@
     galio: { slot: 2, kind: "dash", range: 650, min: 250, speed: 1400, cd: 7, src: "range: data, speed: 추정" },
     zoe: { slot: 3, kind: "blink", range: 575, ret: 1, cd: 5, src: "range: data, ret: 추정" },
     kassadin: { slot: 3, kind: "blink", range: 500, cd: 2, src: "data" },
-    shaco: { slot: 0, kind: "blink", range: 400, cd: 11, src: "data" },
-    leblanc: { slot: 1, kind: "dash", range: 600, speed: 1450, cd: 10, src: "range: data, speed: 추정" },
+    shaco: { slot: 0, kind: "blink", range: 400, windup: 0.125, stealth: 3.5, cd: 11, src: "data(PseudoCastTime·StealthDuration)" },
+    leblanc: { slot: 1, kind: "dash", range: 600, speed: 1450, recall: 4, cd: 10, src: "range·recall: data(SnapbackTimeAllowed), speed: 추정" },
     ekko: { slot: 2, kind: "dash", range: 350, fixed: true, speed: 1150, cd: 7, src: "range: data, speed: 추정" },
     akali: { slot: 2, kind: "dash", range: 400, fixed: true, back: true, speed: 1000, cd: 10, src: "range: data, speed: 추정" },
+    // 패시브 돌진: 칼리스타는 Q(꿰뚫기) 를 던진 뒤 커서 쪽으로 뛴다(전투 태세). 거리는 신발에 따라 달라서 데이터에 없다
+    kalista: { slot: 0, kind: "dash", range: 250, dur: 0.3, windup: 0.25, dashAnim: "dash", passive: true, cd: 9,
+               src: "cd·windup: data, range·dur: 추정" },
+    // 암베사는 스킬을 쓸 때마다 패시브로 짧게 돌진한다(AmbessaPassive 의 Buffer_Dash_*: 175~350 을 0.3초)
+    ambessa: [
+      { slot: 0, kind: "dash", range: 350, min: 175, dur: 0.3, passive: true, cd: 10, src: "data" },
+      { slot: 1, kind: "dash", range: 350, min: 175, dur: 0.3, windup: 0.225, passive: true, cd: 14, src: "data(Dash_Delay)" },
+      { slot: 2, kind: "dash", range: 350, min: 175, dur: 0.3, windup: 0.225, passive: true, cd: 9, src: "data" },
+    ],
   };
-  // 고를 수 있는 내 챔피언은 이동기와 그 3D 동작이 다 들어간 이 40명. 키(소문자) → OP.GG·모델에 쓰는 이름(첫 글자만 대문자)
+  // 그 챔피언의 이동기 칸들(없으면 빈 배열)
+  const skillsOf = key => { const v = MOBILITY[String(key).toLowerCase()]; return !v ? [] : Array.isArray(v) ? v : [v]; };
+  // 고를 수 있는 내 챔피언은 이동기와 그 3D 동작이 다 들어간 이 42명. 키(소문자) → OP.GG·모델에 쓰는 이름(첫 글자만 대문자)
   const champAlias = k => k[0].toUpperCase() + k.slice(1);
   const champName = key => CHAMP_NAMES[String(key).toLowerCase()] || key;
   // 롤 쿨타임 그대로면 궁극기(100초) 는 한 판에 한 번, 벨베스 Q(1초) 는 쉬지 않고 쓴다. 소환사 주문(15·20초) 쪽으로 맞춘다
@@ -123,8 +144,13 @@
     const how = sk.kind === "blink" ? `커서 쪽으로 최대 ${sk.range} 순간이동`
       : sk.back ? `커서 반대쪽으로 ${sk.range} 뛰어 물러남`
       : `커서 쪽으로 ${sk.fixed ? "" : "최대 "}${sk.range} 돌진`;
-    return how + (sk.ret ? `, ${sk.ret}초 뒤 제자리로` : "") + (sk.untarget ? ", 그동안 스킬이 통과" : "")
-      + (sk.charges ? `, ${sk.window}초 안에 ${sk.charges}번` : "");
+    return (sk.passive ? "패시브: " : "") + how
+      + (sk.ret ? `, ${sk.ret}초 뒤 제자리로` : "") + (sk.recall ? `. ${sk.recall}초 안에 다시 누르면 처음 자리로` : "")
+      + (sk.untarget ? ", 그동안 스킬이 통과" : "") + (sk.recast ? ". 그사이 다시 누르면 한 번 더" : "")
+      + (sk.stealth ? `. ${sk.stealth}초 동안 투명(적은 마지막으로 본 자리를 노린다)` : "")
+      + (sk.haste ? `, 이동 속도 +${Math.round(sk.haste * 100)}%` : "")
+      + (sk.charges ? `, ${sk.window}초 안에 ${sk.charges}번` : "")
+      + (sk.dirs ? ". 네 방향마다 쿨타임이 따로" : "") + (sk.unstoppable ? ". 돌진 중에는 CC 를 받지 않음" : "");
   }
 
   // 조작 설정: 이동 방식(mouse | wasd), 모드(normal | hard), 모드마다 주문 두 칸(slots: [앞 키 칸, 뒤 키 칸]).
@@ -163,14 +189,18 @@
   const RARE_CHANCE = 0.03;
   const LIVES = 3;
   const SAFE_AFTER_HIT = 1.0;
-  // 3D 모델이 도는 빠르기(라디안/초). 판정용 facing 은 바로 바뀌고, 보이는 각도만 이 빠르기로 따라간다
-  const TURN_RATE = Math.PI * 6;
+  // 3D 모델이 도는 모양: [남은 각도를 줄이는 빠르기(/초), 가장 느린 빠르기(라디안/초)].
+  // 남은 각도에 비례해 돌아서 처음엔 빠르고 끝은 부드럽게 멈춘다. 판정용 facing 은 바로 바뀌고, 보이는 각도만 따라간다
+  const TURN = [22, Math.PI * 3];
+  // WASD 로 갈 때 이동 방향이 키 방향으로 휘어 도는 모양(마우스로 커서를 돌리며 갈 때처럼 360도로 이어진다)
+  const STEER = [16, Math.PI * 4];
   // 멈추기 직전 이만큼(초) 안에 바뀐 방향은 버린다. 대각선으로 가다 두 키를 조금 다르게 떼도 대각선을 보고 선다
   const STOP_GRACE = 0.08;
-  // a 에서 want 쪽으로 짧은 길로 최대 max 만큼 돈 각도
-  function turnToward(a, want, max) {
+  // a 에서 want 쪽으로 짧은 길로 dt 초 동안 돈 각도(how: TURN·STEER)
+  function turnToward(a, want, dt, how) {
     const d = ((want - a + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
-    return Math.abs(d) <= max ? want : a + Math.sign(d) * max;
+    const step = Math.max(Math.abs(d) * (1 - Math.exp(-how[0] * dt)), how[1] * dt);
+    return Math.abs(d) <= step ? want : a + Math.sign(d) * step;
   }
   // 바닥 표시를 보고 움직이기 시작하기까지 걸리는 시간(사람의 반응 시간).
   // 장판은 표시가 뜬 뒤 이만큼 늦게 움직여도 빠져나갈 수 있는 자리로 찍는다
@@ -733,13 +763,14 @@
     let lives, hits, safe, lastHit, dead;
     let fx, parts, shake, hurt;          // 그림 효과(판정과 상관없음)
     let waves, ca, deadFx;               // 효과층: 충격파 왜곡, 색수차, 죽은 뒤 회색이 되는 정도
-    let cds, ghostLeft, cursor, facing, prevFacing, facingAt, viewAngle, level, pops, lastSpree, lastMark;
+    let cds, ghostLeft, cursor, facing, prevFacing, facingAt, viewAngle, steer, level, pops, lastSpree, lastMark;
     let mode, spells;                    // 이번 판의 모드(normal | hard) 와 주문 두 개
     let effects, tenacity, ablaze, marked, tethers;   // 하드 모드 CC(applyCC)
-    let skillLeft, skillMax, charges, dash, untarget, ret, skillAt;   // 내 챔피언 이동기(useSkill)
+    let cdLeft, cdMax, dirLeft, charges, dash, untarget, ret, recall, pole;   // 내 챔피언 이동기(useSkill)
+    let hidden, seen, haste, realm, skillAt, skillUsed;
     let bannerTimer = 0, overTimer = 0;
     let controls = loadControls();
-    // 내 챔피언: 시작 창에서 고른 챔피언. 고른 적이 없으면 앱이 넘긴 챔피언이 고를 수 있는 40명 안에 있을 때 그 챔피언, 아니면 이즈리얼
+    // 내 챔피언: 시작 창에서 고른 챔피언. 고른 적이 없으면 앱이 넘긴 챔피언이 고를 수 있는 42명 안에 있을 때 그 챔피언, 아니면 이즈리얼
     const myChamp = () => controls.champ || (MOBILITY[modelKey(opFace)] ? modelKey(opFace) : "ezreal");
     faceKey = champAlias(myChamp());
     // 고를 수 있는 챔피언과 적 챔피언의 모델을 처음 열 때 한꺼번에 받는다(다음부터는 브라우저 저장소에서 읽는다).
@@ -779,18 +810,27 @@
       marked = -1;             // 진 W 표식이 끝나는 시각(맞은 뒤 4초. 그 안에 진 W 를 맞으면 속박)
       tethers = [];            // 블리츠·쓰레쉬 사슬 {c, skill, until}
       ghostLeft = 0;           // 유체화 남은 시간
-      skillLeft = 0;           // 이동기 남은 쿨타임과 그 쿨타임의 처음 길이(칸의 부채꼴)
-      skillMax = 1;
-      charges = null;          // 여러 번 쓰는 이동기(아리 R) {left, until}
-      dash = null;             // 돌진 중 {fx, fy, tx, ty, t0, dur}
+      cdLeft = [0, 0, 0, 0];   // 칸(Q W E R) 마다 이동기 남은 쿨타임과 그 쿨타임의 처음 길이(칸의 부채꼴)
+      cdMax = [1, 1, 1, 1];
+      dirLeft = [0, 0, 0, 0];  // 방향마다 따로인 쿨타임(벨베스 Q. 위·오른쪽·아래·왼쪽)
+      charges = null;          // 여러 번 쓰는 이동기(아리 R) {slot, left, until}
+      dash = null;             // 시전 중·돌진 중·순간이동 직전 {sk, fx, fy, tx, ty, t0(움직이기 시작), dur, blink, again}
       untarget = -1;           // 이 시각까지 스킬이 통과(피즈 E)
       ret = null;              // 돌아올 자리와 시각(조이 R) {x, y, at}
-      skillAt = -9;            // 이동기를 쓴 시각(3D 동작)
+      recall = null;           // 다시 누르면 돌아갈 자리(르블랑 W) {slot, x, y, until}
+      pole = null;             // 한 번 더 뛸 수 있는 동안(피즈 E) {until}
+      hidden = -1;             // 이 시각까지 투명(적은 seen 을 노린다)
+      seen = null;
+      haste = null;            // 이동기의 이동 속도 증가 {pct, until}
+      realm = null;            // 오로라 W 의 "다른 차원" {from, until}
+      skillAt = -9;            // 이동기를 쓴 시각과 그 이동기(3D 동작)
+      skillUsed = null;
       cursor = null;          // 마우스가 가리키는 바닥(점멸 방향)
       facing = { x: 0, y: -1 };    // 마지막으로 움직인 방향(커서가 없을 때 점멸 방향)
       prevFacing = null;       // 바로 전 방향과 바뀐 시각(STOP_GRACE)
       facingAt = 0;
-      viewAngle = -Math.PI / 2;    // 3D 모델이 지금 보는 각도(facing 을 TURN_RATE 로 따라간다)
+      viewAngle = -Math.PI / 2;    // 3D 모델이 지금 보는 각도(facing 을 TURN 으로 따라간다)
+      steer = null;            // WASD 로 가는 중: { a: 지금 이동 각도, want: 키 방향, prev: 바로 전 키 방향, at: 바뀐 시각 }
       level = 1;
       pops = [];               // 떠오르는 피해 숫자
       lastSpree = 0;
@@ -902,13 +942,13 @@
     // 쏘는 사람 자리. 롤에서처럼 사거리 끝 가까이에서 쏘게 한다.
     // 투사체·레이저: 나와의 거리가 사거리의 60~100% 인 곳을 먼저 고른다(너무 가까우면 못 피한다)
     // 장판·감옥: 노리는 곳이 사거리 안에 드는 곳
-    function castFrom(skill, aim) {
+    function castFrom(skill, aim, me) {
       const tries = Array.from({ length: 24 }, edgePoint);
       if (skill.kind === "line" || skill.kind === "beam") {
         const reach = Math.min(skill.range, FAR);
-        const good = tries.filter(p => { const d = dist(p, player); return d >= Math.min(600, reach * 0.6) && d <= reach; });
+        const good = tries.filter(p => { const d = dist(p, me); return d >= Math.min(600, reach * 0.6) && d <= reach; });
         if (good.length) return good[Math.floor(Math.random() * good.length)];
-        return tries.reduce((a, b) => (dist(b, player) > dist(a, player) ? b : a));
+        return tries.reduce((a, b) => (dist(b, me) > dist(a, me) ? b : a));
       }
       const inRange = tries.filter(p => dist(p, aim) <= skill.range);
       if (inRange.length) return inRange[Math.floor(Math.random() * inRange.length)];
@@ -921,12 +961,14 @@
       // 롤처럼 누르는 순간 노리는 곳이 정해진다. 가끔은 내가 갈 곳을 앞질러 노린다
       const ground = skill.kind === "circle" || skill.kind === "cage";
       const lead = Math.random() < leadChance(t);
-      let aim = { x: player.x, y: player.y }, at0;
+      // 내가 투명하면(오로라 W·샤코 Q) 마지막으로 본 자리를 노린다. 움직임도 모르니 앞질러 노리지 못한다
+      const me = hidden > t && seen ? { x: seen.x, y: seen.y, vx: 0, vy: 0 } : player;
+      let aim = { x: me.x, y: me.y }, at0;
       if (ground) {
         // 바닥 스킬은 노릴 곳을 먼저 정하고, 거기가 사거리 안에 드는 자리에서 쏜다
         if (lead) {
           const ahead = skill.cast + skill.delay;
-          aim = { x: player.x + player.vx * ahead, y: player.y + player.vy * ahead };
+          aim = { x: me.x + me.vx * ahead, y: me.y + me.vy * ahead };
         }
         // 감옥은 실제 베이가처럼 대개 테두리를 내 몸에 걸치게 쓴다(안으로 들어가거나 밖으로 나가야 산다).
         // 가끔은 나를 한가운데 가둔다
@@ -934,12 +976,12 @@
           const a = Math.random() * Math.PI * 2;
           aim = { x: aim.x + Math.cos(a) * skill.radius, y: aim.y + Math.sin(a) * skill.radius };
         }
-        at0 = castFrom(skill, aim);
+        at0 = castFrom(skill, aim, me);
       } else {
-        at0 = castFrom(skill, aim);
+        at0 = castFrom(skill, aim, me);
         if (lead) {
-          const ahead = skill.cast + (skill.kind === "line" ? dist(at0, player) / skill.speed : 0);
-          aim = { x: player.x + player.vx * ahead, y: player.y + player.vy * ahead };
+          const ahead = skill.cast + (skill.kind === "line" ? dist(at0, me) / skill.speed : 0);
+          aim = { x: me.x + me.vx * ahead, y: me.y + me.vy * ahead };
         }
       }
       const d = dist(aim, at0) || 1;
@@ -1097,39 +1139,83 @@
     }
     const inArena = (x, y) => ({ x: Math.min(ARENA.w - CHAMP.radius, Math.max(CHAMP.radius, x)),
                                  y: Math.min(ARENA.h - CHAMP.radius, Math.max(CHAMP.radius, y)) });
-    // 내 챔피언의 이동기(없으면 null)
-    const mySkill = () => MOBILITY[modelKey(faceKey)] || null;
+    // 내 챔피언의 이동기 칸들
+    const mySkills = () => skillsOf(modelKey(faceKey));
+    // 방향 번호: 위 0, 오른쪽 1, 아래 2, 왼쪽 3(벨베스 Q)
+    const dirOf = (dx, dy) => (Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 1 : 3) : (dy > 0 ? 2 : 0));
 
-    // 이동기. 점멸처럼 이동 불가 효과 중에는 못 쓰고, 돌진 중에도 못 쓴다
+    // 이동기. 점멸처럼 이동 불가 효과 중에는 못 쓰고, 시전·돌진 중에도 못 쓴다
     function useSkill(i) {
-      const sk = mySkill();
-      if (state !== "play" || !sk || sk.slot !== i) return;
-      if (skillLeft > 0 || held() || dash) { sfx("deny"); return; }
+      const sk = mySkills().find(x => x.slot === i);
+      if (state !== "play" || !sk) return;
+      if (held() || dash) { sfx("deny"); return; }
+      // 르블랑 W: 정해진 시간 안에 다시 누르면 처음 자리로(쿨타임과 상관없이)
+      if (recall && recall.slot === i) {
+        const from = { x: player.x, y: player.y };
+        player.x = recall.x; player.y = recall.y;
+        recall = null;
+        target = null;
+        skillAt = t; skillUsed = sk;
+        flashFx(from, player, LEBLANC_FX);
+        sfx("flash");
+        return;
+      }
+      // 피즈 E: 첫 번째로 뛰어 장대 위에 있는 동안(스킬이 통과) 한 번 더 뛴다. 내려오면 통과도 끝난다
+      if (sk.recast && pole && t < pole.until) {
+        pole = null;
+        const { dx, dy, len } = aim(sk.recast.range);
+        go(sk, dx, dy, len, { dur: sk.recast.dur, again: true });
+        return;
+      }
+      const { dx, dy, len } = aim(sk.range, sk.min, sk.fixed || sk.back);
+      const dir = dirOf(sk.back ? -dx : dx, sk.back ? -dy : dy);
+      if (sk.dirs ? dirLeft[dir] > 0 : cdLeft[i] > 0) { sfx("deny"); return; }
       // 쿨타임: 여러 번 쓰는 것은 마지막 번(또는 window 가 끝날 때, step) 에 돌기 시작한다
-      if (sk.charges) {
-        if (!charges) charges = { left: sk.charges, until: t + sk.window };
+      if (sk.dirs) {
+        dirLeft[dir] = cdMax[i] = skillCd(sk);
+      } else if (sk.charges) {
+        if (!charges) charges = { slot: i, left: sk.charges, until: t + sk.window };
         charges.left -= 1;
-        skillMax = skillLeft = charges.left > 0 ? sk.gap : skillCd(sk);
+        cdMax[i] = cdLeft[i] = charges.left > 0 ? sk.gap : skillCd(sk);
         if (charges.left <= 0) charges = null;
       } else {
-        skillMax = skillLeft = skillCd(sk);
+        cdMax[i] = cdLeft[i] = skillCd(sk);
       }
-      let { dx, dy, len } = aim(sk.range, sk.min, sk.fixed || sk.back);
+      go(sk, dx, dy, len, { wind: sk.windup || 0 });
+    }
+    // 움직임을 예약한다. 시전 시간(wind) 동안은 제자리에서 스킬 동작, 그 뒤 돌진하거나 순간이동(step)
+    function go(sk, dx, dy, len, o) {
       if (sk.back) { dx = -dx; dy = -dy; }
-      const from = { x: player.x, y: player.y }, to = inArena(player.x + dx * len, player.y + dy * len);
+      const to = inArena(player.x + dx * len, player.y + dy * len);
+      const d = Math.hypot(to.x - player.x, to.y - player.y);
+      const blink = sk.kind === "blink";
+      dash = { sk, fx: player.x, fy: player.y, tx: to.x, ty: to.y, t0: t + (o.wind || 0), blink, again: !!o.again,
+               dur: blink ? 0 : Math.max(0.05, o.dur || sk.dur || d / sk.speed) };
       target = null;
-      skillAt = t;
-      if (sk.untarget) untarget = t + sk.untarget;
-      if (sk.kind === "blink") {
-        Object.assign(player, to);
-        if (sk.ret) ret = { x: from.x, y: from.y, at: t + sk.ret };
-        flashFx(from, player);
-        sfx("flash");
-      } else {
-        const d = Math.hypot(to.x - from.x, to.y - from.y);
-        dash = { fx: from.x, fy: from.y, tx: to.x, ty: to.y, t0: t, dur: Math.max(0.05, sk.dur || d / sk.speed) };
-        facing = sk.back ? { x: -dx, y: -dy } : { x: dx, y: dy };     // 뒤로 뛸 때는 커서 쪽을 본 채로
-        sfx("ghost");
+      skillAt = t; skillUsed = sk;
+      facing = sk.back ? { x: -dx, y: -dy } : { x: dx, y: dy };     // 뒤로 뛸 때는 커서 쪽을 본 채로
+      if (dash.t0 <= t) moveStarts(dash);
+    }
+    // 움직이기 시작할 때: 통과·되돌아가기 표식
+    function moveStarts(m) {
+      m.started = true;
+      const sk = m.sk;
+      if (!m.blink) sfx("ghost");
+      if (sk.untarget && !m.again) { untarget = t + sk.untarget; if (sk.recast) pole = { until: untarget }; }
+      if (sk.recall) recall = { slot: sk.slot, x: m.fx, y: m.fy, until: t + sk.recall };
+    }
+    // 도착했을 때: 순간이동 효과, 조이 R 돌아오기, 투명·다른 차원
+    function moveEnds(m) {
+      const sk = m.sk;
+      if (m.blink) { flashFx({ x: m.fx, y: m.fy }, player); sfx("flash"); }
+      if (m.again) { untarget = t; pole = null; }
+      if (sk.ret) ret = { x: m.fx, y: m.fy, at: t + sk.ret };
+      if (sk.stealth) {
+        hidden = t + sk.stealth;
+        // 순간이동(샤코 Q) 은 사라진 자리를, 뛰어간 것(오로라 W) 은 내려앉은 자리를 마지막으로 본다
+        seen = m.blink ? { x: m.fx, y: m.fy } : { x: player.x, y: player.y };
+        if (sk.haste) haste = { pct: sk.haste, until: hidden };
+        if (sk.realm) { realm = { from: t, until: hidden }; flashGround(player.x, player.y, 150, "#9775fa", 0.5); }
       }
     }
 
@@ -1159,7 +1245,8 @@
       skillSound(s, "hit");
       if (lives === 1) announce("체력이 낮습니다", "warn");
       if (lives <= 0) dead = true;
-      else if (mode === "hard") applyCC(s, how);
+      // 말파이트 R 처럼 저지 불가인 돌진 중에는 CC 를 받지 않는다
+      else if (mode === "hard" && !(dash && dash.started && dash.sk.unstoppable)) applyCC(s, how);
       return true;
     }
 
@@ -1225,8 +1312,28 @@
       for (const sp of SPELLS) cds[sp.id] = Math.max(0, cds[sp.id] - dt);
       ghostLeft = Math.max(0, ghostLeft - dt);
       // 이동기 쿨타임. 여러 번 쓰는 것을 다 안 쓰고 window 가 지나면 그때부터 쿨타임
-      skillLeft = Math.max(0, skillLeft - dt);
-      if (charges && t >= charges.until) { charges = null; skillMax = skillLeft = skillCd(mySkill()); }
+      for (let i = 0; i < 4; i++) { cdLeft[i] = Math.max(0, cdLeft[i] - dt); dirLeft[i] = Math.max(0, dirLeft[i] - dt); }
+      if (charges && t >= charges.until) {
+        const sk = mySkills().find(x => x.slot === charges.slot);
+        cdMax[charges.slot] = cdLeft[charges.slot] = skillCd(sk);
+        charges = null;
+      }
+      if (recall && t >= recall.until) recall = null;
+      if (pole && t >= pole.until) pole = null;
+      if (haste && t >= haste.until) haste = null;
+      // 르블랑 W·조이 R 이 돌아갈 자리는 바닥에 보라 표식이 숨 쉰다
+      for (const m of [recall, ret]) {
+        if (m && !(t - (m.fxAt || -1) < 0.3)) {
+          m.fxAt = t;
+          emit({ x: m.x, y: m.y, ground: 1, size: 60, size1: 95, color: "#f3d9fa", color1: m === recall ? "#9c36b5" : "#cc5de8", shape: "ring", life: 0.6, a: 0.85 });
+        }
+      }
+      // 다른 차원(오로라 W): 몸 둘레로 영혼 빛이 피어오른다
+      if (realm && t < realm.until && !(t - (realm.fxAt || -1) < 0.05)) {
+        realm.fxAt = t;
+        emit({ x: player.x + rand(-45, 45), y: player.y + rand(-45, 45), z: rand(10, 110), vz: 90, size: 22, size1: 4,
+               color: "#ffffff", color1: "#9775fa", shape: "glow", life: 0.7 });
+      }
       // 조이 R: 정해진 시간 뒤 제자리로(CC 중이어도)
       if (ret && t >= ret.at) {
         const from = { x: player.x, y: player.y };
@@ -1236,7 +1343,7 @@
         target = null;
         flashFx(from, player);
       }
-      const base = CHAMP.speed * (ghostLeft > 0 ? 1 + spellById("ghost").bonus : 1);
+      const base = CHAMP.speed * (ghostLeft > 0 ? 1 + spellById("ghost").bonus : 1) * (haste ? 1 + haste.pct : 1);
       // 둔화: 가장 센 것 하나만. 줄어드는 둔화(to) 는 시간에 따라 pct → to. 이동 속도는 110 아래로 안 내려간다
       let slow = 0;
       for (const e of effects) {
@@ -1252,19 +1359,27 @@
       if (keys.has("KeyS") || keys.has("ArrowDown")) my += 1;
       if (keys.has("KeyA") || keys.has("ArrowLeft")) mx -= 1;
       if (keys.has("KeyD") || keys.has("ArrowRight")) mx += 1;
+      let steering = false;       // 이번 틀에 WASD 로 갔는지
       const toward = (p, v) => {
         const dx = p.x - player.x, dy = p.y - player.y, d = Math.hypot(dx, dy);
         if (d <= v * dt) { player.vx = player.vy = 0; player.x = p.x; player.y = p.y; return true; }
         player.vx = dx / d * v; player.vy = dy / d * v;
         return false;
       };
+      if (dash && t < dash.t0 && (stun || root || air || charm)) {
+        // 시전 중에 CC 를 맞으면 끊긴다(쿨타임은 그대로 돈다)
+        dash = null;
+      }
       if (dash) {
-        // 이동기 돌진: 정해진 시간 동안 곧게 간다. 그사이 걸린 CC 는 돌진이 끝난 뒤에 느낀다
-        const k = Math.min(1, (t - dash.t0) / dash.dur);
+        // 이동기: 시전 시간에는 제자리, 그 뒤 정해진 시간 동안 곧게 가거나 순간이동. 돌진 중에 걸린 CC 는 끝난 뒤에 느낀다
         player.vx = player.vy = 0;
-        player.x = dash.fx + (dash.tx - dash.fx) * k;
-        player.y = dash.fy + (dash.ty - dash.fy) * k;
-        if (k >= 1) dash = null;
+        if (t >= dash.t0) {
+          if (!dash.started) moveStarts(dash);
+          const k = dash.dur ? Math.min(1, (t - dash.t0) / dash.dur) : 1;
+          player.x = dash.fx + (dash.tx - dash.fx) * k;
+          player.y = dash.fy + (dash.ty - dash.fy) * k;
+          if (k >= 1) { const m = dash; dash = null; moveEnds(m); }
+        }
       } else if (air && air.pull) {
         // 블리츠 Q: 블리츠 앞까지 끌려간다. 닿으면 공중에 뜸이 끝난다
         if (toward(air.pull, air.speed)) air.end = t;
@@ -1282,10 +1397,15 @@
         target = null;
         toward(charm.from, base * (1 - charm.slow));
       } else if (mx || my) {
+        // 이동 방향은 키 방향으로 빠르게 휘어 돈다(서 있다가 누르면 바로 그쪽으로)
         target = null;
-        const n = Math.hypot(mx, my);
-        player.vx = mx / n * spd;
-        player.vy = my / n * spd;
+        steering = true;
+        const want = Math.atan2(my, mx);
+        if (!steer) steer = { a: want, want, prev: null, at: 0 };
+        else if (want !== steer.want) { steer.prev = steer.want; steer.at = t; steer.want = want; }
+        steer.a = turnToward(steer.a, want, dt, STEER);
+        player.vx = Math.cos(steer.a) * spd;
+        player.vy = Math.sin(steer.a) * spd;
       } else if (target) {
         const dx = target.x - player.x, dy = target.y - player.y;
         const d = Math.hypot(dx, dy);
@@ -1300,7 +1420,18 @@
       } else {
         player.vx = player.vy = 0;
       }
-      if (player.vx || player.vy) {
+      if (steering) {
+        facing = { x: Math.cos(steer.a), y: Math.sin(steer.a) };
+        prevFacing = null;
+      } else if (steer) {
+        // WASD 를 뗐다(또는 CC·이동기로 끊겼다): 휘어 돌던 중이어도 마지막 키 방향을 보고 선다
+        const a = steer.prev != null && t - steer.at < STOP_GRACE ? steer.prev : steer.want;
+        facing = { x: Math.cos(a), y: Math.sin(a) };
+        steer = null;
+      }
+      if (steering) {
+        // 위에서 정했다
+      } else if (player.vx || player.vy) {
         const n = Math.hypot(player.vx, player.vy);
         const f = { x: player.vx / n, y: player.vy / n };
         if (f.x !== facing.x || f.y !== facing.y) { prevFacing = facing; facingAt = t; }
@@ -1309,7 +1440,7 @@
         if (t - facingAt < STOP_GRACE) facing = prevFacing;
         prevFacing = null;
       }
-      viewAngle = turnToward(viewAngle, Math.atan2(facing.y, facing.x), TURN_RATE * dt);
+      viewAngle = turnToward(viewAngle, Math.atan2(facing.y, facing.x), dt, TURN);
       player.x = Math.min(ARENA.w - CHAMP.radius, Math.max(CHAMP.radius, player.x + player.vx * dt));
       player.y = Math.min(ARENA.h - CHAMP.radius, Math.max(CHAMP.radius, player.y + player.vy * dt));
 
@@ -1567,14 +1698,16 @@
       wave(player.x, player.y, 40, 260, 0.4, 14);
       ca = 1;
     }
-    // 점멸: 출발점과 도착점에 노란 섬광, 그 사이를 빛줄기가 잇는다
-    function flashFx(from, to) {
+    // 점멸: 출발점과 도착점에 노란 섬광, 그 사이를 빛줄기가 잇는다. pal 로 색을 바꾼다(르블랑 W 돌아가기는 보라)
+    const FLASH_FX = { main: "#ffd43b", deep: "#fab005", soft: "#fff3bf", spark: "#ffe066", line: "#fff9db" };
+    const LEBLANC_FX = { main: "#da77f2", deep: "#9c36b5", soft: "#f3d9fa", spark: "#e599f7", line: "#f8f0fc" };
+    function flashFx(from, to, pal = FLASH_FX) {
       for (const p of [from, to]) {
-        emit({ x: p.x, y: p.y, z: 70, size: 170, size1: 60, color: "#ffffff", color1: "#ffd43b", shape: "star", life: 0.3, spin: 4 });
-        emit({ x: p.x, y: p.y, ground: 1, size: 80, size1: 150, color: "#fff3bf", color1: "#fab005", shape: "ring", life: 0.35, erode: 1 });
-        burst(p.x, p.y, 60, "#ffe066", 12, 240);
+        emit({ x: p.x, y: p.y, z: 70, size: 170, size1: 60, color: "#ffffff", color1: pal.main, shape: "star", life: 0.3, spin: 4 });
+        emit({ x: p.x, y: p.y, ground: 1, size: 80, size1: 150, color: pal.soft, color1: pal.deep, shape: "ring", life: 0.35, erode: 1 });
+        burst(p.x, p.y, 60, pal.spark, 12, 240);
       }
-      emit({ x: from.x, y: from.y, z: 70, line: [from.x, from.y, to.x, to.y], size: 60, size1: 10, color: "#fff9db", color1: "#fab005", shape: "spark", life: 0.25 });
+      emit({ x: from.x, y: from.y, z: 70, line: [from.x, from.y, to.x, to.y], size: 60, size1: 10, color: pal.line, color1: pal.deep, shape: "spark", life: 0.25 });
     }
     // 정화: 발밑에서 맑은 빛이 퍼지고 반짝이가 솟는다
     function cleanseFx() {
@@ -1702,13 +1835,18 @@
       if (!player) return out;
       if (model(faceKey)) {
         const moving = (player.vx || player.vy) && !(mode === "hard" && held());
-        // 이동기를 쓰면 그 스킬 동작(spell1~4) 을 한 번. 돌진이 길면 돌진이 끝날 때까지
-        const sk = mySkill(), since = t - skillAt;
+        // 이동기를 쓰면 그 스킬 동작(spell1~4) 을 한 번. 돌진이 길면 돌진이 끝날 때까지.
+        // 돌진 동작이 따로 있으면(칼리스타 패시브) 시전 뒤 돌진하는 동안은 그 동작
+        const sk = skillUsed, since = t - skillAt;
         const casting = sk && (dash || since < 0.5);
+        const leaping = casting && dash && dash.started && sk.dashAnim;
         out.push({ key: modelKey(faceKey), x: player.x, y: player.y, z: lift(), angle: viewAngle,
-                   anim: casting ? "spell" + (sk.slot + 1) : moving ? "run" : "idle", time: casting ? since : animClock, loop: !casting,
-                   alpha: untarget > t ? 0.4 : safe > 0 && Math.floor(safe * 10) % 2 ? 0.45 : 1,
-                   tint: hurt > 0 ? [1, 1, 1, hurt / 0.4 * 0.55] : ghostLeft > 0 ? [0.4, 0.85, 0.95, 0.22] : null });
+                   anim: leaping ? sk.dashAnim : casting ? "spell" + (sk.slot + 1) : moving ? "run" : "idle",
+                   time: leaping ? t - dash.t0 : casting ? since : animClock, loop: !casting,
+                   // 투명하면 내 화면에서만 흐리게 보인다(롤에서 내 챔피언이 반투명해지는 것처럼)
+                   alpha: hidden > t ? 0.35 : untarget > t ? 0.4 : safe > 0 && Math.floor(safe * 10) % 2 ? 0.45 : 1,
+                   tint: hurt > 0 ? [1, 1, 1, hurt / 0.4 * 0.55] : realm && t < realm.until ? [0.6, 0.5, 1, 0.35]
+                     : ghostLeft > 0 ? [0.4, 0.85, 0.95, 0.22] : null });
       }
       for (const c of casters) {
         if (!model(c.skill.champ)) continue;
@@ -2461,7 +2599,7 @@
       const base = proj(player.x, player.y, 0), head = upright(player.x, player.y, PORTRAIT_Z + lift());
       const r = 46 * head.k;
       const blink = safe > 0 && Math.floor(safe * 10) % 2;
-      ctx.globalAlpha = blink ? 0.4 : 1;
+      ctx.globalAlpha = blink || hidden > t ? 0.4 : 1;
       if (ghostLeft > 0) {
         // 유체화: 뒤로 잔상이 남고 푸르게 빛난다
         for (let i = 3; i >= 1; i--) {
@@ -3015,14 +3153,21 @@
         // CC 때문에 못 쓰는 주문(이동 불가 중의 점멸) 은 어둡게
         b.classList.toggle("locked", sp.id === "flash" && !!blocked);
       });
-      const sk = mySkill();
-      if (sk) {
+      for (const sk of mySkills()) {
         const b = skillBtns[sk.slot];
-        paintCd(b, skillLeft, skillMax);
-        // 쓰는 중(돌진·스킬 통과·돌아오기 전·남은 횟수가 있음) 은 빛나고, CC 중에는 잠긴다
-        b.classList.toggle("active", !!(dash || untarget > t || ret || charges));
+        // 벨베스 Q 는 지금 커서가 가리키는 방향의 쿨타임
+        const left = sk.dirs ? (cursor ? dirLeft[dirOf(cursor.x - player.x, cursor.y - player.y)] : Math.min(...dirLeft)) : cdLeft[sk.slot];
+        paintCd(b, left, cdMax[sk.slot]);
+        // 쓰는 중(시전·돌진·스킬 통과·투명·돌아갈 수 있음·남은 횟수가 있음) 은 빛나고, CC 중에는 잠긴다
+        const using = (dash && dash.sk === sk) || (recall && recall.slot === sk.slot) || (sk.untarget && untarget > t)
+          || (sk.stealth && hidden > t) || (sk.ret && ret) || (charges && charges.slot === sk.slot);
+        b.classList.toggle("active", !!using);
         b.classList.toggle("locked", !!blocked);
+        // 다시 누를 수 있으면(르블랑 W·피즈 E) 쿨타임이 돌아도 밝게
+        b.classList.toggle("recast", !dash && !!((recall && recall.slot === sk.slot) || (sk.recast && pole)));
       }
+      // 오로라 W: 다른 차원에 들어가면 화면 색이 바뀐다
+      view.classList.toggle("realm", !!(realm && t < realm.until && state === "play"));
     }
     // 쿨타임은 시계 방향으로 걷히는 그림자와 남은 초
     function paintCd(b, left, max) {
@@ -3047,12 +3192,12 @@
     // 아이콘은 늦게 오므로 그사이 챔피언이 바뀌었으면 버린다
     let skillNames = null;     // 내 챔피언의 Q W E R 한국어 이름(받기 전엔 null)
     function paintSkills() {
-      const champ = faceKey, sk = mySkill(), labels = skillLabels(controls.move);
+      const champ = faceKey, sks = mySkills(), labels = skillLabels(controls.move);
       const show = list => {
         if (champ !== faceKey) return;
         skillNames = list && list.map(x => x.name);
         skillBtns.forEach((b, i) => {
-          const img = b.querySelector("img"), on = !!sk && sk.slot === i;
+          const img = b.querySelector("img"), sk = sks.find(x => x.slot === i), on = !!sk;
           const name = (list && list[i].name) || "QWER"[i] + " 스킬";
           if (list && list[i].icon) { img.src = list[i].icon; b.classList.remove("noimg"); }
           else { img.removeAttribute("src"); b.classList.add("noimg"); }
@@ -3284,7 +3429,7 @@
         ${controls.move === "mouse"
           ? `<li><b>우클릭</b> 찍은 곳으로 이동 (누른 채 끌면 계속 따라가요)</li>`
           : `<li><b>WASD</b> 누른 쪽으로 이동 (방향키도 돼요). 마우스는 점멸·이동기 방향만 정해요</li>`}
-        ${mySkill() ? `<li><b>${skillLabels(controls.move)[mySkill().slot]}</b> ${skillNames && skillNames[mySkill().slot] ? esc(skillNames[mySkill().slot]) + ". " : ""}${skillText(mySkill())}. 쿨타임 ${skillCd(mySkill())}초 (나머지 스킬 칸은 못 써요)</li>`
+        ${mySkills().length ? mySkills().map((sk, n, all) => `<li><b>${skillLabels(controls.move)[sk.slot]}</b> ${skillNames && skillNames[sk.slot] ? esc(skillNames[sk.slot]) + ". " : ""}${skillText(sk)}. 쿨타임 ${skillCd(sk)}초${n === all.length - 1 ? " (나머지 스킬 칸은 못 써요)" : ""}</li>`).join("")
           : `<li><b>${skillLabels(controls.move).join(" ")}</b> 스킬 칸. 이 챔피언은 연습장에서 쓸 이동기가 없어요</li>`}
         <li><b>${k[s1.id]} · ${k[s2.id]}</b> ${s1.name} · ${s2.name}. 쿨타임 ${s1.cd}초 · ${s2.cd}초
           (점멸은 커서 쪽 400, 유체화는 3초 동안 이동 속도 +40%)</li>
@@ -3328,9 +3473,8 @@
         <div class="spell-pop-info"></div>`;
       const info = pop.querySelector(".spell-pop-info");
       const show = k => {
-        const sk = MOBILITY[k];
         info.innerHTML = `<b>${esc(champName(k))}</b>
-          <p>${skillLabels(controls.move)[sk.slot]} · ${skillText(sk)}. 쿨타임 ${skillCd(sk)}초</p>`;
+          ${skillsOf(k).map(sk => `<p>${skillLabels(controls.move)[sk.slot]} · ${skillText(sk)}. 쿨타임 ${skillCd(sk)}초</p>`).join("")}`;
       };
       show(myChamp());
       card.appendChild(pop);
@@ -3425,7 +3569,7 @@
     function setBest(text) { hud("best").innerHTML = text || ""; }
 
     // 내 챔피언을 나중에 바꾼다(티어표를 늦게 받았을 때)
-    // 시작 창에서 직접 고른 챔피언이 있으면 그쪽이 먼저다(고를 수 있는 40명 밖의 챔피언이면 이즈리얼)
+    // 시작 창에서 직접 고른 챔피언이 있으면 그쪽이 먼저다(고를 수 있는 42명 밖의 챔피언이면 이즈리얼)
     function setChamp(key, name) {
       if (key) { opFace = key; if (!controls.champ) applyFace(); }
       if (name) opts.name = name;
