@@ -118,10 +118,11 @@
   // ── 재생 중인 시스템 ──
   const live = [];
   // name: 시스템 경로. o: { x, y, h(바닥 좌표·높이), dir: {x, y}(바닥에서 앞), target: {x, y, h}(빔 끝), scale }
+  // o.gain: 밝기 배율(색에 곱한다. 적 스킬을 잘 보이게)
   function play(name, o = {}) {
     if (!FX || !FX.systems[name]) return null;
     const s = FX.systems[name];
-    const inst = { s, name, age: 0, stopped: false, done: false, scale: o.scale || 1, ems: [], odom: 0 };
+    const inst = { s, name, age: 0, stopped: false, done: false, scale: o.scale || 1, ems: [], odom: 0, gain: o.gain || 0 };
     place(inst, o);
     inst.prev = inst.pos.slice();
     for (const e of s.emitters) inst.ems.push({ e, age: 0, acc: 0, ps: [], single: false, emitted: 0, path: 0 });
@@ -319,7 +320,7 @@
     if (ev(c.chance, 0, 1) < Math.random()) return;
     for (const k of c.kids) {
       const ci = play(k, { scale: inst.scale });
-      if (ci) { ci.pos = p.pos.slice(); ci.prev = ci.pos.slice(); ci.sin = inst.sin; ci.cos = inst.cos; ci.target = inst.target; }
+      if (ci) { ci.pos = p.pos.slice(); ci.prev = ci.pos.slice(); ci.sin = inst.sin; ci.cos = inst.cos; ci.target = inst.target; ci.gain = inst.gain; }
     }
   }
 
@@ -370,6 +371,7 @@
           side = norm(cross(dir, toCam));
         }
         const s = scaleOf(e, p), col = colorOf(e, p), w = s[0];
+        if (inst.gain) { col[0] *= inst.gain; col[1] *= inst.gain; col[2] *= inst.gain; }
         const tx = p.tile ? p.tile[0] : 0;
         const u = tx > 0 ? (tr.mMode ? p.dist : walked) / tx : 0;
         rows.push({ L: add(p.pos, mul(side, w)), Rr: add(p.pos, mul(side, -w)), u, col, x: extra(e, p) });
@@ -385,6 +387,7 @@
     for (const p of ps) {
       const s = scaleOf(e, p), col = colorOf(e, p), x = extra(e, p);
       if (col[3] <= 0.002) continue;
+      if (inst.gain) { col[0] *= inst.gain; col[1] *= inst.gain; col[2] *= inst.gain; }
       const mu = e.textureMult ? multUv(e, p) : null;
       if (T === "VfxPrimitiveBeam") {
         if (!inst.target) continue;

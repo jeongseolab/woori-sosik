@@ -1353,7 +1353,7 @@
       // 시전하는 동안 켜지는 것(진 W 모으기, 징크스 W 경고선)
       if (lf && (skill.kind === "beam" || skill.kind === "line") && lf.warn) {
         const end = { x: c.x + c.dx * Math.min(skill.range, 2500), y: c.y + c.dy * Math.min(skill.range, 2500), h: FX_H };
-        c.vfx = fxPlay(lf.warn, { x: c.x, y: c.y, h: FX_H, dir: { x: c.dx, y: c.dy }, target: end }, skill.cast + 1);
+        c.vfx = fxPlay(lf.warn, { x: c.x, y: c.y, h: FX_H, gain: ENEMY_GAIN, dir: { x: c.dx, y: c.dy }, target: end }, skill.cast + 1);
       }
       model(skill.champ);       // 3D 모델이 있으면 받기 시작(다 받기 전엔 초상화)
       skillSound(skill, "cast");
@@ -2136,10 +2136,10 @@
       const sp = m.skill.split;
       const piece = { ...m.skill, name: m.skill.name + " (갈라짐)", speed: sp.speed, radius: sp.radius, range: sp.range, split: null };
       const lf = m.fx && lolFx(m.skill);
-      if (lf) fxPlay(lf.splitfx, { x: m.x, y: m.y, h: FX_H, dir: { x: m.dx, y: m.dy } });
+      if (lf) fxPlay(lf.splitfx, { x: m.x, y: m.y, h: FX_H, gain: ENEMY_GAIN, dir: { x: m.dx, y: m.dy } });
       for (const side of [1, -1]) {
         const q = { skill: piece, x: m.x, y: m.y, ox: m.x, oy: m.y, dx: -m.dy * side, dy: m.dx * side, speed: sp.speed, left: sp.range, flown: 0, caster: m.caster };
-        if (lf) { q.vfx = fxPlay(lf.split, { x: q.x, y: q.y, h: FX_H, dir: { x: q.dx, y: q.dy } }, 10); q.fx = !!q.vfx; }
+        if (lf) { q.vfx = fxPlay(lf.split, { x: q.x, y: q.y, h: FX_H, gain: ENEMY_GAIN, dir: { x: q.dx, y: q.dy } }, 10); q.fx = !!q.vfx; }
         missiles.push(q);
       }
       burst(m.x, m.y, MISSILE_Z, m.skill.color, 14, 300);
@@ -2173,12 +2173,15 @@
     function fxPlay(names, o, ttl = 6) {
       if (!names || !names.length) return null;
       const out = names.map(n => DodgeVfx.play(n, o)).filter(Boolean);
+      if (o.gain) out.forEach(i => { i.gain = o.gain; });
       out.forEach(i => { i.ttl = ttl; if (i.s.sound) lolSound(i.s.sound); });
       return out.length ? out : null;
     }
     const fxMove = (list, o) => { if (list) list.forEach(i => DodgeVfx.move(i, o)); };
     const fxStop = list => { if (list) list.forEach(i => DodgeVfx.stop(i)); };
     const FX_H = 100;              // 롤 투사체가 나는 높이(mOffsetInitialTargetHeight)
+    // 적 스킬 이펙트는 밝기를 올린다(롤보다 멀리서 내려다봐 작고 어둡게 보인다). 크기는 판정 그대로 둔다
+    const ENEMY_GAIN = 1.5;
 
     // 내 챔피언 스킬 이펙트(dodge/vfx/mine/<챔피언>.json): 칸마다 cast(쓸 때) · anim([이펙트, 초], 애니메이션에 박힌 것) ·
     // dash(돌진하는 동안) · land(내려앉을 때) · buf(이속·보호막·투명 동안). 모두 내 몸에 붙어 따라다닌다
@@ -2230,13 +2233,13 @@
       const s = c.skill, lf = lolFx(s), dir = { x: c.dx, y: c.dy };
       skillSound(s, "release");
       fxStop(c.vfx);
-      if (lf) fxPlay(lf.cast, { x: c.x, y: c.y, h: 0, dir });
+      if (lf) fxPlay(lf.cast, { x: c.x, y: c.y, h: 0, gain: ENEMY_GAIN, dir });
       else castFx(c);
       if (s.kind === "line") {
         const m = { skill: s, x: c.x, y: c.y, ox: c.x, oy: c.y, dx: c.dx, dy: c.dy, speed: s.speed, left: s.range, flown: 0, caster: c };
         if (lf) {
           // 투사체 이펙트의 빔 끝은 시전자(쓰레쉬 Q 사슬이 갈고리에서 쓰레쉬까지)
-          m.vfx = fxPlay(lf.mis, { x: m.x, y: m.y, h: FX_H, dir, target: { x: c.x, y: c.y, h: FX_H } }, 30);
+          m.vfx = fxPlay(lf.mis, { x: m.x, y: m.y, h: FX_H, gain: ENEMY_GAIN, dir, target: { x: c.x, y: c.y, h: FX_H } }, 30);
           m.fx = !!m.vfx;
         }
         missiles.push(m);
@@ -2246,14 +2249,14 @@
         const delay = s.delayFar ? s.delay + (s.delayFar - s.delay) * Math.min(1, dist(c, at) / s.range) : s.delay;
         const z = { skill: s, x: at.x, y: at.y, wait: delay, total: delay };
         if (lf) {
-          z.vfx = fxPlay(lf.warn, { x: z.x, y: z.y, h: 0, dir }, delay + 0.5);
-          fxPlay(lf.land, { x: z.x, y: z.y, h: 0, dir });
+          z.vfx = fxPlay(lf.warn, { x: z.x, y: z.y, h: 0, gain: ENEMY_GAIN, dir }, delay + 0.5);
+          fxPlay(lf.land, { x: z.x, y: z.y, h: 0, gain: ENEMY_GAIN, dir });
           z.fx = true;
         }
         zones.push(z);
       } else if (s.kind === "cage") {
         const z = { skill: s, x: c.aim.x, y: c.aim.y, wait: s.delay, total: s.delay, up: 0 };
-        if (lf) { z.vfx = fxPlay(lf.warn, { x: z.x, y: z.y, h: 0, dir }, s.delay + 0.5); z.fx = true; }
+        if (lf) { z.vfx = fxPlay(lf.warn, { x: z.x, y: z.y, h: 0, gain: ENEMY_GAIN, dir }, s.delay + 0.5); z.fx = true; }
         zones.push(z);
       } else if (s.kind === "beam") {
         const a = { x: c.x, y: c.y }, b = { x: c.x + c.dx * s.range, y: c.y + c.dy * s.range };
@@ -2261,7 +2264,7 @@
         const f = { skill: s, a, b, left: 0.35, max: 0.35 };
         if (lf) {
           const far = Math.min(s.range, 2500);
-          f.fx = !!fxPlay(lf.beam, { x: a.x, y: a.y, h: FX_H, dir, target: { x: a.x + c.dx * far, y: a.y + c.dy * far, h: FX_H } }, 1.5);
+          f.fx = !!fxPlay(lf.beam, { x: a.x, y: a.y, h: FX_H, gain: ENEMY_GAIN, dir, target: { x: a.x + c.dx * far, y: a.y + c.dy * far, h: FX_H } }, 1.5);
         }
         flashes.push(f);
         if (!f.fx) beamFx(s, a, b);
@@ -2617,7 +2620,7 @@
           if (s.kind === "circle") {
             // 터지는 순간 원 안에 몸이 조금이라도 걸치면 맞는다
             z.done = 0.3;          // 터진 자리를 잠깐 보여 준다
-            if (z.fx) { fxStop(z.vfx); fxPlay(lolFx(s) && lolFx(s).boom, { x: z.x, y: z.y, h: 0 }); }
+            if (z.fx) { fxStop(z.vfx); fxPlay(lolFx(s) && lolFx(s).boom, { x: z.x, y: z.y, h: 0, gain: ENEMY_GAIN }); }
             else boom(z.x, z.y, s.radius, s.color, s);
             skillSound(s, "land");
             if (d < s.radius + CHAMP.radius && hit(s, { d })) { if (dead) return; }
@@ -2629,7 +2632,7 @@
           // 테두리에 몸이 닿으면 맞는다. 안에 갇혔으면 테두리에 닿지 않게 버텨야 한다
           if (!z.formed) {
             z.formed = true;
-            if (z.fx) { fxStop(z.vfx); z.cage = fxPlay(lolFx(s) && lolFx(s).cage, { x: z.x, y: z.y, h: 0 }, s.last + 1); }
+            if (z.fx) { fxStop(z.vfx); z.cage = fxPlay(lolFx(s) && lolFx(s).cage, { x: z.x, y: z.y, h: 0, gain: ENEMY_GAIN }, s.last + 1); }
             else fx.push({ kind: "ring", x: z.x, y: z.y, r: s.radius, color: s.color, life: 0.4, max: 0.4 });
             skillSound(s, "form");
           }
@@ -2780,7 +2783,7 @@
       const lf = lolFx(s);
       if (lf && lf.hit && lf.hit.length) {
         const from = lastHow && lastHow.m ? { x: lastHow.m.dx, y: lastHow.m.dy } : null;
-        fxPlay(lf.hit, { x: player.x, y: player.y, h: 0, dir: from || undefined });
+        fxPlay(lf.hit, { x: player.x, y: player.y, h: 0, gain: ENEMY_GAIN, dir: from || undefined });
         ca = 1;
         return;
       }
@@ -3602,6 +3605,46 @@
       ctx.stroke();
     }
 
+    // 적 장판의 위험 표시(롤의 적 범위 표시처럼 빨강). 판정 반지름 그대로: 옅게 깔린 바닥 + 터질 때까지 차오르는 안쪽 + 또렷한 테두리.
+    // 감옥은 서기 전까지 빨간 점선 고리
+    const DANGER = "#ff3030";
+    function dangerZone(z, s) {
+      if (z.done != null || z.wait <= 0) return;
+      const p = 1 - Math.max(0, z.wait) / z.total;
+      if (s.kind === "cage") {
+        groundCircle(z.x, z.y, s.radius);
+        ctx.fillStyle = "rgba(255, 48, 48, .10)";
+        ctx.fill();
+        ctx.setLineDash([12, 8]);
+        ctx.strokeStyle = DANGER;
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        ctx.setLineDash([]);
+        return;
+      }
+      groundCircle(z.x, z.y, s.radius);
+      ctx.fillStyle = "rgba(255, 48, 48, .16)";
+      ctx.fill();
+      groundCircle(z.x, z.y, s.radius * p);
+      ctx.fillStyle = "rgba(255, 48, 48, " + (0.18 + 0.22 * p).toFixed(3) + ")";
+      ctx.fill();
+      groundCircle(z.x, z.y, s.radius);
+      glow(DANGER, 10);
+      ctx.strokeStyle = DANGER;
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      noGlow();
+      if (s.inner) {
+        // 가운데가 더 센 곳(제라스 W·레오나 R). 맞는 범위는 바깥 원 그대로
+        groundCircle(z.x, z.y, s.inner, 0, 36);
+        ctx.setLineDash([8, 6]);
+        ctx.strokeStyle = DANGER;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    }
+
     // ── 바닥에 깔리는 표시들(경기장 밖으로 삐져나가지 않게 잘라서) ──
     function drawDecals() {
       ctx.save();
@@ -3610,7 +3653,7 @@
 
       for (const z of zones) {
         const s = z.skill;
-        if (z.fx) continue;
+        if (z.fx) { dangerZone(z, s); continue; }
         if (s.kind === "circle") {
           if (z.done != null) continue;          // 터진 뒤는 빛기둥·고리가 대신한다
           const p = 1 - Math.max(0, z.wait) / z.total;
@@ -3718,8 +3761,9 @@
         ctx.globalAlpha = 1;
       }
 
-      // 투사체의 바닥 그림자 = 실제 판정 원. 내 발밑 초록 링(65) 과 이 원이 겹치면 맞는다
+      // 투사체의 바닥 그림자 = 실제 판정 원. 롤 이펙트로 그리는 투사체는 롤처럼 원을 그리지 않는다
       for (const m of missiles) {
+        if (m.fx) continue;
         groundCircle(m.x, m.y, m.skill.radius, 0, 28);
         ctx.fillStyle = "rgba(0, 0, 0, .4)";
         ctx.fill();
