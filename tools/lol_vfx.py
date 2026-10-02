@@ -57,7 +57,7 @@ SKILLS = {
     "애쉬 R": ("ashe", {"mis": ["Ashe_R_mis"], "hit": ["Ashe_R_Tar"]}),
     "카서스 Q": ("karthus", {"warn": ["Karthus_Q_Ring_red", "Karthus_Q_Point_red"], "boom": ["Karthus_Q_Explosion"]}),
     "브랜드 W": ("brand", {"warn": ["Brand_W_POF_charge"], "boom": ["Brand_W_POF_tar"]}),
-    "초가스 Q": ("chogath", {"warn": ["Chogath_Q_Enemy_team"], "land": ["Chogath_Q_cas"]}),
+    "초가스 Q": ("chogath", {"warn": ["Chogath_Q_Enemy_team"], "boom": ["Chogath_Q_cas"]}),
     "베이가 W": ("veigar", {"cast": ["Veigar_W_cas"], "warn": ["Veigar_W_cas_red"], "boom": ["Veigar_W_aoe_explosionRed"]}),
     "신드라 Q": ("syndra", {"warn": ["Syndra_Q_aoe_gather_enemy"], "boom": ["Syndra_Q_aoe_explode"]}),
     "제라스 W": ("xerath", {"cast": ["Xerath_W_cas"], "warn": ["Xerath_W_aoe_red"], "boom": ["Xerath_W_aoe_explosion"]}),
