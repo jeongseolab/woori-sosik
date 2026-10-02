@@ -2181,7 +2181,7 @@
     const fxStop = list => { if (list) list.forEach(i => DodgeVfx.stop(i)); };
     const FX_H = 100;              // 롤 투사체가 나는 높이(mOffsetInitialTargetHeight)
     // 적 스킬 이펙트는 밝기를 올린다(롤보다 멀리서 내려다봐 작고 어둡게 보인다). 크기는 판정 그대로 둔다
-    const ENEMY_GAIN = 1.5;
+    const ENEMY_GAIN = 1.8;
 
     // 내 챔피언 스킬 이펙트(dodge/vfx/mine/<챔피언>.json): 칸마다 cast(쓸 때) · anim([이펙트, 초], 애니메이션에 박힌 것) ·
     // dash(돌진하는 동안) · land(내려앉을 때) · buf(이속·보호막·투명 동안). 모두 내 몸에 붙어 따라다닌다
@@ -2620,7 +2620,11 @@
           if (s.kind === "circle") {
             // 터지는 순간 원 안에 몸이 조금이라도 걸치면 맞는다
             z.done = 0.3;          // 터진 자리를 잠깐 보여 준다
-            if (z.fx) { fxStop(z.vfx); fxPlay(lolFx(s) && lolFx(s).boom, { x: z.x, y: z.y, h: 0, gain: ENEMY_GAIN }); }
+            if (z.fx) {
+              fxStop(z.vfx);
+              fxPlay(lolFx(s) && lolFx(s).boom, { x: z.x, y: z.y, h: 0, gain: ENEMY_GAIN });
+              flashGround(z.x, z.y, s.radius, s.color, 0.3);       // 터지는 순간이 잘 보이게 스킬 색으로 번쩍
+            }
             else boom(z.x, z.y, s.radius, s.color, s);
             skillSound(s, "land");
             if (d < s.radius + CHAMP.radius && hit(s, { d })) { if (dead) return; }
@@ -3234,7 +3238,13 @@
       const now = performance.now() / 1000;
       drawParts(L, false);
       drawAmb(L, false, now);
-      for (const m of missiles) if (!m.fx) missileFx(L, m, now);
+      for (const m of missiles) {
+        if (!m.fx) { missileFx(L, m, now); continue; }
+        // 롤 이펙트 투사체: 머리에 스킬 색 빛무리(판정 크기쯤) 를 깔아 바닥 위에서도 잘 보이게
+        const p = upright(m.x, m.y, FX_H), r = m.skill.radius * p.k, g = gfxOf(m.skill);
+        rq(L, frameOf("glow"), p.x, p.y, r * 2.6, r * 2.6, 0, rgb(g.glow || m.skill.color), 0.32, 1);
+        rq(L, frameOf("glow"), p.x, p.y, r * 1.1, r * 1.1, 0, rgb(g.core || "#ffffff"), 0.22, 1);
+      }
       for (const f of flashes) {
         if (f.fx) continue;
         const al = Math.max(0, f.left / f.max), col = rgb(f.skill.color), w = f.skill.radius;
