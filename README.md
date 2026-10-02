@@ -105,6 +105,26 @@ FastAPI 로 만든 롤 전적 서비스. 데이터는 OP.GG 가 공개한 MCP �
 
 ### 롤 그림·소리 (`static/dodge/`)
 
+- **스킬 이펙트 = 롤 파티클 그대로**(`vfx/`, 재생은 `static/dodge-vfx.js`, 그리기는 `dodge-gl.js` 의 `drawVfx`).
+  손으로 흉내 낸 그림이 아니라, 롤 클라이언트의 파티클 정의(`VfxSystemDefinitionData` 의 발생기들) 를 `tools/lol_vfx.py` 가 뽑아
+  `vfx/fx.json` 에 적고, 화면이 롤 엔진처럼 돌린다: 발생기마다 뿜는 빠르기·수명, 날 때의 값(Birth*, 확률표로 무작위)과
+  나이에 따른 곡선(색·크기·회전), 속도·끌림·가속·궤도, 프레임 애니메이션(texDiv), 색 조회 텍스처·팔레트·곱 텍스처·침식,
+  모양은 카메라 판·임의 판(바닥에 눕는 판)·광선·3D 메시(.scb)·빔(메시 빔 포함)·궤적 리본, 섞기는 빛 더하기(0·2·4) / 알파(1·3·5),
+  바닥층(isGroundLayer) 은 캐릭터보다 먼저 깊이 검사 없이. 값의 뜻은 LeagueToolkit lol-meta-wiki
+  (github.com/LeagueToolkit/lol-meta-wiki) 를 따랐다. 롤 좌표(y 위) 로 계산하고 모델과 같은 카메라로 3D 로 그린다
+  - 적 스킬 26개: 스킬 데이터의 `mMissileEffectKey`·`mHitEffectKey` 와 스킨의 `resourceMap` 으로 시전(cast)·투사체(mis)·
+    맞음(hit)·경고(warn, 적 쪽 빨간 표시)·터짐(boom)·빔·감옥 이펙트를 짝지었다(`lol_vfx.py` 의 `SKILLS`). 판정 그림자 원은 그대로 둔다
+  - 내 챔피언(71명): 그 스킬 애니메이션(SpellN) 에 박힌 이펙트 + 이름 규칙(`<챔피언>_<칸>_cas`·`dash/trail/jump`·`land`·`buf`)
+    + 손으로 고른 것(`MINE_EXTRA`). 고른 챔피언 것만 `vfx/mine/<챔피언>.json` 으로 받고 몸에 붙여 따라다니게 한다.
+    롤 스킬 스크립트가 클라이언트에 없어서 언제 어떤 이펙트를 켜는지는 이름으로 고른 것이다(킨드레드는 못 찾음)
+  - 텍스처(`vfx/t/<번호>.webp`, 1,353장, 긴 변 512 까지) 는 처음 그릴 때 받는다. WebGL 이 없으면 예전 손그림으로 돈다
+  - 알려진 차이: 애쉬 R 화살 메시가 날아가는 쪽이 아니라 위로 선다(메시 회전 해석이 롤과 다른 곳이 있다)
+- **스킬 소리 = 롤 효과음 그대로**(`sfx/lol/`, `tools/lol_sfx.py`). 챔피언 WAD 의 Wwise 뱅크(`*_sfx_events.bnk`·`_audio.bnk`) 에서
+  이벤트(`Play_sfx_<챔피언>_<스킬>_OnCast` 등, FNV-1 해시) → Play 동작 → 소리·무작위 컨테이너 → wem 을 따라가
+  vgmstream 으로 풀고 ogg 로 줄였다(3초 넘는 반복음은 자름). 겹은 함께 울리고 후보는 무작위로 하나
+  - 적 스킬: 쓸 때(OnCast)·나갈 때(OnMissileLaunch)·맞을 때(OnHit 등)·터질 때, 그리고 이펙트에 붙은 소리(`soundOnCreateDefault`)
+  - 내 챔피언: 그 스킬의 OnCast(62명). 점멸·유체화 합성음은 롤 소리가 없는 스킬에만
+
 - `ground.jpg`: 소환사의 협곡 미드 라인 바닥 텍스처(`maps/kitpieces/srx/base/textures/terrain_midlane_ground_a.png`)
   를 경기장 비율(1400:900) 로 자른 것. 원근에 맞게 가로 띠로 깔고, 스킬 빛이 잘 보이게 살짝 어둡게 덮는다
 - `fx.webp`: 스킬 파티클 텍스처 43장을 한 장으로 묶은 것(+ 아래쪽에 암베사 26장, `tools/fx_atlas.py` 가 붙인다). 롤 클라이언트의 `characters/<챔피언>/skins/base/particles/*.png`
