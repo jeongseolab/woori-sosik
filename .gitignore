@@ -14,3 +14,4 @@ __pycache__/
 .omc/
 .playwright-mcp/
 tools/.cache/
+.rift-bake/

@@ -711,15 +711,29 @@
     amb_motes: [130, 2346, 128, 128],
     amb_q2_decal: [260, 2346, 64, 128],
   };
-  const fxImg = new Image(), groundImg = new Image();
-  let fxReady = false, groundReady = false;
+  // 전체 화면 바닥: 진짜 협곡 지형(Map11 의 base_srx.mapgeo 바탕 층 + 미드 1차 포탑 두 개) 을 롤 카메라
+  // (56° 내려다봄, 줌 2250, 경기장 가운데 = 협곡 (7400, 7400)) 로 구운 그림. 초점 거리 f 픽셀. 다시 굽기: tools/rift_bake.py
+  const RIFT_BAKE = { src: "rift.webp", w: 4400, h: 2400, f: 1600 };
+  const riftBakeImg = new Image();
+  let riftBakeReady = false;
+  // 전체 화면을 처음 켤 때만 받는다(600KB)
+  function loadRiftBake() {
+    if (riftBakeImg.src) return;
+    riftBakeImg.onload = () => { riftBakeReady = true; };
+    riftBakeImg.src = ART + RIFT_BAKE.src;
+  }
+  // 전체 화면 미니맵: 소환사의 협곡 전체 지도(CommunityDragon game/assets/maps/info/map11/2dlevelminimap_base_baron1.png)
+  const fxImg = new Image(), groundImg = new Image(), riftMapImg = new Image();
+  let fxReady = false, groundReady = false, riftMapReady = false;
   const onFx = new Set();     // 그림 한 장을 다 받으면 부를 것(효과층이 텍스처로 올린다)
   function loadArt() {
     if (fxImg.src) return;
     fxImg.onload = () => { fxReady = true; onFx.forEach(f => f()); };
     groundImg.onload = () => { groundReady = true; };
+    riftMapImg.onload = () => { riftMapReady = true; };
     fxImg.src = ART + "fx.webp";
     groundImg.src = ART + "ground.jpg";
+    riftMapImg.src = ART + "minimap.jpg";
   }
   // 스프라이트 한 칸을 떼어 둔다. color 를 주면 그 색을 곱해 입힌다(흰 텍스처용). 한 번 만든 건 다시 쓴다
   const SPR = new Map();
@@ -964,6 +978,7 @@
             </div>
           </div>
         </div>
+        <button type="button" class="dodge-full" data-full aria-pressed="false" title="롤 화면 크기 그대로 전체 화면으로">전체 화면</button>
         <div class="dodge-over" data-over></div>
         <div class="lol-loading" data-loading>
           <div class="lol-loading-ring"><b>L</b><span>로딩 중</span><div class="lol-loading-bar"><i data-loading-fill></i></div></div>
@@ -1129,8 +1144,11 @@
 
     // ── 유사 3D 시점 ──
     // 카메라는 경기장 가운데를 PITCH 만큼 내려다본다. 판정에는 쓰지 않고 그릴 때만 쓴다
+    // 전체 화면에서는 롤 기본 카메라와 똑같이 맞춘다: 세로 시야각 40°, 56° 내려다봄, 최대 줌 거리 2250 유닛.
+    // 롤은 세로 시야각이 고정이라(가로는 화면 비율만큼 넓어진다) 화면 높이만으로 배율이 정해진다
     const PITCH = 56 * Math.PI / 180;
-    const CAM_D = 2300, FOCAL = 1500;
+    const FOCAL = 1500, LOL_FOV = 40 * Math.PI / 180, LOL_CAM_D = 2250;
+    let CAM_D = 2300;
     const COS = Math.cos(PITCH), SIN = Math.sin(PITCH);
     let S = 1, OX = 0, OY = 0, VW = 0, VH = 0, DPR = 1;   // 배율·원점·화면 크기(CSS 픽셀)
 
@@ -1159,6 +1177,8 @@
 
     // ── 화면 크기 ──
     function fit() {
+      if (isFull()) return fitFull();
+      CAM_D = 2300;
       // 가로는 칸에 꽉 차게, 단 세로가 창 안에 다 들어오게 줄인다(게임 중에 스크롤하면 안 되니까)
       // 폭을 다시 재기 전에 지난번에 박아 둔 폭을 푼다(안 풀면 창을 줄여도 예전 폭 그대로 잰다)
       view.style.width = "";
@@ -1181,6 +1201,32 @@
       VH = Math.floor((maxY - minY) * S + pad * 2 + HUD_ROOM * VW);
       OX = VW / 2 - (minX + maxX) / 2 * S;
       OY = pad - minY * S;
+      // HUD 는 화면 폭에 맞춰 줄고 는다(1000px 폭일 때 --u = 1px)
+      const mw = Math.round(Math.max(90, VW * 0.17));
+      sizeView(VW / 1000, mw, Math.round(mw * ARENA.h / ARENA.w));
+    }
+
+    // 전체 화면: 화면 전체가 롤 게임 화면. 카메라는 롤 기본값 그대로 경기장 가운데를 화면 가운데에 둔다.
+    // 그래서 챔피언·스킬 크기(픽셀)가 같은 해상도의 롤과 같고, 경기장 밖은 협곡이 이어진다(전장의 안개로 어둡게)
+    function fitFull() {
+      const stage = view.parentElement;
+      view.style.width = "";
+      VW = stage.clientWidth;
+      VH = stage.clientHeight;
+      CAM_D = LOL_CAM_D;
+      S = VH / 2 / Math.tan(LOL_FOV / 2) / FOCAL;
+      OX = VW / 2;
+      OY = VH / 2;
+      // 세로로 긴 화면(휴대폰 세로)은 롤 카메라로는 경기장 양옆이 잘리니 그때만 경기장 폭이 다 들어오게 물러난다
+      const near = proj(0, ARENA.h);
+      if (near.x < 8) S *= (OX - 8) / (OX - near.x);
+      // 롤 HUD 는 화면 높이에 맞춰 커진다(1080p 에서 스킬 칸 약 55px). 미니맵은 화면 높이의 약 26% 정사각형.
+      // 세로로 긴 화면에서는 폭에 맞춰 줄여 HUD 와 미니맵이 겹치지 않게 한다
+      const mw = Math.round(Math.min(VH * 0.26, VW * 0.22));
+      sizeView(Math.min(VH, VW * 0.75) / 1080 * 1.1, mw, mw);
+    }
+
+    function sizeView(u, mw, mh) {
       DPR = window.devicePixelRatio || 1;
       canvas.style.width = VW + "px";
       canvas.style.height = VH + "px";
@@ -1189,16 +1235,37 @@
       bgCv.width = fgCv.width = canvas.width;
       bgCv.height = fgCv.height = canvas.height;
       if (fxgl) fxgl.resize(VW, VH, DPR);
-      // HUD 는 화면 폭에 맞춰 줄고 는다(1000px 폭일 때 --u = 1px)
       view.style.width = VW + "px";
-      view.style.setProperty("--u", (VW / 1000).toFixed(4) + "px");
-      const mw = Math.round(Math.max(90, VW * 0.17)), mh = Math.round(mw * ARENA.h / ARENA.w);
+      view.style.setProperty("--u", u.toFixed(4) + "px");
       mini.style.width = mw + "px";
       mini.style.height = mh + "px";
       mini.width = Math.round(mw * DPR);
       mini.height = Math.round(mh * DPR);
       draw(0);
     }
+
+    // ── 전체 화면 ──
+    const stageEl = root.querySelector(".dodge-stage");
+    const fullBtn = root.querySelector("[data-full]");
+    const isFull = () => document.fullscreenElement === stageEl;
+    function toggleFull() {
+      if (isFull()) document.exitFullscreen().catch(() => {});
+      else stageEl.requestFullscreen({ navigationUI: "hide" }).catch(() => {});
+    }
+    function onFullChange() {
+      const on = isFull();
+      stageEl.classList.toggle("full", on);
+      fullBtn.textContent = on ? "전체 화면 끝내기 (Esc)" : "전체 화면";
+      fullBtn.setAttribute("aria-pressed", String(on));
+      if (on && !riftBakeReady) {
+        loadRiftBake();
+        riftBakeImg.addEventListener("load", () => { if (isFull()) draw(0); }, { once: true });
+      }
+      fit();
+      canvas.focus({ preventScroll: true });
+    }
+    // 아이폰 사파리처럼 요소 전체 화면을 못 하는 곳에서는 버튼을 숨긴다
+    fullBtn.hidden = !document.fullscreenEnabled;
 
     function toArena(e) {
       const r = canvas.getBoundingClientRect();
@@ -3400,12 +3467,89 @@
       return c;
     })();
 
+    // 전체 화면 바닥: 진짜 소환사의 협곡 미드 한가운데를 롤 카메라 그대로 구운 그림(RIFT_BAKE).
+    // 그림 가운데가 경기장 가운데이고 카메라 위치·각도가 proj 와 같아서, 화면 초점 거리에 맞춰 키우기만 하면 겹친다.
+    // 다 받기 전이거나 그림이 화면을 다 못 덮으면(아주 세로로 긴 화면) false → 아래의 이어 붙인 바닥으로 그린다
+    function drawRiftBake() {
+      if (!riftBakeReady) { loadRiftBake(); return false; }
+      const k = FOCAL * S / RIFT_BAKE.f;
+      const x = OX - RIFT_BAKE.w / 2 * k, y = OY - RIFT_BAKE.h / 2 * k;
+      if (x > 0 || y > 0 || x + RIFT_BAKE.w * k < VW || y + RIFT_BAKE.h * k < VH) return false;
+      ctx.drawImage(riftBakeImg, x, y, RIFT_BAKE.w * k, RIFT_BAKE.h * k);
+      // 경기장 밖은 못 나가는 곳이라 아주 살짝만 어둡게 하고, 경계는 금빛 선으로
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, 0, VW, VH);
+      const q = [proj(0, 0), proj(ARENA.w, 0), proj(ARENA.w, ARENA.h), proj(0, ARENA.h)];
+      q.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+      ctx.closePath();
+      ctx.fillStyle = "rgba(1, 10, 19, .18)";
+      ctx.fill("evenodd");
+      ctx.restore();
+      arenaPath();
+      ctx.strokeStyle = "rgba(200, 170, 110, .55)";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      return true;
+    }
+
+    // 전체 화면에서 경기장 밖으로 이어지는 협곡 바닥(구운 그림을 받기 전에 쓴다). 바닥 텍스처를 좌우·위아래로 뒤집어 가며 이어 붙여
+    // 이음매가 안 보이게 한다(절반 해상도. 어차피 전장의 안개로 어둡게 덮는다)
+    let riftTiles = null;
+    function drawRift() {
+      if (!riftTiles || riftTiles.real !== groundReady) {
+        const src = groundReady ? groundImg : TEX;
+        riftTiles = [0, 1, 2, 3].map(i => {
+          const c = document.createElement("canvas");
+          c.width = ARENA.w / 2; c.height = ARENA.h / 2;
+          const g = c.getContext("2d");
+          g.translate(i & 1 ? c.width : 0, i & 2 ? c.height : 0);
+          g.scale(i & 1 ? -1 : 1, i & 2 ? -1 : 1);
+          g.drawImage(src, 0, 0, c.width, c.height);
+          return c;
+        });
+        riftTiles.real = groundReady;
+      }
+      // 화면 네 귀퉁이가 바닥 어디인지 보고 그 안만 깐다(위 귀퉁이가 가장 멀고 넓다)
+      const tl = unproj(0, 0), tr = unproj(VW, 0), bl = unproj(0, VH), br = unproj(VW, VH);
+      const X0 = Math.max(-5000, Math.min(tl.x, bl.x) - 60), X1 = Math.min(ARENA.w + 5000, Math.max(tr.x, br.x) + 60);
+      const Y0 = Math.max(-5000, Math.min(tl.y, tr.y) - 60), Y1 = Math.max(bl.y, br.y) + 60;
+      const N = 30;
+      for (let j = Math.floor(Y0 / ARENA.h); j * ARENA.h < Y1; j++) {
+        for (let i = Math.floor(X0 / ARENA.w); i * ARENA.w < X1; i++) {
+          if (i === 0 && j === 0) continue;          // 경기장 자리는 원래 해상도로 따로 깐다
+          const img = riftTiles[(i & 1) | ((j & 1) << 1)], th = img.height / N;
+          const xa = Math.max(X0, i * ARENA.w), xb = Math.min(X1, (i + 1) * ARENA.w);
+          const sx = (xa - i * ARENA.w) / 2, sw = (xb - xa) / 2;
+          for (let r = 0; r < N; r++) {
+            const y0 = j * ARENA.h + ARENA.h * r / N, y1 = y0 + ARENA.h / N;
+            if (y1 < Y0 || y0 > Y1) continue;
+            const a = proj(xa, y0), b = proj(xb, y0), c = proj(xa, y1), d = proj(xb, y1);
+            const left = Math.min(a.x, c.x), right = Math.max(b.x, d.x);
+            ctx.drawImage(img, sx, r * th, sw, th + 0.5, left, a.y, right - left, c.y - a.y + 0.8);
+          }
+        }
+      }
+      // 전장의 안개: 경기장 밖은 롤의 시야 밖처럼 어둡고 푸르게
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, 0, VW, VH);
+      const q = [proj(0, 0), proj(ARENA.w, 0), proj(ARENA.w, ARENA.h), proj(0, ARENA.h)];
+      q.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+      ctx.closePath();
+      ctx.fillStyle = "rgba(4, 14, 30, .62)";
+      ctx.fill("evenodd");
+      ctx.restore();
+    }
+
     function drawGround() {
       const bg = ctx.createLinearGradient(0, 0, 0, VH);
       bg.addColorStop(0, "#010a13");
       bg.addColorStop(1, "#06141d");
       ctx.fillStyle = bg;
       ctx.fillRect(0, 0, VW, VH);
+      if (isFull() && drawRiftBake()) return;
+      if (isFull()) drawRift();
 
       // 질감을 가로 띠로 잘라 원근에 맞게 깐다(한 줄 안에서는 가로 배율이 같아서 띠로 충분하다)
       ctx.save();
@@ -4162,6 +4306,7 @@
 
     // 미니맵: 경기장 전체를 위에서. 나는 금테 초록, 적은 빨강
     function drawMinimap() {
+      if (isFull()) return drawRiftMinimap();
       const w = mini.width / DPR, h = mini.height / DPR, k = w / ARENA.w;
       mctx.setTransform(DPR, 0, 0, DPR, 0, 0);
       mctx.drawImage(groundReady ? groundImg : TEX, 0, 0, w, h);
@@ -4189,6 +4334,48 @@
         mctx.strokeStyle = "#f0e6d2";
         mctx.lineWidth = 1.5;
         mctx.beginPath(); mctx.arc(player.x * k, player.y * k, 5, 0, Math.PI * 2); mctx.fill(); mctx.stroke();
+      }
+    }
+
+    // 전체 화면 미니맵: 롤처럼 협곡 전체. 경기장은 협곡 한가운데(미드 라인) 에 놓고,
+    // 지금 화면에 보이는 곳을 흰 사다리꼴로 긋는다. 협곡 한 변 14870 유닛, 화면 아래쪽이 지도의 남쪽(파랑 진영 쪽)
+    const RIFT = 14870;
+    function drawRiftMinimap() {
+      const w = mini.width / DPR, h = mini.height / DPR, k = w / RIFT;
+      // 경기장 가운데 = 협곡 (7400, 7400)(RIFT_BAKE 와 같은 자리). 지도 위쪽이 북쪽(z 큰 쪽)
+      const mx = x => (7400 + x - ARENA.w / 2) * k, my = y => (RIFT - 7400 + y - ARENA.h / 2) * k;
+      mctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+      mctx.fillStyle = "#010a13";
+      mctx.fillRect(0, 0, w, h);
+      if (riftMapReady) mctx.drawImage(riftMapImg, 0, 0, w, h);
+      mctx.strokeStyle = "rgba(200, 170, 110, .9)";
+      mctx.lineWidth = 1;
+      mctx.strokeRect(mx(0), my(0), ARENA.w * k, ARENA.h * k);
+      // 화면에 보이는 바닥
+      mctx.strokeStyle = "#f0e6d2";
+      mctx.beginPath();
+      [[0, 0], [VW, 0], [VW, VH], [0, VH]].forEach(([sx, sy], i) => {
+        const p = unproj(sx, sy);
+        i ? mctx.lineTo(mx(p.x), my(p.y)) : mctx.moveTo(mx(p.x), my(p.y));
+      });
+      mctx.closePath();
+      mctx.stroke();
+      // 점은 지도 배율과 상관없이 롤 미니맵의 아이콘 크기로(미니맵 폭의 비율)
+      const dot = Math.max(2, w * 0.018);
+      for (const m of missiles) {
+        mctx.fillStyle = m.skill.color;
+        mctx.beginPath(); mctx.arc(mx(m.x), my(m.y), dot * 0.45, 0, Math.PI * 2); mctx.fill();
+      }
+      for (const c of casters) {
+        mctx.fillStyle = "#e03131";
+        mctx.strokeStyle = "#010a13";
+        mctx.beginPath(); mctx.arc(mx(c.x), my(c.y), dot, 0, Math.PI * 2); mctx.fill(); mctx.stroke();
+      }
+      if (player) {
+        mctx.fillStyle = "#1fa33a";
+        mctx.strokeStyle = "#f0e6d2";
+        mctx.lineWidth = 1.5;
+        mctx.beginPath(); mctx.arc(mx(player.x), my(player.y), dot * 1.2, 0, Math.PI * 2); mctx.fill(); mctx.stroke();
       }
     }
 
@@ -4503,6 +4690,8 @@
     window.addEventListener("keyup", onKeyUp);
     window.addEventListener("blur", onBlur);
     window.addEventListener("resize", fit);
+    document.addEventListener("fullscreenchange", onFullChange);
+    fullBtn.addEventListener("click", toggleFull);
     // HUD 의 주문 칸은 눌러도 쓴다(휴대폰)
     root.querySelectorAll("[data-slot]").forEach(b => b.addEventListener("pointerdown", e => {
       e.preventDefault();
@@ -4746,6 +4935,8 @@
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("blur", onBlur);
       window.removeEventListener("resize", fit);
+      document.removeEventListener("fullscreenchange", onFullChange);
+      if (isFull()) document.exitFullscreen().catch(() => {});
       onFx.delete(atlasUp);
       if (fxgl) { fxgl.destroy(); fxgl = null; }
     }
