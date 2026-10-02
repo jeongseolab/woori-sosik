@@ -25,7 +25,7 @@
 쓰는 법:
   pip install xxhash zstandard numpy pillow
   python tools/champ_models.py                      # 연습장에 나오는 챔피언(스킬 쓰는 적) + 이즈리얼
-  python tools/champ_models.py --mobility           # 내 챔피언으로 고르는 챔피언(MOBILITY, PASSIVE, GUARD, SHIELD)
+  python tools/champ_models.py --mobility           # 내 챔피언으로 고르는 챔피언(MOBILITY, PASSIVE, GUARD, SHIELD, MORE)
   python tools/champ_models.py ahri jinx            # 고른 챔피언만(내 챔피언으로 쓰려면)
   python tools/champ_models.py --all                # 모든 챔피언
   python tools/champ_models.py --game "D:/Riot Games/League of Legends"
@@ -68,14 +68,26 @@ GUARD = {"fiora": [2], "tryndamere": [4], "kindred": [4], "sivir": [3], "nocturn
          "vladimir": [2], "olaf": [4]}
 # 자기에게 보호막을 거는 스킬(럭스 W, 카르마 E, 모르가나 E …) 과 그 스킬(Q=1 … R=4)
 SHIELD = {"lux": [2], "karma": [3], "janna": [3], "lulu": [3], "diana": [2], "orianna": [3], "morgana": [3]}
+# 그 밖에 내 챔피언이 쓰는 스킬(이동 속도 증가·투명·되감기 …) 과 그 스킬(Q=1 … R=4). 동작 클립이 없는 스킬(르블랑 R·카직스 R·마스터 이 R) 은 뺀다
+MORE = {"riven": [1], "akali": [2, 4], "pyke": [2], "ekko": [4], "aurora": [4], "rakan": [4], "sivir": [4], "kassadin": [1],
+        "ahri": [2], "lulu": [2], "orianna": [2], "kayn": [3], "garen": [1, 2], "hecarim": [3, 4], "rammus": [1], "twitch": [1],
+        "teemo": [2], "blitzcrank": [2], "zilean": [3], "sona": [2, 3], "kennen": [3], "draven": [2], "volibear": [1], "udyr": [3],
+        "masteryi": [], "warwick": [4], "bard": [3], "poppy": [2], "khazix": []}
 # 스킬 동작으로 기본 규칙(Spell1·Spell1_0·Spell1_Base → spell1 로 시작하는 것) 대신 쓸 클립.
 # 쓰레쉬 Q 는 기본이 Spell1_Dash(끌려간 적에게 날아가는 두 번째 동작) 라 던지는 Spell1_In,
 # 사일러스 E 는 Spell3 이 0.1초 조각이라 돌진 Spell3_Dash, 트리스타나 W 는 Spell2_In(0.27초, 뛰기 시작만) 대신 Spell2_Mid
-SPELL_CLIPS = {("thresh", 1): ["Spell1_In"], ("sylas", 3): ["Spell3_Dash"], ("tristana", 2): ["Spell2_Mid"]}
+SPELL_CLIPS = {("thresh", 1): ["Spell1_In"], ("sylas", 3): ["Spell3_Dash"], ("tristana", 2): ["Spell2_Mid"],
+               ("riven", 1): ["Spell1A"], ("rakan", 4): ["Spell4_Into"]}
 # 스킬 말고 따로 굽는 동작: 이름 → 클립 이름 후보(칼리스타 Q 뒤의 패시브 돌진).
 # 암베사는 스킬마다 패시브 돌진 동작이 따로 있다(해시로만 적힌 클립: passivedash_spell1a·1b·2·3·4·4_fail.anm),
 # Q2(Spell1B), R 내려찍기(spell4_hit). spell4 는 R 시전(Spell4_Windup)
+# skrun: 이속 스킬 중의 달리기(가렌 Q·파이크 W …). 리븐 Q 는 세 번 동작이 다르고, 아칼리 R 은 두 번째 돌진 동작이 따로
 EXTRA_CLIPS = {"kalista": {"dash": ["Spell1_Dash_0", "Attack1_Dash_0"]},
+               "riven": {"spell1b": ["Spell1B"], "spell1c": ["Spell1C"]}, "akali": {"spell4b": ["Spell4_Dash2"]},
+               "warwick": {"dash4": ["Spell4Dash"]}, "pyke": {"skrun": ["Spell2_Move"]}, "kayn": {"skrun": ["Spell3_Run"]},
+               "rakan": {"skrun": ["Spell4_Run"]}, "hecarim": {"skrun": ["Spell3run"]}, "twitch": {"skrun": ["Run_Stealth"]},
+               "volibear": {"skrun": ["Spell1_Run"]}, "udyr": {"skrun": ["Spell3_Run"]}, "masteryi": {"skrun": ["Run_Haste"]},
+               "poppy": {"skrun": ["Spell2_Run"]}, "garen": {"skrun": ["Run_Spell1"]}, "khazix": {"skrun": ["Run_Haste"]},
                "ambessa": {"spell1b": ["Spell1B"], "dash1": ["{99834a45}"], "dash1b": ["{6e4a0e24}"], "dash2": ["{5ed08d9d}"],
                            "dash3": ["{ed14ca10}"], "miss4": ["{0e9701b2}"], "hit4": ["Spell4_Hit_ToIdle"]}}
 FPS = 15
@@ -630,7 +642,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("champions", nargs="*", help="챔피언 영문 이름(소문자). 비우면 연습장 챔피언")
     ap.add_argument("--all", action="store_true", help="모든 챔피언")
-    ap.add_argument("--mobility", action="store_true", help="내 챔피언으로 고르는 챔피언(MOBILITY, PASSIVE, GUARD, SHIELD)")
+    ap.add_argument("--mobility", action="store_true", help="내 챔피언으로 고르는 챔피언(MOBILITY, PASSIVE, GUARD, SHIELD, MORE)")
     ap.add_argument("--game", default=r"C:\Riot Games\League of Legends", help="롤 설치 폴더")
     a = ap.parse_args()
     wad_dir = os.path.join(a.game, "Game", "DATA", "FINAL", "Champions")
@@ -640,7 +652,7 @@ def main():
         keys = sorted(str(c["alias"]).lower() for c in get_json(
             "plugins/rcp-be-lol-game-data/global/default/v1/champion-summary.json") if 0 < c["id"] < 10000 and "_" not in str(c["alias"]))
     elif a.mobility:
-        keys = sorted(set(MOBILITY) | set(PASSIVE) | set(GUARD) | set(SHIELD))
+        keys = sorted(set(MOBILITY) | set(PASSIVE) | set(GUARD) | set(SHIELD) | set(MORE))
     else:
         keys = [k.lower() for k in a.champions] or sorted(CASTERS)
     index_path = os.path.join(OUT, "index.json")
@@ -649,7 +661,7 @@ def main():
         try:
             # 체력바 높이(h) 는 손으로 고친 챔피언이 있다(커밋 bf8d43a). 다시 만들어도 있던 값은 지킨다(새로 재려면 그 h 를 지운다)
             old_h = index.get(k, {}).get("h")
-            index[k] = build(k, wad_dir, sorted(set(CASTERS.get(k, [])) | ({MOBILITY[k]} if k in MOBILITY else set()) | set(PASSIVE.get(k, [])) | set(GUARD.get(k, [])) | set(SHIELD.get(k, []))))
+            index[k] = build(k, wad_dir, sorted(set(CASTERS.get(k, [])) | ({MOBILITY[k]} if k in MOBILITY else set()) | set(PASSIVE.get(k, [])) | set(GUARD.get(k, [])) | set(SHIELD.get(k, [])) | set(MORE.get(k, []))))
             if old_h is not None:
                 index[k]["h"] = old_h
             index[k]["v"] = file_version(k)
