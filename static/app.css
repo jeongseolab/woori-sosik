@@ -949,6 +949,19 @@ table.dodge-table { min-width: 0; }
 .lol-loading-bar i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #0397ab, #0ac8b9); transition: width .2s; }
 .dodge-over { position: absolute; inset: 0; display: grid; place-items: center; padding: 12px; background: rgba(5, 10, 20, .6); }
 .dodge-over[hidden] { display: none; }
+/* 전체 화면: 화면 전체가 롤 게임 화면(카메라·HUD 크기는 dodge.js 의 fitFull) */
+.dodge-full {
+  position: absolute; left: 10px; top: 10px; z-index: 4; padding: 4px 10px; font-size: 12px; font-weight: 700;
+  color: #c8aa6e; background: rgba(1, 10, 19, .8); border: 1px solid #785a28; border-radius: 2px; cursor: pointer;
+}
+.dodge-full:hover { color: #f0e6d2; border-color: #c8aa6e; filter: none; }
+.dodge-full[hidden] { display: none; }
+.dodge-stage.full { border: 0; border-radius: 0; width: 100vw; height: 100vh; }
+.dodge-stage.full .lol-view { margin: 0; }
+/* 전체 화면에서는 판 중에 버튼이 거슬리지 않게 흐리게 두고, 가져가면 또렷하게 */
+.dodge-stage.full .dodge-full { opacity: .35; }
+.dodge-stage.full .dodge-full:hover, .dodge-stage.full .dodge-full:focus-visible { opacity: 1; }
+.dodge-stage:fullscreen { background: #010a13; }
 .dodge-card { width: min(440px, 100%); max-height: 100%; overflow-y: auto; padding: 20px 22px; border-radius: 14px; background: var(--panel); border: 1px solid var(--line); text-align: center; }
 .dodge-card h2 { margin: 0 0 8px; font-size: 22px; }
 .dodge-card p { margin: 0 0 10px; font-size: 14px; color: var(--muted); }
