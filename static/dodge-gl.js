@@ -408,6 +408,57 @@
       gl_FragColor = vec4(c * uAlpha, uAlpha);
     }`;
 
+  // ── 롤 이펙트(dodge-vfx.js 가 만든 삼각형) ──
+  // 정점(롤 좌표 x, y 위, z 북쪽) → 바닥 좌표(x, -z, 높이 y) → 화면. 투영은 VS_MODEL 과 같다
+  const VS_VFX = `
+    attribute vec3 aPos; attribute vec2 aUv; attribute vec4 aCol; attribute vec4 aX; attribute vec2 aMu;
+    uniform vec4 uC; uniform vec3 uC2; uniform vec2 uC3; uniform vec2 uRes;
+    varying vec2 vUv; varying vec4 vCol; varying vec4 vX; varying vec2 vMu;
+    void main() {
+      float wx = aPos.x, wy = -aPos.z, wz = aPos.y;
+      float dy = (wy - uC3.y) - uC2.x * uC2.y, dz = wz - uC2.x * uC2.z;
+      float yc = -dy * uC2.z + dz * uC2.y;
+      float zc = -dy * uC2.y - dz * uC2.z;
+      float k = uC.w / zc * uC.x;
+      float sx = uC.y + (wx - uC3.x) * k, sy = uC.z - yc * k;
+      vec2 ndc = vec2(sx / uRes.x * 2.0 - 1.0, 1.0 - sy / uRes.y * 2.0);
+      float d = clamp((zc - 500.0) / 6000.0, 0.0, 1.0) * 2.0 - 1.0;
+      gl_Position = vec4(ndc * zc, d * zc, zc);
+      vUv = aUv; vCol = aCol; vX = aX; vMu = aMu;
+    }`;
+  // 텍스처(낱장 또는 texDiv 칸) × 색. 색 조회 텍스처·팔레트·곱 텍스처·침식은 켜진 것만.
+  // 텍스처는 미리 곱한 알파로 올라와 있다. 빛을 더하는 발생기는 알파를 0 으로 내보내 뒤를 덮지 않는다
+  const FS_VFX = `
+    precision mediump float;
+    uniform sampler2D uTex; uniform sampler2D uColTex; uniform sampler2D uMult; uniform sampler2D uErode; uniform sampler2D uPal;
+    uniform vec2 uDiv; uniform float uWrap; uniform vec4 uOn; uniform float uAdd; uniform float uRef; uniform vec2 uMultK;
+    uniform vec4 uPalSel; uniform vec4 uPalMix; uniform float uErodeA;
+    varying vec2 vUv; varying vec4 vCol; varying vec4 vX; varying vec2 vMu;
+    vec4 un(vec4 c) { return vec4(c.rgb / max(c.a, 0.0001), c.a); }
+    void main() {
+      vec2 uv = uWrap > 0.5 ? fract(vUv) : clamp(vUv, 0.0, 1.0);
+      float f = floor(vX.x + 0.5);
+      vec2 cell = vec2(mod(f, uDiv.x), floor(f / uDiv.x));
+      vec2 tuv = (cell + clamp(uv, 0.002, 0.998)) / uDiv;
+      vec4 s = un(texture2D(uTex, tuv));
+      vec4 col = vCol;
+      if (uOn.x > 0.5) { vec4 c = un(texture2D(uColTex, vec2(clamp(vX.y, 0.0, 1.0), 0.5))); col *= c; }
+      if (uOn.w > 0.5) {
+        float l = dot(s, uPalMix);
+        vec4 pc = un(texture2D(uPal, vec2(clamp(l, 0.0, 1.0), uPalSel.x)));
+        s = vec4(pc.rgb, s.a * pc.a);
+      }
+      if (uOn.y > 0.5) { vec4 m = un(texture2D(uMult, fract(vUv * uMultK + vMu))); s *= m; }
+      float a = s.a * col.a;
+      if (uOn.z > 0.5 && vX.z > 0.0001) {
+        vec4 em = texture2D(uErode, tuv);
+        float m = uErodeA > 0.5 ? em.a : un(em).r;
+        a *= smoothstep(vX.z, vX.z + 0.08, m);
+      }
+      if (a * 255.0 < uRef) discard;
+      gl_FragColor = vec4(s.rgb * col.rgb * a, a * (1.0 - uAdd));
+    }`;
+
   // 받은 모델 파일(.bin + 텍스처) 은 페이지에 남겨 둔다. 연습장을 나갔다(티어표·그룹방) 다시 와도 새로 받지 않는다.
   // WebGL 버퍼는 연습장마다 새로 만들지만 그건 금방이다
   // 파일은 브라우저 저장소(Cache Storage) 에도 넣어 둬서 다음에 연습장을 열 때는 받지 않는다.
@@ -486,6 +537,7 @@
         blur: program(VS_FULL, FS_BLUR),
         final: program(VS_FULL, FS_FINAL),
         model: program(VS_MODEL, FS_MODEL),
+        vfx: program(VS_VFX, FS_VFX),
       };
     } catch (e) {
       console.warn("dodge-gl: 셰이더를 만들지 못해 2D 로 그립니다", e);
@@ -726,7 +778,100 @@
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
 
-    // o: { bg, fg (캔버스), waves, shake: {x, y}, ca, dead, hurt, low, bloom }
+    // ── 롤 이펙트 ──
+    // 이펙트 텍스처(dodge/vfx/t/<번호>.webp) 는 처음 쓸 때 받는다. 2 의 거듭제곱 크기만 반복(REPEAT) 할 수 있다(WebGL1)
+    const vtex = new Map();
+    let vbuf = null, vcap = 0;
+    const white = texture(null);
+    gl.bindTexture(gl.TEXTURE_2D, white);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([255, 255, 255, 255]));
+    function vfxTex(i) {
+      if (i == null || !window.DodgeVfx) return null;
+      if (vtex.has(i)) return vtex.get(i);
+      const rec = { t: null, wrap: false, opaque: false };
+      vtex.set(i, rec);
+      const img = new Image();
+      img.onload = () => {
+        if (lost) return;
+        const pot = v => (v & (v - 1)) === 0;
+        rec.wrap = pot(img.width) && pot(img.height);
+        // 알파가 꽉 찬 텍스처인지(침식 지도는 그때 빨강 채널을 쓴다)
+        try {
+          const c = document.createElement("canvas"); c.width = 16; c.height = 16;
+          const g = c.getContext("2d"); g.drawImage(img, 0, 0, 16, 16);
+          const d = g.getImageData(0, 0, 16, 16).data;
+          rec.opaque = true;
+          for (let k = 3; k < d.length; k += 4) if (d[k] < 250) { rec.opaque = false; break; }
+        } catch {}
+        rec.t = texture(img, rec.wrap);
+        if (rec.wrap) {
+          gl.bindTexture(gl.TEXTURE_2D, rec.t);
+          gl.generateMipmap(gl.TEXTURE_2D);
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+        }
+      };
+      img.src = DodgeVfx.base() + "t/" + i + ".webp";
+      return rec;
+    }
+    // list: DodgeVfx.batches() 의 묶음. ground 면 바닥층만, 아니면 나머지만
+    function drawVfx(list, cam, ground) {
+      if (!list || !list.length || !cam) return;
+      const q = P.vfx, u = q.u;
+      gl.useProgram(q.p);
+      if (!vbuf) vbuf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, vbuf);
+      gl.uniform4f(u.uC, cam.S, cam.OX, cam.OY, cam.FOCAL);
+      gl.uniform3f(u.uC2, cam.CAM_D, cam.COS, cam.SIN);
+      gl.uniform2f(u.uC3, cam.W2, cam.H2);
+      gl.uniform2f(u.uRes, cssW, cssH);
+      const VF = DodgeVfx.VF, sizes = [3, 2, 4, 4, 2];
+      const locs = ["aPos", "aUv", "aCol", "aX", "aMu"].map(n => q.a(n));
+      if (ground) gl.disable(gl.DEPTH_TEST);
+      else { gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL); gl.depthMask(false); }
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+      for (const b of list) {
+        if (!!b.ground !== !!ground) continue;
+        const e = b.e, base = vfxTex(e.texture);
+        if (!base || !base.t) continue;
+        if (b.verts.byteLength > vcap) { vcap = b.verts.byteLength * 2; gl.bufferData(gl.ARRAY_BUFFER, vcap, gl.DYNAMIC_DRAW); }
+        gl.bufferSubData(gl.ARRAY_BUFFER, 0, b.verts);
+        let off = 0;
+        locs.forEach((a, k) => {
+          if (a >= 0) { gl.enableVertexAttribArray(a); gl.vertexAttribPointer(a, sizes[k], gl.FLOAT, false, VF * 4, off * 4); }
+          off += sizes[k];
+        });
+        bindTex(0, base.t, u.uTex);
+        const div = e.texDiv || [1, 1];
+        gl.uniform2f(u.uDiv, Math.max(1, div[0]), Math.max(1, div[1]));
+        gl.uniform1f(u.uWrap, base.wrap && !(div[0] > 1 || div[1] > 1) ? 1 : 0);
+        const ct = vfxTex(e.particleColorTexture), mt = e.textureMult && vfxTex(e.textureMult.textureMult);
+        const er = e.alphaErosionDefinition && vfxTex(e.alphaErosionDefinition.erosionMapName);
+        const pd = e.paletteDefinition, pt = pd && vfxTex(pd.paletteTexture);
+        const on = [ct && ct.t ? 1 : 0, mt && mt.t ? 1 : 0, er && er.t ? 1 : 0, pt && pt.t ? 1 : 0];
+        gl.uniform4f(u.uOn, on[0], on[1], on[2], on[3]);
+        bindTex(1, on[0] ? ct.t : white, u.uColTex);
+        bindTex(2, on[1] ? mt.t : white, u.uMult);
+        bindTex(3, on[2] ? er.t : white, u.uErode);
+        bindTex(4, on[3] ? pt.t : white, u.uPal);
+        const mk = on[1] && e.textureMult.uvScaleMult && e.textureMult.uvScaleMult.c ? e.textureMult.uvScaleMult.c : [1, 1];
+        gl.uniform2f(u.uMultK, mk[0], mk[1]);
+        gl.uniform1f(u.uErodeA, on[2] && !er.opaque ? 1 : 0);
+        if (on[3]) {
+          const cnt = pd.paletteCount || 1, sel = pd.paletteSelector && pd.paletteSelector.c ? pd.paletteSelector.c[0] : 0;
+          const mix = pd.palleteSrcMixColor && pd.palleteSrcMixColor.c ? pd.palleteSrcMixColor.c : [1, 0, 0, 0];
+          gl.uniform4f(u.uPalSel, (sel + 0.5) / cnt, 0, 0, 0);
+          gl.uniform4f(u.uPalMix, mix[0], mix[1], mix[2], mix[3]);
+        }
+        gl.uniform1f(u.uAdd, b.add ? 1 : 0);
+        gl.uniform1f(u.uRef, e.alphaRef == null ? 5 : e.alphaRef);
+        gl.drawArrays(gl.TRIANGLES, 0, b.n);
+      }
+      locs.forEach(a => { if (a >= 0) gl.disableVertexAttribArray(a); });
+      if (!ground) { gl.depthMask(true); gl.disable(gl.DEPTH_TEST); }
+    }
+
+    // o: { bg, fg (캔버스), waves, shake: {x, y}, ca, dead, hurt, low, bloom, vfx(롤 이펙트 묶음) }
     function frame(o) {
       if (lost || !RT) return false;
       try {
@@ -746,7 +891,9 @@
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
       drawBatch(ground);
+      drawVfx(o.vfx, o.cam, true);
       drawModels(o.actors, o.cam);
+      drawVfx(o.vfx, o.cam, false);
       layer(tFg, o.waves);
       drawBatch(air);
       gl.disable(gl.BLEND);

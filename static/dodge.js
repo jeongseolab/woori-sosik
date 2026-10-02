@@ -777,9 +777,44 @@
                    "veigar_e", "veigar_e_form", "cho_q"];
   const buffers = {};
   let samplesAsked = false;
+  // 롤 클라이언트 효과음(tools/lol_sfx.py 가 Wwise 뱅크에서 뽑은 것). events: 이벤트 이름 → 겹마다 후보 파일들
+  // (겹은 함께 울리고 후보는 무작위로 하나), cast·launch·hit·boom: 스킬 이름 → 그때 롤이 내는 이벤트들
+  let LOL_SFX = null;
+  function loadLolSfx() {
+    fetch(ART + "sfx/lol/sfx.json").then(r => { if (!r.ok) throw new Error(r.status); return r.json(); }).then(j => {
+      LOL_SFX = j;
+      // 적 스킬 소리는 모두 받고, 내 챔피언 소리는 고른 챔피언 것만(loadMineSfx)
+      const mineEv = new Set(Object.values(j.mine || {}).flatMap(sl => Object.values(sl).flat()));
+      for (const [ev, layers] of Object.entries(j.events)) if (!mineEv.has(ev)) layers.flat().forEach(loadLolFile);
+      if (mineSfxWant) loadMineSfx(mineSfxWant);
+    }).catch(() => {});
+  }
+  function loadLolFile(f) {
+    if (buffers["lol/" + f] || !audio) return;
+    buffers["lol/" + f] = null;
+    fetch(ART + "sfx/lol/" + f)
+      .then(r => { if (!r.ok) throw new Error(r.status); return r.arrayBuffer(); })
+      .then(b => new Promise((ok, no) => audio.decodeAudioData(b, ok, no)))
+      .then(buf => { buffers["lol/" + f] = buf; }, () => { delete buffers["lol/" + f]; });
+  }
+  let mineSfxWant = null;
+  function loadMineSfx(champ) {
+    mineSfxWant = champ;
+    const sl = LOL_SFX && LOL_SFX.mine && LOL_SFX.mine[champ];
+    if (sl) Object.values(sl).flat().forEach(ev => (LOL_SFX.events[ev] || []).flat().forEach(loadLolFile));
+  }
+  // 롤 이벤트 하나를 튼다(받아 둔 게 없으면 false)
+  function lolSound(ev, vol = 0.45) {
+    const layers = LOL_SFX && LOL_SFX.events[ev];
+    if (!layers || !layers.length) return false;
+    let ok = false;
+    for (const files of layers) ok = sample("lol/" + files[Math.floor(Math.random() * files.length)], vol) || ok;
+    return ok;
+  }
   function loadSamples() {
     if (samplesAsked || !ensureAudio()) return;
     samplesAsked = true;
+    loadLolSfx();
     for (const name of SAMPLES) {
       fetch(ART + "sfx/" + name + ".ogg")
         .then(r => { if (!r.ok) throw new Error(r.status); return r.arrayBuffer(); })
@@ -811,6 +846,13 @@
     "초가스 Q": { release: "cho_q" },
   };
   function skillSound(s, when) {
+    // 롤 소리가 있는 스킬: 쓸 때는 그 스킬의 OnCast 이벤트, 그 뒤(날아감·터짐·맞음) 는 롤 이펙트가 켜질 때 함께 난다(fxPlay)
+    const lc = LOL_SFX && LOL_SFX.cast[s.name];
+    if (lc && lc.some(ev => LOL_SFX.events[ev])) {
+      const table = { cast: LOL_SFX.cast, release: LOL_SFX.launch, hit: LOL_SFX.hit, land: LOL_SFX.boom }[when];
+      ((table && table[s.name]) || []).forEach(ev => lolSound(ev));
+      return;
+    }
     const name = (SKILL_SFX[s.name] || {})[when];
     if (name && sample(name, 0.4)) return;
     // 진짜 소리가 없는 스킬: 투사체는 바람 가르는 소리, 장판은 터지는 소리(작게)
@@ -1001,6 +1043,7 @@
     // 고를 수 있는 챔피언과 적 챔피언의 모델을 처음 열 때 한꺼번에 받는다(다음부터는 브라우저 저장소에서 읽는다).
     // 그래서 시작 창에서 챔피언을 바꿀 때는 로딩이 없다
     ensureModels([faceKey, ...SKILLS.map(s => s.champ), ...Object.keys(MOBILITY)]);
+    if (window.DodgeVfx) DodgeVfx.load(ART + "vfx/").catch(() => {});
     const keyOf = id => spellKeys(controls)[id];
     const keys = new Set();
     let holding = false;
@@ -1014,6 +1057,9 @@
       flashes = [];      // 레이저가 지나간 자리(그림만)
       fx = [];           // 퍼지는 고리·그을린 자리 등 2D 효과
       parts = [];        // 파티클(효과층에 그린다. emit)
+      if (window.DodgeVfx) DodgeVfx.clear();     // 롤 이펙트
+      myFx.length = 0;
+      loadMineFx();
       waves = [];        // 충격파 왜곡(바닥 좌표)
       ca = 0;            // 색수차(맞은 순간 1)
       deadFx = 0;
@@ -1236,6 +1282,12 @@
         c.aim = { x: at0.x + c.dx * r, y: at0.y + c.dy * r };
       }
       casters.push(c);
+      const lf = lolFx(skill);
+      // 시전하는 동안 켜지는 것(진 W 모으기, 징크스 W 경고선)
+      if (lf && (skill.kind === "beam" || skill.kind === "line") && lf.warn) {
+        const end = { x: c.x + c.dx * Math.min(skill.range, 2500), y: c.y + c.dy * Math.min(skill.range, 2500), h: FX_H };
+        c.vfx = fxPlay(lf.warn, { x: c.x, y: c.y, h: FX_H, dir: { x: c.dx, y: c.dy }, target: end }, skill.cast + 1);
+      }
       model(skill.champ);       // 3D 모델이 있으면 받기 시작(다 받기 전엔 초상화)
       skillSound(skill, "cast");
       if (c.wind <= 0) release(c);
@@ -1397,7 +1449,11 @@
       if (sk.kind === "guard") {
         if (cdLeft[i] > 0) { sfx("deny"); return; }
         spend(sk, i);
+        skillUsed = sk;
+        mySkillStart(sk);
         guard(sk);
+        myBuff(sk, Math.max(sk.hasteDur || 0, sk.barrier || 0, sk.spellShield || 0, sk.parry || 0, sk.untarget || 0, sk.ccImmune || 0,
+                            sk.undying || 0, (sk.stealthDelay || 0) + (sk.stealth || 0), sk.shroud ? sk.shroud.dur : 0, sk.lambs ? sk.lambs.dur : 0));
         return;
       }
       // 르블랑 W: 정해진 시간 안에 다시 누르면 처음 자리로(쿨타임과 상관없이)
@@ -1408,7 +1464,7 @@
         target = null;
         skillAt = t; skillUsed = sk;
         flashFx(from, player, LEBLANC_FX);
-        sfx("flash");
+        mySfx("flash");
         return;
       }
       // 피즈 E: 첫 번째로 뛰어 장대 위에 있는 동안(스킬이 통과) 한 번 더 뛴다. 내려오면 통과도 끝난다
@@ -1477,24 +1533,27 @@
     function guard(sk) {
       skillAt = t; skillUsed = sk;
       target = null;
-      if (sk.parry) { parry = t + sk.parry; emit({ x: player.x, y: player.y, z: 90, size: 200, size1: 120, color: "#ffffff", color1: "#a5d8ff", shape: "glow", life: 0.3 }); sfx("cleanse"); }
-      if (sk.spellShield) { shieldUp = { until: t + sk.spellShield, color: sk.color }; sfx("cleanse"); }
+      if (sk.parry) { parry = t + sk.parry; if (!myArt(sk)) emit({ x: player.x, y: player.y, z: 90, size: 200, size1: 120, color: "#ffffff", color1: "#a5d8ff", shape: "glow", life: 0.3 }); mySfx("cleanse"); }
+      if (sk.spellShield) { shieldUp = { until: t + sk.spellShield, color: sk.color }; mySfx("cleanse"); }
       if (sk.barrier) giveBarrier(sk);
       if (sk.wall) {
         const { dx, dy } = aim(1);
         wall = { ...sk.wall, x: player.x, y: player.y, nx: dx, ny: dy, born: t, until: t + sk.wall.life };
-        sfx("ghost");
+        // 롤 바람 장막(Yasuo_W_windwall) 을 장막 자리에 세우고 따라 움직인다
+        const wf = myPart(sk, "wall");
+        if (wf && fxgl && fxgl.gl) { const c = wallAt(wall); wall.fx = fxPlay(wf, { x: c.x, y: c.y, h: 0, dir: { x: dx, y: dy } }, sk.wall.life); }
+        mySfx("ghost");
       }
-      if (sk.blades) { blades = { until: t + sk.blades.dur, radius: sk.blades.radius }; sfx("ghost"); }
+      if (sk.blades) { blades = { until: t + sk.blades.dur, radius: sk.blades.radius }; mySfx("ghost"); }
       if (sk.ccImmune) {
         // 걸린 CC 도 푼다(정화처럼 공중에 뜸만 빼고)
         ccImmune = t + sk.ccImmune;
         effects = effects.filter(e => e.type === "air" || e.start > t);
-        flashGround(player.x, player.y, 150, "#ff6b6b", 0.5);
-        sfx("cleanse");
+        if (!myArt(sk)) flashGround(player.x, player.y, 150, "#ff6b6b", 0.5);
+        mySfx("cleanse");
       }
-      if (sk.undying) { undying = t + sk.undying; flashGround(player.x, player.y, 140, "#fa5252", 0.5); sfx("cleanse"); }
-      if (sk.lambs) { lambs = { x: player.x, y: player.y, radius: sk.lambs.radius, until: t + sk.lambs.dur }; flashGround(player.x, player.y, sk.lambs.radius, "#91a7ff", 0.6); sfx("cleanse"); }
+      if (sk.undying) { undying = t + sk.undying; if (!myArt(sk)) flashGround(player.x, player.y, 140, "#fa5252", 0.5); mySfx("cleanse"); }
+      if (sk.lambs) { lambs = { x: player.x, y: player.y, radius: sk.lambs.radius, until: t + sk.lambs.dur }; flashGround(player.x, player.y, sk.lambs.radius, "#91a7ff", 0.6); mySfx("cleanse"); }
       if (sk.haste) { startHaste(sk, sk.hasteDur || (sk.stealthDelay || 0) + sk.stealth); hasteFx(sk); }
       if (sk.slowCleanse) effects = effects.filter(e => e.type !== "slow" || e.start > t);
       if (sk.slowImmune) slowFree = t + sk.hasteDur;
@@ -1503,7 +1562,7 @@
         fade = { at: t + (sk.stealthDelay || 0), until: t + (sk.stealthDelay || 0) + sk.stealth };
         detect = sk.detect || 0;
         if (!sk.stealthDelay) hide();
-        sfx("ghost");
+        mySfx("ghost");
       }
       if (sk.shroud) {
         shroud = { x: player.x, y: player.y, r: sk.shroud.radius, until: t + sk.shroud.dur };
@@ -1512,12 +1571,12 @@
           emit({ x: player.x, y: player.y, z: rand(20, 80), vx: Math.cos(b) * v, vy: Math.sin(b) * v, size: rand(90, 140), size1: 160,
                  color: "#495057", color1: "#212529", shape: "glow", add: 0, life: 0.9, a: 0.6, drag: 3 });
         }
-        sfx("ghost");
+        mySfx("ghost");
       }
       if (sk.untarget) {
         untarget = t + sk.untarget;
-        flashGround(player.x, player.y, 120, "#c92a2a", 0.5);
-        sfx("ghost");
+        if (!myArt(sk)) flashGround(player.x, player.y, 120, "#c92a2a", 0.5);
+        mySfx("ghost");
       }
     }
     // 투명해진다(fade 가 정한 동안). 적은 지금 자리를 마지막으로 본다
@@ -1529,16 +1588,17 @@
     }
     // 이동 속도가 오를 때: 발밑에서 바람이 터진다
     function hasteFx(sk) {
+      if (myArt(sk)) return;
       const c = sk.color || "#74c0fc";
       emit({ x: player.x, y: player.y, ground: 1, size: 60, size1: 140, color: c, color1: c, shape: "ring", life: 0.35, a: 0.5 });
       burst(player.x, player.y, 30, c, 10, 300);
-      if (!sk.stealth) sfx("ghost");
+      if (!sk.stealth) mySfx("ghost");
     }
     // 보호막을 건다(막기 스킬, 또는 돌진과 함께: 리븐 E·우르곳 E)
     function giveBarrier(sk) {
       barrier = { until: t + sk.barrier, color: sk.color || "#ffd8a8", cc: !!sk.ccShield };
-      emit({ x: player.x, y: player.y, z: 90, size: 230, size1: 170, color: "#ffffff", color1: barrier.color, shape: "glow", life: 0.3 });
-      sfx("cleanse");
+      if (!myArt(sk)) emit({ x: player.x, y: player.y, z: 90, size: 230, size1: 170, color: "#ffffff", color1: barrier.color, shape: "glow", life: 0.3 });
+      mySfx("cleanse");
     }
     // 보호막이 맞은 스킬의 피해를 받아 낸다(그리고 깨진다). 받았으면 true, CC 까지 막으면 "cc"
     function barrierTake() {
@@ -1548,7 +1608,7 @@
       pops.push({ x: player.x, y: player.y, text: "보호막", life: 1, max: 1 });
       emit({ x: player.x, y: player.y, z: 90, size: 220, size1: 280, color: "#ffffff", color1: b.color, shape: "ring", life: 0.3 });
       burst(player.x, player.y, 80, b.color, 14, 300);
-      sfx("cleanse");
+      mySfx("cleanse");
       return b.cc ? "cc" : true;
     }
     // 바람 장막의 지금 가운데(range 까지 나아간다)
@@ -1571,7 +1631,7 @@
       pops.push({ x: player.x, y: player.y, text: word, life: 1, max: 1 });
       emit({ x: player.x, y: player.y, z: 80, size: 190, size1: 70, color: "#ffffff", color1: "#74c0fc", shape: "star", life: 0.3, spin: 4 });
       burst(player.x, player.y, 70, "#d0ebff", 14, 260);
-      sfx("cleanse");
+      mySfx("cleanse");
     }
     // 움직임을 예약한다. 시전 시간(wind) 동안은 제자리에서 스킬 동작, 그 뒤 돌진하거나 순간이동(step)
     function go(sk, dx, dy, len, o) {
@@ -1584,6 +1644,7 @@
       target = null;
       skillAt = t; skillUsed = sk;
       facing = sk.back ? { x: -dx, y: -dy } : { x: dx, y: dy };     // 뒤로 뛸 때는 커서 쪽을 본 채로
+      if (!sk.amb) mySkillStart(sk);
       // 몇 번째인지에 따라 동작이 다르다(리븐 Q 세 번, 아칼리 R 두 번)
       if (o.anim) act = { anim: o.anim, t0: t, hold: dash.t0 + dash.dur, until: dash.t0 + dash.dur + 0.3 };
       if (dash.t0 <= t) moveStarts(dash);
@@ -1592,7 +1653,8 @@
     function moveStarts(m) {
       m.started = true;
       const sk = m.sk;
-      if (!m.blink && !sk.amb && !sk.step) sfx("ghost");
+      if (!sk.amb) m.fxDash = myPlay(myPart(sk, "dash"), (m.dur || 0) + 0.3);
+      if (!m.blink && !sk.amb && !sk.step) mySfx("ghost");
       if (sk.untarget && !m.again) { untarget = t + sk.untarget; if (sk.recast) pole = { until: untarget }; }
       if (sk.recall) recall = { slot: sk.slot, x: m.fx, y: m.fy, until: t + sk.recall };
       if (sk.barrier && !m.again) giveBarrier(sk);
@@ -1609,10 +1671,15 @@
     // 도착했을 때: 순간이동 효과, 조이 R 돌아오기, 투명·다른 차원
     function moveEnds(m) {
       const sk = m.sk;
+      if (!sk.amb) {
+        fxStop(m.fxDash);
+        myPlay(myPart(sk, "land"));
+        myBuff(sk, Math.max(sk.hasteDur || 0, sk.barrier || 0, sk.stealth || 0, sk.untarget || 0));
+      }
       if (sk.amb || sk.step) {
         if (m.ambCast) ambOpen(m);
         else { ambLand(m); if (m.walkTo) target = m.walkTo; }
-      } else if (m.blink) { flashFx({ x: m.fx, y: m.fy }, player); sfx("flash"); }
+      } else if (m.blink) { if (!myArt(sk)) flashFx({ x: m.fx, y: m.fy }, player); mySfx("flash"); }
       // 레넥톤 E: 지나간 길에 적이 있으면 한 번 더
       if (sk.followHit && !m.again) {
         const got = casters.filter(c => segDist(c, { x: m.fx, y: m.fy }, { x: m.tx, y: m.ty }) < CHAMP.radius * 2);
@@ -1660,6 +1727,7 @@
       skillAt = t; skillUsed = sk;
       facing = { x: dx, y: dy };
       amb.buf = null;
+      if (!sk.amb) mySkillStart(sk);
       act = { anim: q2 ? "spell1b" : sk.anim, t0: t, hold: t + sk.windup, until: t + sk.windup };
       if (sk.amb === "w") {
         amb.shield = { until: t + 1.5 };
@@ -1800,6 +1868,14 @@
     // 칼리스타 Q: 창이 커서 쪽으로 1150 날아간다(그림만. 지나간 적은 번쩍)
     function kalistaSpear(x, y, a) {
       const cx = Math.cos(a), cy = Math.sin(a);
+      // 롤 창 이펙트(Kalista_Q_mis) 가 있으면 그것을 날린다(빠르기 1200, 사거리 1150)
+      const mis = myPart({ slot: 0 }, "mis");
+      if (mis && fxgl && fxgl.gl) {
+        const list = fxPlay(mis, { x, y, h: FX_H, dir: { x: cx, y: cy } }, 1.2);
+        if (list) myFx.push({ list, fly: { x, y, vx: cx * 1200, vy: cy * 1200, t0: t }, until: t + 1150 / 1200 });
+        sfx("ambWhip");
+        return;
+      }
       // 사거리 1150, 경기장 밖으로는 그리지 않는다
       const L = Math.min(1150, cx > 0 ? (ARENA.w - x) / cx : cx < 0 ? -x / cx : 1150, cy > 0 ? (ARENA.h - y) / cy : cy < 0 ? -y / cy : 1150);
       emit({ x, y, z: 80, vx: cx * 1200, vy: cy * 1200, size: 60, size1: 50, color: "#e6fcf5", color1: "#12b886", shape: "glow", life: L / 1200 });
@@ -1954,8 +2030,10 @@
 
     // 맞았다. 무적 중이면 없던 일로(false). 목숨을 다 잃으면 끝.
     // 하드 모드는 무적이 없고, 맞은 스킬의 CC 를 그대로 당한다(how: applyCC 참고)
+    let lastHow = null;          // 맞은 투사체(맞은 이펙트의 방향)
     function hit(s, how = {}) {
       if (dead || untarget > t || (mode !== "hard" && safe > 0)) return false;
+      lastHow = how;
       // 응수·주문 보호막: 피해도 CC(공중에 뜸 포함) 도 받지 않는다. 맞힌 투사체처럼 사라진다
       if (parry > t || (shieldUp && t < shieldUp.until)) { blocked(); return true; }
       // 저지 불가 돌진(말파이트 R, 암베사 R 은 겨눌 때부터) 이나 CC 면역(올라프 R) 이면 CC 를 받지 않는다
@@ -1990,8 +2068,12 @@
     function splitMissile(m) {
       const sp = m.skill.split;
       const piece = { ...m.skill, name: m.skill.name + " (갈라짐)", speed: sp.speed, radius: sp.radius, range: sp.range, split: null };
+      const lf = m.fx && lolFx(m.skill);
+      if (lf) fxPlay(lf.splitfx, { x: m.x, y: m.y, h: FX_H, dir: { x: m.dx, y: m.dy } });
       for (const side of [1, -1]) {
-        missiles.push({ skill: piece, x: m.x, y: m.y, ox: m.x, oy: m.y, dx: -m.dy * side, dy: m.dx * side, speed: sp.speed, left: sp.range, flown: 0, caster: m.caster });
+        const q = { skill: piece, x: m.x, y: m.y, ox: m.x, oy: m.y, dx: -m.dy * side, dy: m.dx * side, speed: sp.speed, left: sp.range, flown: 0, caster: m.caster };
+        if (lf) { q.vfx = fxPlay(lf.split, { x: q.x, y: q.y, h: FX_H, dir: { x: q.dx, y: q.dy } }, 10); q.fx = !!q.vfx; }
+        missiles.push(q);
       }
       burst(m.x, m.y, MISSILE_Z, m.skill.color, 14, 300);
     }
@@ -2017,25 +2099,105 @@
       return spot;
     }
 
+    // ── 롤 이펙트(dodge-vfx.js, 롤 클라이언트의 파티클 그대로) ──
+    // WebGL 과 이펙트 자료가 있으면 스킬 그림은 이것만 쓰고, 예전에 직접 그린 그림은 끈다(판정 그림자 원은 둔다)
+    const lolFx = s => (window.DodgeVfx && fxgl && fxgl.gl && fxgl.ok() && DodgeVfx.skillFx(s.name)) || null;
+    // 이펙트 여럿을 한 자리에 켠다. o: { x, y, h, dir: {x, y}, target: {x, y, h} }. ttl 초가 지나면 저절로 끈다
+    function fxPlay(names, o, ttl = 6) {
+      if (!names || !names.length) return null;
+      const out = names.map(n => DodgeVfx.play(n, o)).filter(Boolean);
+      out.forEach(i => { i.ttl = ttl; if (i.s.sound) lolSound(i.s.sound); });
+      return out.length ? out : null;
+    }
+    const fxMove = (list, o) => { if (list) list.forEach(i => DodgeVfx.move(i, o)); };
+    const fxStop = list => { if (list) list.forEach(i => DodgeVfx.stop(i)); };
+    const FX_H = 100;              // 롤 투사체가 나는 높이(mOffsetInitialTargetHeight)
+
+    // 내 챔피언 스킬 이펙트(dodge/vfx/mine/<챔피언>.json): 칸마다 cast(쓸 때) · anim([이펙트, 초], 애니메이션에 박힌 것) ·
+    // dash(돌진하는 동안) · land(내려앉을 때) · buf(이속·보호막·투명 동안). 모두 내 몸에 붙어 따라다닌다
+    let mineFx = null, mineFor = null;
+    const myFx = [];               // 몸에 붙은 이펙트 [{ list, until }]
+    function loadMineFx() {
+      const k = modelKey(faceKey);
+      if (mineFor === k) return;
+      mineFor = k; mineFx = null;
+      loadMineSfx(k);
+      if (window.DodgeVfx) DodgeVfx.loadMine(k).then(sl => { if (mineFor === k) mineFx = sl; }).catch(() => {});
+    }
+    const myPart = (sk, part) => (mineFx && mineFx[String(sk.slot)] && mineFx[String(sk.slot)][part]) || null;
+    // 그 칸에 롤 이펙트가 있으면 손으로 그린 장식(섬광·고리·번쩍임) 은 그리지 않는다
+    const myArt = sk => !!(sk && mineFx && mineFx[String(sk.slot)] && fxgl && fxgl.gl);
+    const meNow = () => ({ x: player.x, y: player.y, h: 0, dir: { x: facing.x, y: facing.y } });
+    // 내 몸에 이펙트를 붙인다(dur 초 뒤에 끈다. 없으면 이펙트가 끝날 때까지)
+    function myPlay(names, dur) {
+      if (!names || !names.length || !(fxgl && fxgl.gl)) return null;
+      const list = fxPlay(names, meNow(), dur || 6);
+      if (list) myFx.push({ list, until: dur ? t + dur : Infinity });
+      return list;
+    }
+    // 스킬을 쓰는 순간: cast + 애니메이션 이펙트(제때) + 롤 소리
+    function mySkillStart(sk) {
+      myPlay(myPart(sk, "cast"));
+      for (const [name, at] of myPart(sk, "anim") || []) {
+        if (at > 0) myFx.push({ later: name, at: t + at, until: Infinity });
+        else myPlay([name]);
+      }
+      mySound(sk);
+    }
+    // 롤 시전 소리. 냈으면 true(그 스킬의 점멸·유체화 합성음은 내지 않는다)
+    function mySound(sk) {
+      const evs = LOL_SFX && LOL_SFX.mine && LOL_SFX.mine[modelKey(faceKey)] && LOL_SFX.mine[modelKey(faceKey)][String(sk.slot)];
+      if (!evs) return false;
+      let ok = false;
+      evs.forEach(ev => { ok = lolSound(ev, 0.5) || ok; });
+      return ok;
+    }
+    const hasMySound = sk => !!(sk && LOL_SFX && LOL_SFX.mine && (LOL_SFX.mine[modelKey(faceKey)] || {})[String(sk.slot)]);
+    // 내 스킬의 합성음: 롤 소리가 있는 스킬이면 내지 않는다
+    function mySfx(kind) { if (!hasMySound(skillUsed)) sfx(kind); }
+    // 버프 이펙트를 걸린 동안 붙인다
+    function myBuff(sk, dur) { if (dur > 0) myPlay(myPart(sk, "buf"), dur); }
+
     // 시전이 끝난 순간
     function release(c) {
-      const s = c.skill;
+      const s = c.skill, lf = lolFx(s), dir = { x: c.dx, y: c.dy };
       skillSound(s, "release");
-      castFx(c);
+      fxStop(c.vfx);
+      if (lf) fxPlay(lf.cast, { x: c.x, y: c.y, h: 0, dir });
+      else castFx(c);
       if (s.kind === "line") {
-        missiles.push({ skill: s, x: c.x, y: c.y, ox: c.x, oy: c.y, dx: c.dx, dy: c.dy, speed: s.speed, left: s.range, flown: 0, caster: c });
+        const m = { skill: s, x: c.x, y: c.y, ox: c.x, oy: c.y, dx: c.dx, dy: c.dy, speed: s.speed, left: s.range, flown: 0, caster: c };
+        if (lf) {
+          // 투사체 이펙트의 빔 끝은 시전자(쓰레쉬 Q 사슬이 갈고리에서 쓰레쉬까지)
+          m.vfx = fxPlay(lf.mis, { x: m.x, y: m.y, h: FX_H, dir, target: { x: c.x, y: c.y, h: FX_H } }, 30);
+          m.fx = !!m.vfx;
+        }
+        missiles.push(m);
       } else if (s.kind === "circle") {
         // 벨코즈 E 처럼 멀리 던질수록 늦는 건, 가장 짧은 지연으로 자리를 잡고(더 넉넉한 쪽) 지연은 그 자리로 다시 잰다
         const at = fairSpot(c.aim, s, s.delay, c);
         const delay = s.delayFar ? s.delay + (s.delayFar - s.delay) * Math.min(1, dist(c, at) / s.range) : s.delay;
-        zones.push({ skill: s, x: at.x, y: at.y, wait: delay, total: delay });
+        const z = { skill: s, x: at.x, y: at.y, wait: delay, total: delay };
+        if (lf) {
+          z.vfx = fxPlay(lf.warn, { x: z.x, y: z.y, h: 0, dir }, delay + 0.5);
+          fxPlay(lf.land, { x: z.x, y: z.y, h: 0, dir });
+          z.fx = true;
+        }
+        zones.push(z);
       } else if (s.kind === "cage") {
-        zones.push({ skill: s, x: c.aim.x, y: c.aim.y, wait: s.delay, total: s.delay, up: 0 });
+        const z = { skill: s, x: c.aim.x, y: c.aim.y, wait: s.delay, total: s.delay, up: 0 };
+        if (lf) { z.vfx = fxPlay(lf.warn, { x: z.x, y: z.y, h: 0, dir }, s.delay + 0.5); z.fx = true; }
+        zones.push(z);
       } else if (s.kind === "beam") {
         const a = { x: c.x, y: c.y }, b = { x: c.x + c.dx * s.range, y: c.y + c.dy * s.range };
         if (!(segDist(player, a, b) < CHAMP.radius + s.radius && hit(s, { c }))) dodged += 1;
-        flashes.push({ skill: s, a, b, left: 0.35, max: 0.35 });
-        beamFx(s, a, b);
+        const f = { skill: s, a, b, left: 0.35, max: 0.35 };
+        if (lf) {
+          const far = Math.min(s.range, 2500);
+          f.fx = !!fxPlay(lf.beam, { x: a.x, y: a.y, h: FX_H, dir, target: { x: a.x + c.dx * far, y: a.y + c.dy * far, h: FX_H } }, 1.5);
+        }
+        flashes.push(f);
+        if (!f.fx) beamFx(s, a, b);
       }
     }
 
@@ -2111,7 +2273,9 @@
       // 막기 스킬의 그림: 바람 장막은 벽을 따라 바람이 일고, 칼날은 둘레를 돌고, 보호막·안식처는 테두리가 숨 쉰다
       if (!(t - (lastGuardFx || -1) < 0.05)) {
         lastGuardFx = t;
-        if (wall && t < wall.until) {
+        if (wall && wall.fx) {
+          if (t < wall.until) fxMove(wall.fx, wallAt(wall)); else { fxStop(wall.fx); wall.fx = null; }
+        } else if (wall && t < wall.until) {
           // 장막: 여러 높이로 겹친 빛줄기(벽) + 그 위로 흩날리는 바람
           const c = wallAt(wall), hx = -wall.ny * wall.width / 2, hy = wall.nx * wall.width / 2;
           const fade = Math.min(1, (wall.until - t) / 0.4);
@@ -2334,6 +2498,9 @@
         const d = m.speed * dt;
         m.x += m.dx * d; m.y += m.dy * d;
         m.left -= d; m.flown += d;
+        if (m.fx) {
+          fxMove(m.vfx, { x: m.x, y: m.y, h: FX_H });
+        }
         // 야스오 W 바람 장막·사미라 W 칼날에 닿은 투사체는 사라진다(피한 것으로 센다)
         if (blocksMissile(m)) {
           m.gone = true;
@@ -2366,9 +2533,9 @@
       const pad = 200;
       const alive = [];
       for (const m of missiles) {
-        if (m.gone) continue;
+        if (m.gone) { fxStop(m.vfx); continue; }
         const out = m.x < -pad || m.y < -pad || m.x > ARENA.w + pad || m.y > ARENA.h + pad;
-        if (m.left <= 0 || out) dodged += 1; else alive.push(m);
+        if (m.left <= 0 || out) { dodged += 1; fxStop(m.vfx); } else alive.push(m);
       }
       missiles = alive;
 
@@ -2383,7 +2550,8 @@
           if (s.kind === "circle") {
             // 터지는 순간 원 안에 몸이 조금이라도 걸치면 맞는다
             z.done = 0.3;          // 터진 자리를 잠깐 보여 준다
-            boom(z.x, z.y, s.radius, s.color, s);
+            if (z.fx) { fxStop(z.vfx); fxPlay(lolFx(s) && lolFx(s).boom, { x: z.x, y: z.y, h: 0 }); }
+            else boom(z.x, z.y, s.radius, s.color, s);
             skillSound(s, "land");
             if (d < s.radius + CHAMP.radius && hit(s, { d })) { if (dead) return; }
             else dodged += 1;
@@ -2394,7 +2562,8 @@
           // 테두리에 몸이 닿으면 맞는다. 안에 갇혔으면 테두리에 닿지 않게 버텨야 한다
           if (!z.formed) {
             z.formed = true;
-            fx.push({ kind: "ring", x: z.x, y: z.y, r: s.radius, color: s.color, life: 0.4, max: 0.4 });
+            if (z.fx) { fxStop(z.vfx); z.cage = fxPlay(lolFx(s) && lolFx(s).cage, { x: z.x, y: z.y, h: 0 }, s.last + 1); }
+            else fx.push({ kind: "ring", x: z.x, y: z.y, r: s.radius, color: s.color, life: 0.4, max: 0.4 });
             skillSound(s, "form");
           }
           if (!z.struck && Math.abs(d - s.radius) < CHAMP.radius && hit(s, { d })) {
@@ -2402,7 +2571,7 @@
             if (dead) return;
           }
           z.up += dt;
-          if (z.up >= s.last) { z.done = 0.3; if (!z.struck) dodged += 1; }
+          if (z.up >= s.last) { z.done = 0.3; fxStop(z.cage); if (!z.struck) dodged += 1; }
         }
       }
       for (const z of zones) if (z.done != null) z.done -= dt;
@@ -2541,6 +2710,13 @@
     }
     // 내가 맞았을 때: 스킬 색 불티 + 섬광 + 바닥 고리 + 작은 충격파 + 색수차
     function hitFx(s) {
+      const lf = lolFx(s);
+      if (lf && lf.hit && lf.hit.length) {
+        const from = lastHow && lastHow.m ? { x: lastHow.m.dx, y: lastHow.m.dy } : null;
+        fxPlay(lf.hit, { x: player.x, y: player.y, h: 0, dir: from || undefined });
+        ca = 1;
+        return;
+      }
       const col = gfxOf(s).hit || s.color;
       burst(player.x, player.y, 90, col, 30, 460);
       emit({ x: player.x, y: player.y, z: 90, size: 130, size1: 190, color: "#ffffff", color1: col, shape: "glow", life: 0.22, a: 0.55 });
@@ -2880,6 +3056,7 @@
     function buildGround(L) {
       const now = performance.now() / 1000;
       for (const z of zones) {
+        if (z.fx) continue;
         const s = z.skill, col = rgb(s.color), zg = gfxOf(s).zone || {};
         if (s.kind === "circle" && z.wait > 0) {
           const p = 1 - z.wait / z.total;
@@ -2894,10 +3071,12 @@
         }
       }
       for (const f of flashes) {
+        if (f.fx) continue;
         const al = Math.max(0, f.left / f.max), col = rgb(f.skill.color);
         band(L, frameOf("beam"), f.a, f.b, f.skill.radius * (1.6 + (1 - al) * 0.6), 0, col, al * 0.8, 1, (1 - al) * 0.7, 0.7, now * 3);
       }
       for (const m of missiles) {
+        if (m.fx) continue;
         const g = gfxOf(m.skill);
         floorQ(L, frameOf("glow"), m.x, m.y, m.skill.radius * 2.6, 0, rgb(g.glow || m.skill.color), 0.3, 1);
       }
@@ -2985,8 +3164,9 @@
       const now = performance.now() / 1000;
       drawParts(L, false);
       drawAmb(L, false, now);
-      for (const m of missiles) missileFx(L, m, now);
+      for (const m of missiles) if (!m.fx) missileFx(L, m, now);
       for (const f of flashes) {
+        if (f.fx) continue;
         const al = Math.max(0, f.left / f.max), col = rgb(f.skill.color), w = f.skill.radius;
         band(L, frameOf("beam"), f.a, f.b, w * 1.2, 60, col, al, 1, 0, 0.4, now * 4);
         band(L, frameOf("beam"), f.a, f.b, w * 0.35, 60, rgb("#ffffff"), al, 1);
@@ -3050,6 +3230,19 @@
 
     // 그림 효과만 흘러간다(실제 시간). 게임이 끝나도 파편은 마저 떨어진다
     function tickFx(dt) {
+      if (window.DodgeVfx) {
+        for (let i = myFx.length - 1; i >= 0; i--) {
+          const f = myFx[i];
+          if (f.later) {
+            if (t >= f.at) { myFx.splice(i, 1); myPlay([f.later]); }
+            continue;
+          }
+          if (!player || t >= f.until || f.list.every(x => x.done)) { fxStop(f.list); myFx.splice(i, 1); continue; }
+          if (f.fly) fxMove(f.list, { x: f.fly.x + f.fly.vx * (t - f.fly.t0), y: f.fly.y + f.fly.vy * (t - f.fly.t0), h: FX_H });
+          else fxMove(f.list, meNow());
+        }
+        DodgeVfx.update(dt);
+      }
       for (const f of fx) f.life -= dt;
       fx = fx.filter(f => f.life > 0);
       for (const p of parts) {
@@ -3075,6 +3268,7 @@
       // 투사체: 지나온 길(리본 꼬리) 을 적어 두고, 표의 파티클을 흘린다
       const now = performance.now() / 1000;
       for (const m of missiles) {
+        if (m.fx) continue;
         const g = gfxOf(m.skill);
         (m.hist = m.hist || []).push({ x: m.x, y: m.y, at: now });
         const keep = g.trail ? g.trail[2] : 0.2;
@@ -3089,6 +3283,7 @@
       // 장판: 차오르는 동안 안에서 솟는 것이 점점 많아진다. 감옥은 테두리를 따라 보랏빛이 솟는다
       for (const z of zones) {
         const s = z.skill, zd = (gfxOf(s).zone || {}).motes;
+        if (z.fx) continue;
         if (s.kind === "circle" && z.wait > 0 && zd) {
           const p = 1 - z.wait / z.total;
           z.acc = (z.acc || 0) + dt * (20 + 90 * p) * s.radius / 220;
@@ -3109,7 +3304,7 @@
       }
       // 시전 중: 스킬 색 빛이 초상화로 빨려 들어간다. 레오나 E 돌진은 금빛 자취
       for (const c of casters) {
-        if (c.wind > 0 && c.skill.cast > 0) {
+        if (c.wind > 0 && c.skill.cast > 0 && !lolFx(c.skill)) {
           c.acc = (c.acc || 0) + dt * 40;
           while (c.acc >= 1) {
             c.acc -= 1;
@@ -3271,6 +3466,7 @@
 
       for (const z of zones) {
         const s = z.skill;
+        if (z.fx) continue;
         if (s.kind === "circle") {
           if (z.done != null) continue;          // 터진 뒤는 빛기둥·고리가 대신한다
           const p = 1 - Math.max(0, z.wait) / z.total;
@@ -3390,6 +3586,7 @@
 
       // 레이저가 지나간 자리
       for (const f of flashes) {
+        if (f.fx) continue;
         const a = Math.max(0, f.left / 0.35);
         ctx.globalCompositeOperation = "lighter";
         const art = fxReady && BEAM_ART[f.skill.name];
@@ -3858,7 +4055,7 @@
     // 감옥 창살. 뒤쪽(먼 쪽) 과 앞쪽을 나눠 그려서 안에 선 사람이 창살 사이로 보이게 한다
     function drawCageBars(front) {
       for (const z of zones) {
-        if (z.skill.kind !== "cage" || z.wait > 0) continue;
+        if (z.skill.kind !== "cage" || z.wait > 0 || z.fx) continue;
         const s = z.skill, n = 28, hgt = 170;
         const a = z.done != null ? Math.max(0, z.done / 0.3) : 1;
         if (fxReady) {
@@ -4024,7 +4221,7 @@
         // 먼 것(y 가 작은 것) 부터 그려야 앞의 것이 뒤의 것을 가린다
         const actors = [
           ...casters.map(c => ({ y: c.y, draw: () => drawCaster(c) })),
-          ...missiles.map(m => ({ y: m.y, draw: () => drawMissile(m) })),
+          ...missiles.filter(m => !m.fx).map(m => ({ y: m.y, draw: () => drawMissile(m) })),
           { y: player.y, draw: () => { drawShadow(player.x, player.y, 45); drawPlayer(); } },
         ].sort((a, b) => a.y - b.y);
         actors.forEach(a => a.draw());
@@ -4039,7 +4236,8 @@
       if (gl) {
         fxgl.frame({ bg: bgCv, fg: fgCv, waves: player ? screenWaves() : [], shake: { x: sx, y: sy },
                      ca: ca, dead: deadFx, hurt: hurt / 0.4, low,
-                     actors: modelActors(), cam: { S, OX, OY, FOCAL, CAM_D, COS, SIN, W2: ARENA.w / 2, H2: ARENA.h / 2 } });
+                     actors: modelActors(), cam: { S, OX, OY, FOCAL, CAM_D, COS, SIN, W2: ARENA.w / 2, H2: ARENA.h / 2 },
+                     vfx: window.DodgeVfx ? DodgeVfx.batches({ COS, SIN, CAM_D, W2: ARENA.w / 2, H2: ARENA.h / 2 }) : null });
         mainCtx.setTransform(1, 0, 0, 1, 0, 0);
         mainCtx.clearRect(0, 0, canvas.width, canvas.height);
       }

@@ -13,3 +13,4 @@ __pycache__/
 # 에이전트 도구 찌꺼기
 .omc/
 .playwright-mcp/
+tools/.cache/
