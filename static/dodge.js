@@ -4084,7 +4084,14 @@
         // CC 때문에 못 쓰는 주문(이동 불가 중의 점멸) 은 어둡게
         b.classList.toggle("locked", sp.id === "flash" && !!blocked);
       });
-      for (const sk of mySkills()) {
+      // 내 챔피언에게 없는(못 쓰는) 칸은 비운다. 앞 판의 다른 챔피언 쿨타임·빛이 남지 않게
+      const mine = mySkills();
+      skillBtns.forEach((b, i) => {
+        if (mine.some(sk => sk.slot === i)) return;
+        paintCd(b, 0, 1);
+        b.classList.remove("active", "locked", "recast");
+      });
+      for (const sk of mine) {
         const b = skillBtns[sk.slot];
         // 벨베스 Q 는 지금 커서가 가리키는 방향의 쿨타임
         const left = sk.dirs ? (cursor ? dirLeft[dirOf(cursor.x - player.x, cursor.y - player.y)] : Math.min(...dirLeft)) : cdLeft[sk.slot];
