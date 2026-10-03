@@ -2241,6 +2241,9 @@
     const fxStop = list => { if (list) list.forEach(i => DodgeVfx.stop(i)); };
     const FX_H = 100;              // 롤 투사체가 나는 높이(mOffsetInitialTargetHeight)
     const TRAIL_STEP = 51;         // 자이라 E 의 luaOnMissileUpdateDistanceInterval
+    // 롤 서버는 초당 30 번 돌아서 스크립트도 그때만 불린다. 51 을 넘긴 첫 틱에 덩굴을 뿌리므로
+    // 실제 간격은 한 틱 이동 거리의 배수(자이라 E 1150/30 ≈ 38 → 두 틱 ≈ 77). 51 마다 뿌리면 덩굴이 너무 빽빽하다
+    const trailGap = speed => { const tick = speed / 30; return Math.ceil(TRAIL_STEP / tick - 1e-6) * tick; };
     // 적 스킬 이펙트는 밝기를 올린다(롤보다 멀리서 내려다봐 작고 어둡게 보인다). 크기는 판정 그대로 둔다
     const ENEMY_GAIN = 1.8;
     // 1.8배면 하얗게 타서 모양이 안 보이는 스킬은 SKILLS 의 fxGain 으로 따로 낮춘다(구체·꼬리·불꽃 결이 보이게)
@@ -2636,10 +2639,10 @@
         if (m.fx) {
           fxMove(m.vfx, { x: m.x, y: m.y, h: FX_H });
         }
-        // 롤 스킬 스크립트처럼 TRAIL_STEP 마다 그 자리 땅에 이펙트를 하나씩(자이라 E 덩굴이 길을 따라 솟는다)
+        // 롤 스킬 스크립트처럼 trailGap 마다 그 자리 땅에 이펙트를 하나씩(자이라 E 덩굴이 길을 따라 솟는다)
         while (m.trail && m.trailAt <= m.flown) {
           fxPlay(m.trail, { x: m.ox + m.dx * m.trailAt, y: m.oy + m.dy * m.trailAt, h: 0, gain: fxGain(m.skill), dir: { x: m.dx, y: m.dy } });
-          m.trailAt += TRAIL_STEP;
+          m.trailAt += trailGap(m.speed);
         }
         // 야스오 W 바람 장막·사미라 W 칼날에 닿은 투사체는 사라진다(피한 것으로 센다)
         if (blocksMissile(m)) {
