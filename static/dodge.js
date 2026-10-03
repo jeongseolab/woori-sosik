@@ -1184,6 +1184,10 @@
     let CAM_D = 2300;
     const COS = Math.cos(PITCH), SIN = Math.sin(PITCH);
     let S = 1, OX = 0, OY = 0, VW = 0, VH = 0, DPR = 1;   // 배율·원점·화면 크기(CSS 픽셀)
+    // 성능: 게임 화면은 기기 배율을 MAX_DPR 까지만 쓴다(배율 2 화면에서 픽셀이 44% 줄고 눈으로는 거의 같다. HUD 글자는 DOM 이라 그대로 선명).
+    // 그래도 느리면(watchSpeed) 해상도를 QUALITY 단계로 내리고, 가장 낮은 단계에서는 이펙트 파티클도 덜 뿌린다
+    const MAX_DPR = 1.5, QUALITY = [1, 0.8, 0.65], LOW_DENSITY = 0.6;
+    let quality = 0;
 
     // 바닥 좌표(x, y) 와 높이 z -> 화면 좌표. k: 그 깊이에서 1유닛이 몇 픽셀인지
     function proj(x, y, z = 0) {
@@ -1260,7 +1264,7 @@
     }
 
     function sizeView(u, mw, mh) {
-      DPR = window.devicePixelRatio || 1;
+      DPR = Math.min(window.devicePixelRatio || 1, MAX_DPR) * QUALITY[quality];
       canvas.style.width = VW + "px";
       canvas.style.height = VH + "px";
       canvas.width = Math.round(VW * DPR);
@@ -4662,8 +4666,33 @@
     }
 
     // ── 흐름 ──
+    // 프레임 간격을 지켜보다가 2초 넘게 느리면(평균 20ms 넘게, 50fps 아래) 화질을 한 단계 내리고,
+    // 8초 넘게 넉넉하면(18.5ms 아래) 한 단계 올린다. 내린 뒤 coolDown 동안은 올리지 않고,
+    // 올리자마자(15초 안에. 느린 걸 알아채는 데 2초 걸린다) 다시 느려지면 coolDown 을 두 배로(최대 2분) 늘려 오르내림을 되풀이하지 않는다
+    let speedAvg = 16.7, slowFor = 0, fastFor = 0, droppedAt = -Infinity, raisedAt = -Infinity, coolDown = 15000;
+    function setQuality(q) {
+      quality = q;
+      if (window.DodgeVfx) DodgeVfx.density(q === QUALITY.length - 1 ? LOW_DENSITY : 1);
+      fit();
+    }
+    function watchSpeed(gap, now) {
+      if (state !== "play" || gap <= 0 || gap > 250) return;     // 다른 탭에 갔다 온 것은 빼고
+      speedAvg += (gap - speedAvg) * 0.05;
+      slowFor = speedAvg > 20 ? slowFor + gap : 0;
+      fastFor = speedAvg < 18.5 ? fastFor + gap : 0;
+      if (slowFor > 2000 && quality < QUALITY.length - 1) {
+        if (now - raisedAt < 15000) coolDown = Math.min(coolDown * 2, 120000);
+        setQuality(quality + 1);
+        droppedAt = now; slowFor = fastFor = 0; speedAvg = 16.7;
+      } else if (fastFor > 8000 && quality > 0 && now - droppedAt > coolDown) {
+        setQuality(quality - 1);
+        raisedAt = now; fastFor = 0;
+      }
+    }
+
     function loop(now) {
       raf = requestAnimationFrame(loop);
+      watchSpeed(now - last, now);
       // 다른 탭에 갔다 오면 한꺼번에 흐르지 않게 한 번에 최대 0.1초만 진행.
       // 시작 직후 첫 프레임은 시각이 시작 시각보다 조금 앞설 수 있어서 0 아래로는 안 간다
       const fdt = Math.max(0, Math.min(0.1, (now - last) / 1000));
