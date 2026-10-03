@@ -101,6 +101,9 @@ MINE_EXTRA = {
     ("shen", 2): {"dash": ["Shen_E_mis"]},
     ("twitch", 0): {"cast": ["Twitch_Q_Bamf"], "buf": ["Twitch_Q_Haste"]},
     ("udyr", 2): {"buf": ["Udyr_PhoenixStance"]},
+    # 나피리 W 는 롤 스킬 이름이 NaafiriR(무리의 부름) 이라 이펙트도 Naafiri_R_* (Naafiri_W_* 는 옛 W, 챔피언에게 돌진)
+    ("naafiri", 1): {"cast": ["Naafiri_R_Transform"], "buf": ["Naafiri_R_Buff", "Naafiri_R_Movespeed"]},
+    ("naafiri", 2): {"land": ["Naafiri_E_SecondHit"]},
     ("volibear", 0): {"buf": ["Volibear_Q_ShieldRune_L"]},
 }
 

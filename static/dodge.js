@@ -92,6 +92,7 @@
   //   ccImmune: 이 초 동안 CC 를 받지 않고 걸린 CC 도 풀린다(올라프 R). whileCC: CC 중에도 쓸 수 있다
   //   undying: 이 초 동안 죽지 않는다(트린다미어 R). lambs: {radius, dur} 그 자리 둘레 안에서는 죽지 않는다(킨드레드 R)
   //   untarget·haste·hasteDur: 이 초 동안 스킬이 통과, 그리고 hasteDur 초 동안 이동 속도 +haste(블라디미르 W)
+  //   sink: 그동안 핏물 웅덩이로 가라앉아 거의 안 보인다(블라디미르 W). cast·castRun: 시전 동작을 이 초 동안, 움직이면 castRun 동작(나피리 W)
   //   haste 는 hasteEnd 가 있으면 hasteRamp 초(없으면 hasteDur) 동안 그 값으로 바뀐다(0 이면 줄어드는 이속, 더 크면 붙는 가속).
   //   hasteAfter: {pct, dur} 끝난 뒤(블리츠크랭크 W 의 둔화). runAnim: 그동안 달리는 3D 동작(runIdle 이면 서 있을 때도)
   //   stealth·stealthDelay·detect: 투명(그 초 뒤부터). detect 안에 적이 있으면 들킨다. shroud: {radius, dur} 안에 있으면 투명(아칼리 W)
@@ -152,7 +153,13 @@
       { slot: 3, kind: "guard", stealth: 1.25, haste: 0.4, charges: 2, gap: 2, window: 12, noAnim: true, runAnim: "skrun", cd: 70,
         src: "data(KhazixR StealthDuration·BonusMovementSpeedPercent·NumberOfCasts·RecastCD·RecastWindow)" },
     ],
-    naafiri: { slot: 2, kind: "dash", range: 450, min: 250, speed: 900, cd: 7, src: "data" },
+    // 나피리: 롤의 W 칸은 스킬 스크립트 이름이 NaafiriR(무리의 부름. 2024년에 W·R 을 맞바꿨다). 이펙트·동작도 R 이름(Naafiri_R_*, Spell4*) 이다
+    naafiri: [
+      { slot: 1, kind: "guard", untarget: 1, cast: 0.75, castRun: "skrun", haste: 0.3, hasteDur: 5, cd: 18,
+        desc: "무리의 부름: 1초 동안 모든 스킬이 통과하고(그동안에도 움직일 수 있다), 5초 동안 이동 속도 +30%",
+        src: "data(NaafiriR UntargetableDuration·spellCastTime·mCanMoveWhileChanneling·MoveSpeedAmount·MoveSpeedDuration 5레벨), 무리 소환·공격력은 빼고" },
+      { slot: 2, kind: "dash", range: 450, min: 250, speed: 900, cd: 7, src: "data" },
+    ],
     aurora: [
       { slot: 1, kind: "dash", range: 300, fixed: true, speed: 350 + CHAMP.speed, stealth: 1.6, haste: 0.4, realm: true, cd: 18,
         src: "data(JumpDistance·DashBonusSpeed·InvisDuration·MoveSpeedBonus)" },
@@ -225,7 +232,7 @@
     yasuo: { slot: 1, kind: "guard", wall: { width: 600, life: 4, range: 450, thick: 100 }, cd: 17,
              src: "data(Width·WallLife·TravelRange·Thickness), 장막이 나아가는 빠르기: 추정" },
     samira: { slot: 1, kind: "guard", blades: { dur: 0.75, radius: 325 }, cd: 22, src: "data(SlashDuration·castRange)" },
-    vladimir: { slot: 1, kind: "guard", untarget: 2, haste: 0.375, hasteDur: 1, cd: 16,
+    vladimir: { slot: 1, kind: "guard", untarget: 2, sink: true, haste: 0.375, hasteDur: 1, cd: 16,
                 src: "haste: data(HasteBoost·HasteDuration), untarget: 추정(데이터에 없다)" },
     olaf: { slot: 3, kind: "guard", ccImmune: 3, whileCC: true, cd: 80, src: "data(Duration), CC 중 사용: 추정" },
     // 패시브 돌진(전투 태세): 칼리스타는 Q(꿰뚫기) 를 던지는 동안이나 던진 직후 들어온 이동 입력(클릭한 곳·WASD 방향) 쪽으로 뛴다.
@@ -2388,7 +2395,7 @@
           emit({ x: player.x - facing.x * 50, y: player.y - facing.y * 50, ground: 1, size: 45, size1: 10, color: haste.sk.color || "#74c0fc",
                  color1: haste.sk.color || "#74c0fc", shape: "glow", life: 0.3, a: 0.25 });
         }
-        if (untarget > t && skillUsed && skillUsed.kind === "guard") emit({ x: player.x, y: player.y, ground: 1, size: 110, size1: 130, color: "#ff8787", color1: "#a51111", shape: "glow", life: 0.2, a: 0.8 });
+        if (untarget > t && skillUsed && skillUsed.sink) emit({ x: player.x, y: player.y, ground: 1, size: 110, size1: 130, color: "#ff8787", color1: "#a51111", shape: "glow", life: 0.2, a: 0.8 });
       }
       // 다른 차원(오로라 W): 몸 둘레로 영혼 빛이 피어오른다
       if (realm && t < realm.until && !(t - (realm.fxAt || -1) < 0.05)) {
@@ -2940,17 +2947,19 @@
         // 돌진 동작이 따로 있으면(칼리스타 패시브) 시전 뒤 돌진하는 동안은 그 동작
         const sk = skillUsed, since = t - skillAt;
         const acting = act && t < act.until && (t < act.hold || !moving);
-        const casting = !acting && sk && !sk.noAnim && (dash || since < (sk.parry || 0.5));
+        const casting = !acting && sk && !sk.noAnim && (dash || since < (sk.parry || sk.cast || 0.5));
+        // 나피리 W 는 시전하는 동안 움직일 수 있어서, 움직이면 시전 달리기(Spell4_Run)
+        const castRun = casting && !dash && moving && sk.castRun;
         const leaping = casting && dash && dash.started && sk.dashAnim;
         // 이속 스킬 중에는 그 스킬의 달리기(가렌 Q 칼 들고 달리기, 람머스 Q 구르기 …)
         const fast = haste && !haste.slowed && haste.sk.runAnim ? haste.sk : null;
         out.push({ key: modelKey(faceKey), x: player.x, y: player.y, z: lift(), angle: viewAngle,
-                   anim: acting ? act.anim : leaping ? sk.dashAnim : casting ? sk.anim || "spell" + (sk.slot + 1)
+                   anim: acting ? act.anim : leaping ? sk.dashAnim : castRun ? sk.castRun : casting ? sk.anim || "spell" + (sk.slot + 1)
                      : moving ? (fast ? fast.runAnim : "run") : fast && fast.runIdle ? fast.runAnim : "idle",
-                   time: acting ? t - act.t0 : leaping ? t - dash.t0 : casting ? since : animClock, loop: !casting && !acting,
+                   time: acting ? t - act.t0 : leaping ? t - dash.t0 : casting ? since : animClock, loop: (!casting || !!sk.castRun) && !acting,
                    // 투명하면 내 화면에서만 흐리게 보인다(롤에서 내 챔피언이 반투명해지는 것처럼)
                    // 블라디미르 W 는 핏물 웅덩이로 가라앉아 거의 안 보인다
-                   alpha: untarget > t && skillUsed && skillUsed.kind === "guard" ? 0.15 : hidden > t ? 0.35 : untarget > t ? 0.4 : safe > 0 && Math.floor(safe * 10) % 2 ? 0.45 : 1,
+                   alpha: untarget > t && skillUsed && skillUsed.sink ? 0.15 : hidden > t ? 0.35 : untarget > t ? 0.4 : safe > 0 && Math.floor(safe * 10) % 2 ? 0.45 : 1,
                    tint: hurt > 0 ? [1, 1, 1, hurt / 0.4 * 0.55] : (realm && t < realm.until) || (rift && t < rift.until && dist(player, rift) <= rift.r) ? [0.6, 0.5, 1, 0.35]
                      : parry > t ? [0.75, 0.9, 1, 0.45] : undying > t || ccImmune > t ? [1, 0.25, 0.2, 0.3]
                      : ghostLeft > 0 ? [0.4, 0.85, 0.95, 0.22] : null });

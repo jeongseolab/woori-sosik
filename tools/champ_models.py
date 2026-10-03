@@ -72,12 +72,13 @@ SHIELD = {"lux": [2], "karma": [3], "janna": [3], "lulu": [3], "diana": [2], "or
 MORE = {"riven": [1], "akali": [2, 4], "pyke": [2], "ekko": [4], "aurora": [4], "rakan": [4], "sivir": [4], "kassadin": [1],
         "ahri": [2], "lulu": [2], "orianna": [2], "kayn": [3], "garen": [1, 2], "hecarim": [3, 4], "rammus": [1], "twitch": [1],
         "teemo": [2], "blitzcrank": [2], "zilean": [3], "sona": [2, 3], "kennen": [3], "draven": [2], "volibear": [1], "udyr": [3],
-        "masteryi": [], "warwick": [4], "bard": [3], "poppy": [2], "khazix": []}
+        "masteryi": [], "warwick": [4], "bard": [3], "poppy": [2], "khazix": [], "naafiri": [2]}
+# 나피리 W 는 롤 스킬 이름이 NaafiriR 이라 동작이 Spell4Dash(서 있으면 Spell4_Idle, 움직이면 Spell4_Run) 다.
 # 스킬 동작으로 기본 규칙(Spell1·Spell1_0·Spell1_Base → spell1 로 시작하는 것) 대신 쓸 클립.
 # 쓰레쉬 Q 는 기본이 Spell1_Dash(끌려간 적에게 날아가는 두 번째 동작) 라 던지는 Spell1_In,
 # 사일러스 E 는 Spell3 이 0.1초 조각이라 돌진 Spell3_Dash, 트리스타나 W 는 Spell2_In(0.27초, 뛰기 시작만) 대신 Spell2_Mid
 SPELL_CLIPS = {("thresh", 1): ["Spell1_In"], ("sylas", 3): ["Spell3_Dash"], ("tristana", 2): ["Spell2_Mid"],
-               ("riven", 1): ["Spell1A"], ("rakan", 4): ["Spell4_Into"]}
+               ("riven", 1): ["Spell1A"], ("rakan", 4): ["Spell4_Into"], ("naafiri", 2): ["Spell4_Idle"]}
 # 스킬 말고 따로 굽는 동작: 이름 → 클립 이름 후보(칼리스타 Q 뒤의 패시브 돌진).
 # 암베사는 스킬마다 패시브 돌진 동작이 따로 있다(해시로만 적힌 클립: passivedash_spell1a·1b·2·3·4·4_fail.anm),
 # Q2(Spell1B), R 내려찍기(spell4_hit). spell4 는 R 시전(Spell4_Windup)
@@ -87,7 +88,7 @@ EXTRA_CLIPS = {"kalista": {"dash": ["Spell1_Dash_0", "Attack1_Dash_0"]},
                "warwick": {"dash4": ["Spell4Dash"]}, "pyke": {"skrun": ["Spell2_Move"]}, "kayn": {"skrun": ["Spell3_Run"]},
                "rakan": {"skrun": ["Spell4_Run"]}, "hecarim": {"skrun": ["Spell3run"]}, "twitch": {"skrun": ["Run_Stealth"]},
                "volibear": {"skrun": ["Spell1_Run"]}, "udyr": {"skrun": ["Spell3_Run"]}, "masteryi": {"skrun": ["Run_Haste"]},
-               "poppy": {"skrun": ["Spell2_Run"]}, "garen": {"skrun": ["Run_Spell1"]}, "khazix": {"skrun": ["Run_Haste"]},
+               "poppy": {"skrun": ["Spell2_Run"]}, "naafiri": {"skrun": ["Spell4_Run"]}, "garen": {"skrun": ["Run_Spell1"]}, "khazix": {"skrun": ["Run_Haste"]},
                "ambessa": {"spell1b": ["Spell1B"], "dash1": ["{99834a45}"], "dash1b": ["{6e4a0e24}"], "dash2": ["{5ed08d9d}"],
                            "dash3": ["{ed14ca10}"], "miss4": ["{0e9701b2}"], "hit4": ["Spell4_Hit_ToIdle"]}}
 FPS = 15
