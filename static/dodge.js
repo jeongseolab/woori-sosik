@@ -1019,26 +1019,51 @@
     loadArt();
     // 3D 모델을 판 시작 전에 미리 받아 둔다. 처음 나올 때 받기 시작하면 일찍 나오는 챔피언(모르가나·초가스 등) 은
     // 다 받기 전까지 초상화로 보인다
-    // 연습장을 열면 규칙 화면보다 먼저 롤 로딩 화면을 띄우고, 모델을 다 받을 때까지 시작을 막는다.
-    // 받은 모델은 dodge-gl.js 가 페이지에 남겨 둬서 티어표·그룹방에 갔다 와도 다시 받지 않는다(그때는 곧바로 끝난다)
+    // 연습장을 열면 규칙 화면보다 먼저 롤 로딩 화면을 띄우고, 모델과 적 스킬 이펙트를 다 받을 때까지 시작을 막는다.
+    // 받은 모델·텍스처는 dodge-gl.js 가 페이지에 남겨 둬서 티어표·그룹방에 갔다 와도 다시 받지 않는다(그때는 곧바로 끝난다)
     let loading = true;
     const loadingEl = root.querySelector("[data-loading]"), loadingFill = root.querySelector("[data-loading-fill]");
     root.classList.add("dodge-loading");
-    const loaded = () => { loading = false; loadingEl.hidden = true; root.classList.remove("dodge-loading"); };
+    // 받을 것(need) 과 받은 것(got) 을 함께 세어 막대를 채우고, 기다리는 일(waits) 이 다 끝나면 로딩 화면을 닫는다
+    let waits = 0, need = 0, got = 0;
+    const tick = () => { loadingFill.style.width = (need ? got / need * 100 : 0) + "%"; };
+    function want(n) {
+      if (!n) return;
+      need += n;
+      loading = true;
+      loadingEl.hidden = false;
+      root.classList.add("dodge-loading");
+      tick();
+    }
+    const one = () => { got++; tick(); };
+    function gate(p) {
+      waits++;
+      return p.catch(() => {}).then(() => {
+        if (--waits) return;
+        need = got = 0;
+        loading = false; loadingEl.hidden = true; root.classList.remove("dodge-loading");
+      });
+    }
     // 아직 안 받은 모델이 있으면 로딩 화면을 띄우고 받는다(시작 창에서 내 챔피언을 바꿨을 때도)
     function ensureModels(champs) {
-      return loadModelIndex().then(() => {
+      return gate(loadModelIndex().then(() => {
         if (!fxgl) return;          // WebGL 이 없으면 초상화로 그리니 받을 것이 없다
         const keys = [...new Set(champs.map(modelKey))].filter(k => modelIndex[k] && !fxgl.model(k));
-        if (!keys.length) return;
-        loading = true;
-        loadingEl.hidden = false;
-        root.classList.add("dodge-loading");
-        let done = 0;
-        const tick = () => { loadingFill.style.width = done / keys.length * 100 + "%"; };
-        tick();
-        return Promise.all(keys.map(k => fxgl.loadModel(k, MODELS, modelIndex[k].v).catch(() => null).then(() => { done++; tick(); })));
-      }).then(loaded);
+        want(keys.length);
+        return Promise.all(keys.map(k => fxgl.loadModel(k, MODELS, modelIndex[k].v).catch(() => null).then(one)));
+      }));
+    }
+    // 적 스킬 이펙트(fx.json) 와 그 텍스처를 다 받을 때까지 기다린다. 처음 날아온 스킬이 텍스처를 덜 받은 채
+    // 나오면 안 보이거나(dodge-gl.js 가 다 받을 때까지 안 그린다) 늦게 나타나니, 판을 시작하기 전에 다 받아 둔다
+    function ensureEnemyFx() {
+      if (!window.DodgeVfx || !fxgl || !fxgl.gl) return gate(Promise.resolve());
+      want(1);
+      return gate(DodgeVfx.load(ART + "vfx/").then(() => {
+        one();
+        const ids = DodgeVfx.skillTextures();
+        want(ids.length);
+        return fxgl.preloadVfx(ids, one);
+      }));
     }
     // 연습장에 들어온 것 자체가 클릭이라 소리를 미리 받아 풀어 둔다(첫 판 "환영합니다" 부터 나오게)
     if (soundOn()) loadSamples();
@@ -1066,7 +1091,7 @@
     // 고를 수 있는 챔피언과 적 챔피언의 모델을 처음 열 때 한꺼번에 받는다(다음부터는 브라우저 저장소에서 읽는다).
     // 그래서 시작 창에서 챔피언을 바꿀 때는 로딩이 없다
     ensureModels([faceKey, ...SKILLS.map(s => s.champ), ...Object.keys(MOBILITY)]);
-    if (window.DodgeVfx) DodgeVfx.load(ART + "vfx/").catch(() => {});
+    ensureEnemyFx();
     const keyOf = id => spellKeys(controls)[id];
     const keys = new Set();
     let holding = false;
