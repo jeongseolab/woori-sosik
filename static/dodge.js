@@ -1061,8 +1061,8 @@
       return gate(DodgeVfx.load(ART + "vfx/").then(() => {
         one();
         const ids = DodgeVfx.skillTextures();
-        want(ids.length);
-        return fxgl.preloadVfx(ids, one);
+        want(ids.length + 1);
+        return Promise.all([fxgl.preloadVfx(ids, one), DodgeVfx.loadSkins().then(one)]);     // 뼈대 메시(자이라 E 덩굴 등) 도
       }));
     }
     // 연습장에 들어온 것 자체가 클릭이라 소리를 미리 받아 풀어 둔다(첫 판 "환영합니다" 부터 나오게)
@@ -1426,6 +1426,9 @@
       for (const e of gone) {
         if (!e.vfx || effects.some(o => o.vfx === e.vfx)) continue;
         for (const i of e.vfx) if (cut) DodgeVfx.kill(i); else i.until = Math.max(i.age, HIT_FX_MIN);
+        // 풀리는 이펙트(자이라 E 덩굴이 풀어진다)
+        const lf = lolFx(e.skill);
+        if (lf && lf.free) fxPlay(lf.free, { x: player.x, y: player.y, h: 0, gain: fxGain(e.skill) });
       }
     }
     // 사슬(블리츠·쓰레쉬): 시전자에서 나까지. on 이 풀리면(정화) 같이 끊긴다
@@ -2233,6 +2236,7 @@
     const fxMove = (list, o) => { if (list) list.forEach(i => DodgeVfx.move(i, o)); };
     const fxStop = list => { if (list) list.forEach(i => DodgeVfx.stop(i)); };
     const FX_H = 100;              // 롤 투사체가 나는 높이(mOffsetInitialTargetHeight)
+    const TRAIL_STEP = 51;         // 자이라 E 의 luaOnMissileUpdateDistanceInterval
     // 적 스킬 이펙트는 밝기를 올린다(롤보다 멀리서 내려다봐 작고 어둡게 보인다). 크기는 판정 그대로 둔다
     const ENEMY_GAIN = 1.8;
     // 1.8배면 하얗게 타서 모양이 안 보이는 스킬은 SKILLS 의 fxGain 으로 따로 낮춘다(구체·꼬리·불꽃 결이 보이게)
@@ -2295,7 +2299,9 @@
         if (lf) {
           // 투사체 이펙트의 빔 끝은 시전자(쓰레쉬 Q 사슬이 갈고리에서 쓰레쉬까지)
           m.vfx = fxPlay(lf.mis, { x: m.x, y: m.y, h: FX_H, gain: fxGain(s), missile: true, dir, target: { x: c.x, y: c.y, h: FX_H } }, 30);
-          m.fx = !!m.vfx;
+          // 자이라 E: 투사체 이펙트는 없고 지나간 길에 덩굴을 뿌린다(trail, 아래 투사체 갱신)
+          if (lf.trail && lf.trail.length) { m.trail = lf.trail; m.trailAt = 0; }
+          m.fx = !!(m.vfx || m.trail);
         }
         missiles.push(m);
       } else if (s.kind === "circle") {
@@ -2625,6 +2631,11 @@
         m.left -= d; m.flown += d;
         if (m.fx) {
           fxMove(m.vfx, { x: m.x, y: m.y, h: FX_H });
+        }
+        // 롤 스킬 스크립트처럼 TRAIL_STEP 마다 그 자리 땅에 이펙트를 하나씩(자이라 E 덩굴이 길을 따라 솟는다)
+        while (m.trail && m.trailAt <= m.flown) {
+          fxPlay(m.trail, { x: m.ox + m.dx * m.trailAt, y: m.oy + m.dy * m.trailAt, h: 0, gain: fxGain(m.skill), dir: { x: m.dx, y: m.dy } });
+          m.trailAt += TRAIL_STEP;
         }
         // 야스오 W 바람 장막·사미라 W 칼날에 닿은 투사체는 사라진다(피한 것으로 센다)
         if (blocksMissile(m)) {
@@ -3798,7 +3809,7 @@
       // 쏜 자리부터 끝까지 다 그리면 사거리(1150) 전체가 한 줄로 보여서 실제보다 길어 보인다
       const VINE = 380;
       for (const m of missiles) {
-        if (m.skill.look !== "vines") continue;
+        if (m.skill.look !== "vines" || m.fx) continue;          // 롤 덩굴(trail) 을 뿌리면 그리지 않는다
         const len = Math.min(VINE, Math.hypot(m.x - m.ox, m.y - m.oy));
         const steps = 8;
         for (let i = 0; i < steps; i++) {
