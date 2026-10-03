@@ -99,6 +99,24 @@
     });
   }
   const skillFx = name => (FX && FX.skills[name]) || null;
+  // 적 스킬(FX.skills) 이 쓰는 텍스처 번호 전부: 시전·투사체·적중 시스템과 그 자식 시스템까지 따라가며
+  // dodge-gl.js drawVfx 가 묶는 것(기본·색·곱하기·침식·팔레트) 을 모은다
+  function skillTextures() {
+    if (!FX) return [];
+    const seen = new Set(), tex = new Set();
+    const walk = name => {
+      if (seen.has(name) || !FX.systems[name]) return;
+      seen.add(name);
+      for (const e of FX.systems[name].emitters) {
+        for (const i of [e.texture, e.particleColorTexture, e.textureMult && e.textureMult.textureMult,
+                         e.alphaErosionDefinition && e.alphaErosionDefinition.erosionMapName,
+                         e.paletteDefinition && e.paletteDefinition.paletteTexture]) if (i != null) tex.add(i);
+        if (e.childParticleSetDefinition) (e.childParticleSetDefinition.kids || []).forEach(walk);
+      }
+    };
+    for (const sk of Object.values(FX.skills)) for (const names of Object.values(sk)) [].concat(names).forEach(walk);
+    return [...tex];
+  }
   // 내 챔피언 이펙트(dodge/vfx/mine/<챔피언>.json): 시스템·메시를 합쳐 두고 칸별 이펙트를 돌려준다
   const mine = new Map();
   function loadMine(champ) {
@@ -599,6 +617,6 @@
     return out;
   }
 
-  window.DodgeVfx = { load, loadMine, play, move, stop, kill, update, batches, skillFx, VF, onReady: f => (FX ? f() : ready.push(f)),
+  window.DodgeVfx = { load, loadMine, play, move, stop, kill, update, batches, skillFx, skillTextures, VF, onReady: f => (FX ? f() : ready.push(f)),
                       clear() { live.length = 0; }, count: () => live.length, data: () => FX, base: () => BASE };
 })();

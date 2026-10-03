@@ -789,12 +789,15 @@
       if (i == null || !window.DodgeVfx) return null;
       if (vtex.has(i)) return vtex.get(i);
       const rec = { t: null, wrap: false, opaque: false, failed: false };
+      // p: 받거나 실패하면 풀리는 약속(연습장 로딩 화면이 적 스킬 텍스처를 다 받을 때까지 기다린다)
+      let settle;
+      rec.p = new Promise(ok => { settle = ok; });
       vtex.set(i, rec);
       const img = new Image();
-      img.onerror = () => { rec.failed = true; };
+      img.onerror = () => { rec.failed = true; settle(); };
       img.onload = () => {
         // 못 올리면 실패로 둔다(drawVfx 가 이 텍스처를 기다리느라 묶음을 영영 안 그리지 않게)
-        if (lost) { rec.failed = true; return; }
+        if (lost) { rec.failed = true; settle(); return; }
         const pot = v => (v & (v - 1)) === 0;
         rec.wrap = pot(img.width) && pot(img.height);
         // 알파가 꽉 찬 텍스처인지(침식 지도는 그때 빨강 채널을 쓴다)
@@ -813,6 +816,7 @@
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
           }
         } catch { rec.t = null; rec.failed = true; }
+        settle();
       };
       img.src = DodgeVfx.base() + "t/" + i + ".webp";
       return rec;
@@ -944,6 +948,8 @@
       setAtlas(img) { gl.deleteTexture(tAtlas); tAtlas = texture(img); },
       loadModel,
       model: key => models.get(key) || null,
+      // 이펙트 텍스처들을 미리 받는다. 하나 끝날 때마다(받았든 실패했든) each() 를 부른다
+      preloadVfx: (ids, each = () => {}) => Promise.all(ids.map(i => { const r = vfxTex(i); return (r ? r.p : Promise.resolve()).then(each); })),
       destroy() { cv.remove(); const ext = gl.getExtension("WEBGL_lose_context"); if (ext) ext.loseContext(); },
     };
   }
