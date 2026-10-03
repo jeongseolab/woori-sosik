@@ -117,6 +117,36 @@
     for (const sk of Object.values(FX.skills)) for (const names of Object.values(sk)) [].concat(names).forEach(walk);
     return [...tex];
   }
+  // 뼈대 메시(자이라 E 덩굴, 초가스 Q 가시): tools/lol_vfx.py 가 애니메이션을 프레임마다 정점 위치로 구워 둔 것(skin/<이름>.bin).
+  // 받기 전에는 그 발생기를 그리지 않는다
+  function loadSkin(m) {
+    if (m.ld) return m.ld;
+    m.ld = fetch(BASE + "skin/" + m.skin + ".bin").then(r => { if (!r.ok) throw new Error(r.status); return r.arrayBuffer(); }).then(buf => {
+      const h = new DataView(buf);
+      const nv = h.getUint32(8, true), ni = h.getUint32(12, true), nf = h.getUint32(16, true), fps = h.getFloat32(20, true), q = h.getFloat32(24, true);
+      let o = 28;
+      const idx = new Uint16Array(buf, o, ni);
+      o = (o + ni * 2 + 3) & ~3;
+      const uv = new Float32Array(buf, o, nv * 2);
+      const raw = new Int16Array(buf, o + nv * 8, nf * nv * 3);
+      // 삼각형마다 3정점으로 펼친다(정적 메시와 같은 모양)
+      const U = new Float32Array(ni * 2);
+      for (let k = 0; k < ni; k++) { U[k * 2] = uv[idx[k] * 2]; U[k * 2 + 1] = uv[idx[k] * 2 + 1]; }
+      Object.assign(m, { uv: U, idx, raw, nv, nf, fps, q, tmp: new Float32Array(ni * 3) });
+    }).catch(() => { m.bad = true; });
+    return m.ld;
+  }
+  const loadSkins = () => Promise.all(FX ? FX.meshes.filter(m => m.skin).map(loadSkin) : []);
+  // 파티클 나이 age 의 정점 위치(앞뒤 프레임 사이를 잇는다). 애니메이션이 끝나면 마지막 프레임에 선다
+  function skinAt(m, age) {
+    const fa = Math.min(m.nf - 1, Math.max(0, age * m.fps)), f0 = Math.floor(fa), f1 = Math.min(m.nf - 1, f0 + 1), k = fa - f0;
+    const a = f0 * m.nv * 3, b = f1 * m.nv * 3, R = m.raw, I = m.idx, P = m.tmp, q = m.q;
+    for (let i = 0; i < I.length; i++) {
+      const v = I[i] * 3;
+      for (let c = 0; c < 3; c++) P[i * 3 + c] = (R[a + v + c] + (R[b + v + c] - R[a + v + c]) * k) * q;
+    }
+    return P;
+  }
   // 내 챔피언 이펙트(dodge/vfx/mine/<챔피언>.json): 시스템·메시를 합쳐 두고 칸별 이펙트를 돌려준다
   const mine = new Map();
   function loadMine(champ) {
@@ -468,7 +498,8 @@
       if (T === "VfxPrimitiveMesh" || T === "VfxPrimitiveAttachedMesh") {
         const m = FX.meshes[prim.mesh];
         if (!m) continue;
-        const P = m.pos, U = m.uv, nv = P.length / 3, f = room(out, nv);
+        if (m.skin && !m.raw) { if (!m.bad) loadSkin(m); continue; }
+        const P = m.skin ? skinAt(m, p.age) : m.pos, U = m.uv, nv = P.length / 3, f = room(out, nv);
         const [a, b, c] = ori, px = p.pos[0], py = p.pos[1], pz = p.pos[2];
         // UV 는 한 번에 같은 변환이라 (0,0)·(1,0)·(0,1) 세 점으로 아핀 변환을 구해 쓴다
         const o0 = uvT(e, p, [0, 0]), o1 = uvT(e, p, [1, 0]), o2 = uvT(e, p, [0, 1]);
@@ -618,6 +649,6 @@
     return out;
   }
 
-  window.DodgeVfx = { load, loadMine, play, move, stop, kill, update, batches, skillFx, skillTextures, VF, onReady: f => (FX ? f() : ready.push(f)),
+  window.DodgeVfx = { load, loadMine, play, move, stop, kill, update, batches, skillFx, skillTextures, loadSkins, VF, onReady: f => (FX ? f() : ready.push(f)),
                       clear() { live.length = 0; }, count: () => live.length, data: () => FX, base: () => BASE };
 })();

@@ -6,6 +6,7 @@
 
   텍스처: CommunityDragon 이 PNG 로 풀어 둔 것을 받아 webp 로(static/dodge/vfx/t/<번호>.webp, 긴 변 512 까지)
   메시(.scb): WAD 에서 읽어 fx.json 안에(위치·UV)
+  뼈대 메시(.skn + .skl + .anm, 자이라 E 덩굴): 애니메이션을 프레임마다 정점 위치로 구워 static/dodge/vfx/skin/<이름>.bin 에
 
 어느 스킬이 어느 이펙트를 쓰는지는 롤 데이터의 키(스킬의 mMissileEffectKey·mHitEffectKey, 스킨의 resourceMap) 를 보고
 아래 SKILLS 에 적었다. 발생기 값의 뜻은 LeagueToolkit lol-meta-wiki(github.com/LeagueToolkit/lol-meta-wiki) 를 따른다.
@@ -14,6 +15,7 @@
 """
 import io
 import json
+import numpy as np
 import os
 import re
 import struct
@@ -41,7 +43,10 @@ TEX_MAX = 512
 SKILLS = {
     "모르가나 Q": ("morgana", {"cast": ["Morgana_Q_Cas"], "mis": ["Morgana_Q_Mis"], "hit": ["Morgana_Q_Tar"]}),
     "럭스 Q": ("lux", {"cast": ["Lux_Q_cas"], "mis": ["Lux_Q_mis"], "hit": ["Lux_Q_tar"]}),
-    "자이라 E": ("zyra", {"cast": ["Zyra_E_Cas"], "mis": ["Zyra_E_cas_02"], "hit": ["Zyra_E_tar"]}),
+    # 자이라 E 투사체(Zyra_Z_Dummy_Controller) 는 비어 있고, 스킬 스크립트가 51 마다(luaOnMissileUpdateDistanceInterval)
+    # 땅에 덩굴(Zyra_Z_Sequence_Impact) 을 하나씩 뿌린다(trail). 맞으면 덩굴이 감고(Root), 풀리면 풀어진다(free)
+    "자이라 E": ("zyra", {"cast": ["Zyra_E_Cas"], "trail": ["Zyra_Z_Sequence_Impact"], "hit": ["Zyra_E_Sequence_Root", "Zyra_E_tar"],
+                        "free": ["Zyra_E_Sequence_Unroot"]}),
     "니달리 Q": ("nidalee", {"cast": ["Nidalee_Q_Cas"], "mis": ["Nidalee_Q_Mis"], "hit": ["Nidalee_Q_Tar"]}),
     "브랜드 Q": ("brand", {"mis": ["Brand_Q_Blaze_mis"], "hit": ["Brand_Q_Blaze_tar"]}),
     "아리 E": ("ahri", {"cast": ["Ahri_E_cas"], "mis": ["Ahri_E_mis"], "hit": ["Ahri_E_tar"]}),
@@ -216,9 +221,12 @@ class Pack:
     def __init__(self):
         self.systems, self.textures, self.meshes = {}, {}, {}
         try:
-            self.done = json.load(open(os.path.join(OUT, "t", "index.json"), encoding="utf-8"))
+            done = json.load(open(os.path.join(OUT, "t", "index.json"), encoding="utf-8"))
         except (OSError, ValueError):
-            self.done = {}
+            done = {}
+        # 이미 적은 텍스처는 그 번호를 그대로 쓰고, 새 텍스처는 뒤에 붙인다(스킬을 더해도 다른 그림 번호가 밀리지 않게)
+        self.keep = {src.lower(): int(i) for i, src in done.items() if os.path.exists(os.path.join(OUT, "t", "%s.webp" % i))}
+        self.next = max(self.keep.values(), default=-1) + 1
 
     def tex(self, path):
         """롤 텍스처 경로 → 번호(받아서 webp 로 적는다). 못 받으면 None"""
@@ -227,11 +235,10 @@ class Pack:
         key = path.lower()
         if key in self.textures:
             return self.textures[key]["i"]
-        i = len([t for t in self.textures.values() if t["i"] is not None])
-        # 같은 순서로 다시 돌리면 번호도 같다. 이미 적은 그림이 그 텍스처면 다시 받지 않는다(t/index.json)
-        made = os.path.join(OUT, "t", "%d.webp" % i)
-        if self.done.get(str(i)) == path and os.path.exists(made):
-            with Image.open(made) as im:
+        # 이미 적은 그림이면 다시 받지 않는다(t/index.json)
+        if key in self.keep:
+            i = self.keep[key]
+            with Image.open(os.path.join(OUT, "t", "%d.webp" % i)) as im:
                 self.textures[key] = {"i": i, "w": im.width, "h": im.height, "src": path}
             return i
         url = CDRAGON + key.replace(".tex", ".png").replace(".dds", ".png")
@@ -251,6 +258,8 @@ class Pack:
             print("  텍스처 못 받음:", path, e, file=sys.stderr)
             self.textures[key] = {"i": None}
             return None
+        i = self.next
+        self.next += 1
         k = TEX_MAX / max(img.size)
         if k < 1:
             img = img.resize((max(1, round(img.width * k)), max(1, round(img.height * k))), Image.LANCZOS)
@@ -272,6 +281,42 @@ class Pack:
             self.meshes[key] = {"i": None}
             return None
         self.meshes[key] = {"i": i, **read_scb(data)}
+        return i
+
+    def skin(self, w, md, life):
+        """뼈대 메시(.skn) 를 애니메이션대로 life 초까지 구워 skin/<이름>.bin 에 적고 번호를 돌려준다.
+        파일: 'LVFX' 1, 정점 수·인덱스 수·프레임 수(u32), fps·양자화 간격(f32), 인덱스(u16), UV(f32), 프레임마다 위치(i16 × 간격)"""
+        mesh, anm = md.get("mMeshName"), md.get("mAnimationName")
+        key = (mesh + "|" + (anm or "")).lower()
+        if key in self.meshes:
+            return self.meshes[key]["i"]
+        try:
+            skn = cm.read_skn(w.read(mesh.lower()))
+            skl = cm.read_skl(w.read(md["mMeshSkeletonName"].lower()))
+            a, dur = cm.read_anm(w.read(anm.lower())) if anm else ({}, 0)
+        except (KeyError, ValueError) as e:
+            print("  뼈대 메시 못 읽음:", mesh, e, file=sys.stderr)
+            self.meshes[key] = {"i": None}
+            return None
+        frames = cm.bake(skl, a, max(1 / cm.FPS, min(dur or life, life) + 1 / cm.FPS))     # [프레임, 영향 뼈, 3, 4]
+        ph = np.concatenate([skn["pos"], np.ones((len(skn["pos"]), 1), np.float32)], 1)
+        wts = skn["weights"] / np.maximum(skn["weights"].sum(1, keepdims=True), 1e-6)
+        bones = skn["bones"].astype(np.int64)
+        pos = np.stack([np.einsum("vk,vkij,vj->vi", wts, f[bones], ph) for f in frames])
+        q = max(0.01, float(np.abs(pos).max()) / 32000)
+        name = os.path.splitext(os.path.basename(anm or mesh))[0].lower()
+        idx = skn["idx"].astype("<u2")
+        buf = io.BytesIO()
+        buf.write(b"LVFX" + struct.pack("<IIIIff", 1, len(skn["pos"]), len(idx), len(frames), cm.FPS, q))
+        buf.write(idx.tobytes())
+        if buf.tell() % 4:
+            buf.write(b"\0" * (4 - buf.tell() % 4))
+        buf.write(skn["uv"].astype("<f4").tobytes())
+        buf.write(np.round(pos / q).astype("<i2").tobytes())
+        os.makedirs(os.path.join(OUT, "skin"), exist_ok=True)
+        open(os.path.join(OUT, "skin", name + ".bin"), "wb").write(buf.getvalue())
+        i = len(self.meshes)
+        self.meshes[key] = {"i": i, "skin": name}
         return i
 
     def add_system(self, d, w, name, depth=0):
@@ -313,8 +358,14 @@ class Pack:
             pr = e.get("primitive")
             if isinstance(pr, dict):
                 p = simplify(pr)
-                m = (pr.get("mMesh") or {}).get("mSimpleMeshName")
-                if m:
+                md = pr.get("mMesh") or {}
+                m = md.get("mSimpleMeshName")
+                if not m and str(md.get("mMeshName", "")).lower().endswith(".skn"):
+                    life = (val(e.get("particleLifetime")) or {}).get("c") or 1.0
+                    p["mesh"] = self.skin(w, md, life)
+                    if p["mesh"] is None:
+                        continue
+                elif m:
                     if not m.lower().endswith(".scb"):
                         continue                    # 엔진도 .scb 말고는 안 읽는다(.sco 는 아무것도 안 그림)
                     p["mesh"] = self.mesh(w, m)
@@ -460,7 +511,7 @@ def main():
             print("  못 읽음:", champ, e, file=sys.stderr)
             continue
         sub = Pack()
-        sub.textures, sub.done = pack.textures, pack.done          # 텍스처는 함께(번호가 이어진다)
+        sub.textures, sub.keep, sub.next = pack.textures, pack.keep, pack.next          # 텍스처는 함께(번호가 이어진다)
         rmap = resource_map(d)
         plan = {slot: mine_parts(d, champ, slot, kind) for slot, kind in slots}
         # 쓰일 시스템의 텍스처를 한꺼번에 받아 둔다
@@ -487,19 +538,21 @@ def main():
             if got:
                 parts[str(slot)] = got
         subsys = {k: v for k, v in sub.systems.items() if v}
+        pack.next = sub.next          # 이 챔피언이 새로 받은 텍스처 다음 번호부터
         subm = sorted((m for m in sub.meshes.values() if m["i"] is not None), key=lambda m: m["i"])
         with open(os.path.join(OUT, "mine", champ + ".json"), "w", encoding="utf-8") as f:
-            json.dump({"slots": parts, "systems": subsys, "meshes": [{"pos": m["pos"], "uv": m["uv"]} for m in subm]},
+            json.dump({"slots": parts, "systems": subsys, "meshes": [{k: v for k, v in m.items() if k != "i"} for m in subm]},
                       f, ensure_ascii=False, separators=(",", ":"))
         print("내 챔피언", champ, {k: list(v) for k, v in parts.items()}, flush=True)
     textures = sorted((t for t in pack.textures.values() if t["i"] is not None), key=lambda t: t["i"])
     fx = {"skills": skills, "systems": systems,
           "textures": [[t["w"], t["h"]] for t in textures],
-          "meshes": [{"pos": m["pos"], "uv": m["uv"]} for m in meshes]}
+          "meshes": [{k: v for k, v in m.items() if k != "i"} for m in meshes]}
     os.makedirs(OUT, exist_ok=True)
-    # 번호가 바뀌어 남은 옛 그림은 지운다
+    # 이제 안 쓰는 옛 그림은 지운다(번호는 비워 둔다. 화면은 번호로 t/<번호>.webp 만 받는다)
+    used = {t["i"] for t in textures}
     for f in os.listdir(os.path.join(OUT, "t")):
-        if f.endswith(".webp") and int(f[:-5]) >= len(textures):
+        if f.endswith(".webp") and int(f[:-5]) not in used:
             os.remove(os.path.join(OUT, "t", f))
     with open(os.path.join(OUT, "t", "index.json"), "w", encoding="utf-8") as f:
         json.dump({str(t["i"]): t["src"] for t in textures}, f, ensure_ascii=False, indent=0)
