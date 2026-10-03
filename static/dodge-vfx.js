@@ -235,7 +235,8 @@
             for (let k = 0; k < n; k++) spawn(inst, em, frac);
           }
         } else {
-          em.acc += Math.max(0, ev(e.rate, frac, 0)) * dt;
+          const rate = Math.max(0, ev(e.rate, frac, 0));
+          em.acc += rate * (rate > DENSE_RATE ? density : 1) * dt;
           let guard = 0;
           while (em.acc >= 1 && guard++ < 200) { em.acc -= 1; spawn(inst, em, frac); }
         }
@@ -291,6 +292,11 @@
     }
     if (!alive) inst.done = true;
   }
+
+  // 파티클 밀도(1 = 롤 그대로). 화면이 느릴 때 dodge.js 가 낮춘다. 1초에 DENSE_RATE 개 넘게 뿜는 발생기(불티·연기 줄기) 만
+  // 덜 뿜고, 한 번만 나오는 것·드문 것(메시·본체) 은 그대로 둔다
+  let density = 1;
+  const DENSE_RATE = 10;
 
   // 파티클 하나를 낳는다
   function spawn(inst, em, frac) {
@@ -650,5 +656,5 @@
   }
 
   window.DodgeVfx = { load, loadMine, play, move, stop, kill, update, batches, skillFx, skillTextures, loadSkins, VF, onReady: f => (FX ? f() : ready.push(f)),
-                      clear() { live.length = 0; }, count: () => live.length, data: () => FX, base: () => BASE };
+                      clear() { live.length = 0; }, density(k) { density = k; }, count: () => live.length, data: () => FX, base: () => BASE };
 })();
