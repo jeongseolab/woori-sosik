@@ -185,6 +185,7 @@
   function step(inst, dt) {
     inst.age += dt;
     if (inst.ttl && inst.age > inst.ttl) stop(inst);        // 주인이 잊은 이펙트는 저절로 끈다
+    if (inst.until != null && inst.age > inst.until) { kill(inst); return; }   // 남은 파티클까지 이 나이에 지운다(CC 가 풀린 적중 이펙트)
     const moved = [inst.pos[0] - inst.prev[0], inst.pos[1] - inst.prev[1], inst.pos[2] - inst.prev[2]];
     inst.odom += len(moved);
     inst.prev = inst.pos.slice();

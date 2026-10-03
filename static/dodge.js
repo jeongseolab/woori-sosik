@@ -1414,6 +1414,20 @@
       if (type !== "slow" && at === 0) target = null;     // 롤처럼 이동 명령이 끊긴다
       return e;
     }
+    // CC 를 keep 으로 거른다. 빠진 CC 에 묶인 롤 적중 이펙트(럭스 Q 감옥, 모르가나 Q 사슬 등. applyCC 가 묶는다) 는
+    // 같은 이펙트를 쥔 CC 가 더 없으면 남은 파티클까지 지운다(그냥 끄면 럭스 Q 감옥은 파티클이 10초까지 남는다).
+    // 롤도 CC 가 풀리면 그 이펙트가 사라진다.
+    // cut: 정화처럼 도중에 풀렸으면 곧바로, 제때 끝났으면 맞은 순간의 이펙트가 HIT_FX_MIN 초는 보이게 둔다
+    const HIT_FX_MIN = 0.6;
+    function dropCC(keep, cut) {
+      const gone = effects.filter(e => !keep(e));
+      if (!gone.length) return;
+      effects = effects.filter(keep);
+      for (const e of gone) {
+        if (!e.vfx || effects.some(o => o.vfx === e.vfx)) continue;
+        for (const i of e.vfx) if (cut) DodgeVfx.kill(i); else i.until = Math.max(i.age, HIT_FX_MIN);
+      }
+    }
     // 사슬(블리츠·쓰레쉬): 시전자에서 나까지. on 이 풀리면(정화) 같이 끊긴다
     function tie(c, s, dur, on) {
       if (!c) return;
@@ -1428,6 +1442,7 @@
       const flown = how.m ? how.m.flown : 0;
       const center = how.d != null && s.inner && how.d < s.inner + CHAMP.radius;   // 중심부에 몸이 걸쳤다
       let got = true;
+      const n0 = effects.length;
       switch (s.name.replace(" (갈라짐)", "")) {
         case "모르가나 Q": addCC("root", byRank([2, 2.25, 2.5, 2.75, 3]), s); break;
         case "럭스 Q": addCC("root", 2, s); break;
@@ -1482,6 +1497,9 @@
         default: got = false;
       }
       marked = t + 4;          // 진의 표식은 맞을 때마다 4초(진 W 자신을 판정한 뒤에)
+      // 방금 켠 롤 적중 이펙트를 이번에 건 CC 에 묶는다(이동 불가 CC 가 있으면 그것에만. 초가스 Q 의 뒤따르는 둔화는 빼고)
+      const added = effects.slice(n0), hard = added.filter(e => e.type !== "slow");
+      if (hitVfx) for (const e of hard.length ? hard : added) e.vfx = hitVfx;
       if (got) { sfx("cc"); ccFx(s); }
     }
 
@@ -1517,7 +1535,7 @@
         sfx("ghost");
       } else if (id === "cleanse") {
         // 공중에 뜸 말고 지금 걸린 CC 를 모두 푼다(쓰레쉬 사슬도 끊긴다). 그 뒤 3초 동안 강인함 75%
-        effects = effects.filter(e => e.type === "air" || e.start > t);
+        dropCC(e => e.type === "air" || e.start > t, true);
         tenacity = t + sp.last;
         cleanseFx();
         sfx("cleanse");
@@ -1648,14 +1666,14 @@
       if (sk.ccImmune) {
         // 걸린 CC 도 푼다(정화처럼 공중에 뜸만 빼고)
         ccImmune = t + sk.ccImmune;
-        effects = effects.filter(e => e.type === "air" || e.start > t);
+        dropCC(e => e.type === "air" || e.start > t, true);
         if (!myArt(sk)) flashGround(player.x, player.y, 150, "#ff6b6b", 0.5);
         mySfx("cleanse");
       }
       if (sk.undying) { undying = t + sk.undying; if (!myArt(sk)) flashGround(player.x, player.y, 140, "#fa5252", 0.5); mySfx("cleanse"); }
       if (sk.lambs) { lambs = { x: player.x, y: player.y, radius: sk.lambs.radius, until: t + sk.lambs.dur }; flashGround(player.x, player.y, sk.lambs.radius, "#91a7ff", 0.6); mySfx("cleanse"); }
       if (sk.haste) { startHaste(sk, sk.hasteDur || (sk.stealthDelay || 0) + sk.stealth); hasteFx(sk); }
-      if (sk.slowCleanse) effects = effects.filter(e => e.type !== "slow" || e.start > t);
+      if (sk.slowCleanse) dropCC(e => e.type !== "slow" || e.start > t, true);
       if (sk.slowImmune) slowFree = t + sk.hasteDur;
       if (sk.stealth) {
         // 트위치 Q 는 stealthDelay 초 뒤에 숨는다(그동안은 보인다)
@@ -2131,9 +2149,11 @@
     // 맞았다. 무적 중이면 없던 일로(false). 목숨을 다 잃으면 끝.
     // 하드 모드는 무적이 없고, 맞은 스킬의 CC 를 그대로 당한다(how: applyCC 참고)
     let lastHow = null;          // 맞은 투사체(맞은 이펙트의 방향)
+    let hitVfx = null;           // 방금 켠 롤 적중 이펙트(applyCC 가 CC 에 묶는다)
     function hit(s, how = {}) {
       if (dead || untarget > t || (mode !== "hard" && safe > 0)) return false;
       lastHow = how;
+      hitVfx = null;
       // 응수·주문 보호막: 피해도 CC(공중에 뜸 포함) 도 받지 않는다. 맞힌 투사체처럼 사라진다
       if (parry > t || (shieldUp && t < shieldUp.until)) { blocked(); return true; }
       // 저지 불가 돌진(말파이트 R, 암베사 R 은 겨눌 때부터) 이나 CC 면역(올라프 R) 이면 CC 를 받지 않는다
@@ -2593,7 +2613,7 @@
       }
       casters = casters.filter(c => c.wind > 0 || c.fade > 0);
       // 끝난 CC·사슬은 버린다(정화로 풀린 기절에 걸린 사슬도)
-      effects = effects.filter(e => e.end > t);
+      dropCC(e => e.end > t, false);
       tethers = tethers.filter(x => x.until > t && (!x.on || effects.includes(x.on)) && (x.skill.champ !== "Blitzcrank" || cc("air")));
       if (dead) return;
 
@@ -2822,7 +2842,7 @@
       const lf = lolFx(s);
       if (lf && lf.hit && lf.hit.length) {
         const from = lastHow && lastHow.m ? { x: lastHow.m.dx, y: lastHow.m.dy } : null;
-        fxPlay(lf.hit, { x: player.x, y: player.y, h: 0, gain: fxGain(s), dir: from || undefined });
+        hitVfx = fxPlay(lf.hit, { x: player.x, y: player.y, h: 0, gain: fxGain(s), dir: from || undefined });
         ca = 1;
         return;
       }
