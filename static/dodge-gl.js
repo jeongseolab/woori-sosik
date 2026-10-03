@@ -788,11 +788,13 @@
     function vfxTex(i) {
       if (i == null || !window.DodgeVfx) return null;
       if (vtex.has(i)) return vtex.get(i);
-      const rec = { t: null, wrap: false, opaque: false };
+      const rec = { t: null, wrap: false, opaque: false, failed: false };
       vtex.set(i, rec);
       const img = new Image();
+      img.onerror = () => { rec.failed = true; };
       img.onload = () => {
-        if (lost) return;
+        // 못 올리면 실패로 둔다(drawVfx 가 이 텍스처를 기다리느라 묶음을 영영 안 그리지 않게)
+        if (lost) { rec.failed = true; return; }
         const pot = v => (v & (v - 1)) === 0;
         rec.wrap = pot(img.width) && pot(img.height);
         // 알파가 꽉 찬 텍스처인지(침식 지도는 그때 빨강 채널을 쓴다)
@@ -803,12 +805,14 @@
           rec.opaque = true;
           for (let k = 3; k < d.length; k += 4) if (d[k] < 250) { rec.opaque = false; break; }
         } catch {}
-        rec.t = texture(img, rec.wrap);
-        if (rec.wrap) {
-          gl.bindTexture(gl.TEXTURE_2D, rec.t);
-          gl.generateMipmap(gl.TEXTURE_2D);
-          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
-        }
+        try {
+          rec.t = texture(img, rec.wrap);
+          if (rec.wrap) {
+            gl.bindTexture(gl.TEXTURE_2D, rec.t);
+            gl.generateMipmap(gl.TEXTURE_2D);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+          }
+        } catch { rec.t = null; rec.failed = true; }
       };
       img.src = DodgeVfx.base() + "t/" + i + ".webp";
       return rec;
@@ -834,6 +838,12 @@
         if (!!b.ground !== !!ground) continue;
         const e = b.e, base = vfxTex(e.texture);
         if (!base || !base.t) continue;
+        const ct = vfxTex(e.particleColorTexture), mt = e.textureMult && vfxTex(e.textureMult.textureMult);
+        const er = e.alphaErosionDefinition && vfxTex(e.alphaErosionDefinition.erosionMapName);
+        const pd = e.paletteDefinition, pt = pd && vfxTex(pd.paletteTexture);
+        // 곱하기·침식·색·팔레트 텍스처를 다 받을 때까지 그리지 않는다. 기본 텍스처만으로 그리면
+        // 모양을 깎는 마스크가 빠져 메시가 통째로 더해지고, 처음 날아오는 스킬이 하얗게 탄다(모르가나 Q 등)
+        if ([ct, mt, er, pt].some(r => r && !r.t && !r.failed)) continue;
         if (b.verts.byteLength > vcap) { vcap = b.verts.byteLength * 2; gl.bufferData(gl.ARRAY_BUFFER, vcap, gl.DYNAMIC_DRAW); }
         gl.bufferSubData(gl.ARRAY_BUFFER, 0, b.verts);
         let off = 0;
@@ -845,9 +855,6 @@
         const div = e.texDiv || [1, 1];
         gl.uniform2f(u.uDiv, Math.max(1, div[0]), Math.max(1, div[1]));
         gl.uniform1f(u.uWrap, base.wrap && !(div[0] > 1 || div[1] > 1) ? 1 : 0);
-        const ct = vfxTex(e.particleColorTexture), mt = e.textureMult && vfxTex(e.textureMult.textureMult);
-        const er = e.alphaErosionDefinition && vfxTex(e.alphaErosionDefinition.erosionMapName);
-        const pd = e.paletteDefinition, pt = pd && vfxTex(pd.paletteTexture);
         const on = [ct && ct.t ? 1 : 0, mt && mt.t ? 1 : 0, er && er.t ? 1 : 0, pt && pt.t ? 1 : 0];
         gl.uniform4f(u.uOn, on[0], on[1], on[2], on[3]);
         bindTex(1, on[0] ? ct.t : white, u.uColTex);

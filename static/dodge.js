@@ -407,39 +407,40 @@
   //   blade 칼날 · hook 사슬 달린 갈고리 · zap 가늘고 긴 전격 · arrow 거대한 화살
   // inner: 장판 중심부 반지름(file castRadius). 그림으로만 구분한다(맞는 건 바깥 원 기준 그대로)
   // from: 몇 초부터 나오는지. rare: 가끔만
+  // fxGain: 롤 이펙트 밝기 배율(없으면 ENEMY_GAIN 1.8). 1.8배면 하얗게 타서 모양이 안 보이는 스킬만 낮춘다
   const SKILLS = [
     // ── 투사체 (전부 file) ──
-    { kind: "line", name: "모르가나 Q", champ: "Morgana", cast: 0.25, speed: 1200, radius: 70, range: 1300, color: "#b197fc", from: 0 },
+    { kind: "line", name: "모르가나 Q", champ: "Morgana", cast: 0.25, speed: 1200, radius: 70, range: 1300, color: "#b197fc", fxGain: 1.1, from: 0 },
     { kind: "line", name: "럭스 Q", champ: "Lux", cast: 0.25, speed: 1200, radius: 70, range: 1300, color: "#ffe066", from: 0 },
     { kind: "line", name: "자이라 E", champ: "Zyra", cast: 0.25, speed: 1150, radius: 70, range: 1150, color: "#69db7c", from: 0, look: "vines" },
     { kind: "line", name: "니달리 Q", champ: "Nidalee", cast: 0.25, speed: 1300, radius: 40, range: 1500, color: "#8ce99a", from: 8, look: "spear" },
-    { kind: "line", name: "브랜드 Q", champ: "Brand", cast: 0.25, speed: 1600, radius: 60, range: 1100, color: "#ff8787", from: 8, look: "fire" },
+    { kind: "line", name: "브랜드 Q", champ: "Brand", cast: 0.25, speed: 1600, radius: 60, range: 1100, color: "#ff8787", fxGain: 1.2, from: 8, look: "fire" },
     { kind: "line", name: "아리 E", champ: "Ahri", cast: 0.25, speed: 1550, radius: 60, range: 1000, color: "#faa2c1", from: 15, look: "heart" },
     // 벨코즈 Q 는 내 옆을 지날 때(벨코즈가 다시 눌러서) 또는 사거리 끝에서 양옆 직각으로 갈라진다.
     // 갈라지기 telegraph 초 전부터 구슬이 부풀며 번쩍인다(SplitTelegraphTime). 롤처럼 갈라질 경로는 안 보여 준다.
     // 갈라진 것은 VelkozQMissileSplit
-    { kind: "line", name: "벨코즈 Q", champ: "Velkoz", cast: 0.251, speed: 1300, radius: 50, range: 1100, color: "#d0bfff", from: 15,
+    { kind: "line", name: "벨코즈 Q", champ: "Velkoz", cast: 0.251, speed: 1300, radius: 50, range: 1100, color: "#d0bfff", fxGain: 1.1, from: 15,
       split: { speed: 2100, radius: 45, range: 1100, telegraph: 0.25 } },
     { kind: "line", name: "제라스 E", champ: "Xerath", cast: 0.25, speed: 1400, radius: 60, range: 1125, color: "#91a7ff", from: 15 },
-    { kind: "line", name: "이즈리얼 Q", champ: "Ezreal", cast: 0.25, speed: 2000, radius: 60, range: 1200, color: "#74c0fc", from: 25, look: "bolt" },
+    { kind: "line", name: "이즈리얼 Q", champ: "Ezreal", cast: 0.25, speed: 2000, radius: 60, range: 1200, color: "#74c0fc", fxGain: 0.7, from: 25, look: "bolt" },
     { kind: "line", name: "레오나 E", champ: "Leona", cast: 0.25, speed: 2000, radius: 70, range: 900, color: "#ffd43b", from: 25, look: "blade" },
     { kind: "line", name: "베이가 Q", champ: "Veigar", cast: 0.25, speed: 2200, radius: 70, range: 1050, color: "#9775fa", from: 25 },
     { kind: "line", name: "블리츠크랭크 Q", champ: "Blitzcrank", cast: 0.25, speed: 1800, radius: 70, range: 1080, color: "#ffc078", from: 35, look: "hook" },
     { kind: "line", name: "쓰레쉬 Q", champ: "Thresh", cast: 0.5, speed: 1900, radius: 70, range: 1100, color: "#63e6be", from: 35, look: "hook" },
-    { kind: "line", name: "징크스 W", champ: "Jinx", cast: 0.6, speed: 3300, radius: 60, range: 1500, color: "#f783ac", from: 50, look: "zap" },
+    { kind: "line", name: "징크스 W", champ: "Jinx", cast: 0.6, speed: 3300, radius: 60, range: 1500, color: "#f783ac", fxGain: 1.5, from: 50, look: "zap" },
     // 애쉬 R 은 1500 에서 시작해 초당 200 씩 빨라져 2100 까지(AcceleratingMovement)
     { kind: "line", name: "애쉬 R", champ: "Ashe", cast: 0.25, speed: 1500, accel: 200, maxSpeed: 2100, radius: 130, range: FAR, color: "#a5d8ff", from: 50, rare: true, look: "arrow" },
 
     // ── 지연 장판: 시전 → 바닥에 표시 → delay 초 뒤 터짐 ──
-    { kind: "circle", name: "카서스 Q", champ: "Karthus", cast: 0.25, delay: 0.528, radius: 160, range: 875, color: "#b2f2bb", from: 0, src: "delay: wiki" },
-    { kind: "circle", name: "브랜드 W", champ: "Brand", cast: 0.25, delay: 0.627, radius: 240, range: 900, color: "#ff922b", from: 0, src: "delay: wiki" },
-    { kind: "circle", name: "초가스 Q", champ: "Chogath", cast: 0.5, delay: 0.627, radius: 230, range: 950, color: "#a9e34b", from: 8, src: "cast, delay: wiki" },
-    { kind: "circle", name: "베이가 W", champ: "Veigar", cast: 0.25, delay: 1.2, radius: 225, range: 950, color: "#7950f2", from: 8 },
-    { kind: "circle", name: "신드라 Q", champ: "Syndra", cast: 0, delay: 0.6, radius: 180, range: 800, color: "#e599f7", from: 15, src: "cast(없음), delay: wiki" },
-    { kind: "circle", name: "제라스 W", champ: "Xerath", cast: 0.25, delay: 0.5, radius: 250, inner: 100, range: 1000, color: "#748ffc", from: 15 },
+    { kind: "circle", name: "카서스 Q", champ: "Karthus", cast: 0.25, delay: 0.528, radius: 160, range: 875, color: "#b2f2bb", fxGain: 0.35, from: 0, src: "delay: wiki" },
+    { kind: "circle", name: "브랜드 W", champ: "Brand", cast: 0.25, delay: 0.627, radius: 240, range: 900, color: "#ff922b", fxGain: 1.1, from: 0, src: "delay: wiki" },
+    { kind: "circle", name: "초가스 Q", champ: "Chogath", cast: 0.5, delay: 0.627, radius: 230, range: 950, color: "#a9e34b", fxGain: 1.0, from: 8, src: "cast, delay: wiki" },
+    { kind: "circle", name: "베이가 W", champ: "Veigar", cast: 0.25, delay: 1.2, radius: 225, range: 950, color: "#7950f2", fxGain: 1.0, from: 8 },
+    { kind: "circle", name: "신드라 Q", champ: "Syndra", cast: 0, delay: 0.6, radius: 180, range: 800, color: "#e599f7", fxGain: 1.0, from: 15, src: "cast(없음), delay: wiki" },
+    { kind: "circle", name: "제라스 W", champ: "Xerath", cast: 0.25, delay: 0.5, radius: 250, inner: 100, range: 1000, color: "#748ffc", fxGain: 0.7, from: 15 },
     // 벨코즈 E 는 멀리 던질수록 늦게 떨어진다: 0.25초(가까이) ~ 0.55초(사거리 끝)
     { kind: "circle", name: "벨코즈 E", champ: "Velkoz", cast: 0.25, delay: 0.25, delayFar: 0.55, radius: 225, range: 800, color: "#cc5de8", from: 25 },
-    { kind: "circle", name: "레오나 R", champ: "Leona", cast: 0.25, delay: 0.625, radius: 300, inner: 120, range: 1200, color: "#fab005", from: 25, src: "delay: wiki" },
+    { kind: "circle", name: "레오나 R", champ: "Leona", cast: 0.25, delay: 0.625, radius: 300, inner: 120, range: 1200, color: "#fab005", fxGain: 0.6, from: 25, src: "delay: wiki" },
 
     // ── 지연 레이저: 시전하는 동안 가는 선이 보이고, 끝나는 순간 선 전체를 친다 ──
     { kind: "beam", name: "진 W", champ: "Jhin", cast: 0.75, radius: 40, range: FAR, color: "#ff6b6b", from: 35 },
@@ -1360,7 +1361,7 @@
       // 시전하는 동안 켜지는 것(진 W 모으기, 징크스 W 경고선)
       if (lf && (skill.kind === "beam" || skill.kind === "line") && lf.warn) {
         const end = { x: c.x + c.dx * Math.min(skill.range, 2500), y: c.y + c.dy * Math.min(skill.range, 2500), h: FX_H };
-        c.vfx = fxPlay(lf.warn, { x: c.x, y: c.y, h: FX_H, gain: ENEMY_GAIN, dir: { x: c.dx, y: c.dy }, target: end }, skill.cast + 1);
+        c.vfx = fxPlay(lf.warn, { x: c.x, y: c.y, h: FX_H, gain: fxGain(skill), dir: { x: c.dx, y: c.dy }, target: end }, skill.cast + 1);
       }
       model(skill.champ);       // 3D 모델이 있으면 받기 시작(다 받기 전엔 초상화)
       skillSound(skill, "cast");
@@ -2143,10 +2144,10 @@
       const sp = m.skill.split;
       const piece = { ...m.skill, name: m.skill.name + " (갈라짐)", speed: sp.speed, radius: sp.radius, range: sp.range, split: null };
       const lf = m.fx && lolFx(m.skill);
-      if (lf) fxPlay(lf.splitfx, { x: m.x, y: m.y, h: FX_H, gain: ENEMY_GAIN, dir: { x: m.dx, y: m.dy } });
+      if (lf) fxPlay(lf.splitfx, { x: m.x, y: m.y, h: FX_H, gain: fxGain(m.skill), dir: { x: m.dx, y: m.dy } });
       for (const side of [1, -1]) {
         const q = { skill: piece, x: m.x, y: m.y, ox: m.x, oy: m.y, dx: -m.dy * side, dy: m.dx * side, speed: sp.speed, left: sp.range, flown: 0, caster: m.caster };
-        if (lf) { q.vfx = fxPlay(lf.split, { x: q.x, y: q.y, h: FX_H, gain: ENEMY_GAIN, missile: true, dir: { x: q.dx, y: q.dy } }, 10); q.fx = !!q.vfx; }
+        if (lf) { q.vfx = fxPlay(lf.split, { x: q.x, y: q.y, h: FX_H, gain: fxGain(m.skill), missile: true, dir: { x: q.dx, y: q.dy } }, 10); q.fx = !!q.vfx; }
         missiles.push(q);
       }
       burst(m.x, m.y, MISSILE_Z, m.skill.color, 14, 300);
@@ -2189,6 +2190,8 @@
     const FX_H = 100;              // 롤 투사체가 나는 높이(mOffsetInitialTargetHeight)
     // 적 스킬 이펙트는 밝기를 올린다(롤보다 멀리서 내려다봐 작고 어둡게 보인다). 크기는 판정 그대로 둔다
     const ENEMY_GAIN = 1.8;
+    // 1.8배면 하얗게 타서 모양이 안 보이는 스킬은 SKILLS 의 fxGain 으로 따로 낮춘다(구체·꼬리·불꽃 결이 보이게)
+    const fxGain = s => s.fxGain || ENEMY_GAIN;
 
     // 내 챔피언 스킬 이펙트(dodge/vfx/mine/<챔피언>.json): 칸마다 cast(쓸 때) · anim([이펙트, 초], 애니메이션에 박힌 것) ·
     // dash(돌진하는 동안) · land(내려앉을 때) · buf(이속·보호막·투명 동안). 모두 내 몸에 붙어 따라다닌다
@@ -2240,13 +2243,13 @@
       const s = c.skill, lf = lolFx(s), dir = { x: c.dx, y: c.dy };
       skillSound(s, "release");
       fxStop(c.vfx);
-      if (lf) fxPlay(lf.cast, { x: c.x, y: c.y, h: 0, gain: ENEMY_GAIN, dir });
+      if (lf) fxPlay(lf.cast, { x: c.x, y: c.y, h: 0, gain: fxGain(s), dir });
       else castFx(c);
       if (s.kind === "line") {
         const m = { skill: s, x: c.x, y: c.y, ox: c.x, oy: c.y, dx: c.dx, dy: c.dy, speed: s.speed, left: s.range, flown: 0, caster: c };
         if (lf) {
           // 투사체 이펙트의 빔 끝은 시전자(쓰레쉬 Q 사슬이 갈고리에서 쓰레쉬까지)
-          m.vfx = fxPlay(lf.mis, { x: m.x, y: m.y, h: FX_H, gain: ENEMY_GAIN, missile: true, dir, target: { x: c.x, y: c.y, h: FX_H } }, 30);
+          m.vfx = fxPlay(lf.mis, { x: m.x, y: m.y, h: FX_H, gain: fxGain(s), missile: true, dir, target: { x: c.x, y: c.y, h: FX_H } }, 30);
           m.fx = !!m.vfx;
         }
         missiles.push(m);
@@ -2256,14 +2259,14 @@
         const delay = s.delayFar ? s.delay + (s.delayFar - s.delay) * Math.min(1, dist(c, at) / s.range) : s.delay;
         const z = { skill: s, x: at.x, y: at.y, wait: delay, total: delay };
         if (lf) {
-          z.vfx = fxPlay(lf.warn, { x: z.x, y: z.y, h: 0, gain: ENEMY_GAIN, dir }, delay + 0.5);
-          fxPlay(lf.land, { x: z.x, y: z.y, h: 0, gain: ENEMY_GAIN, dir });
+          z.vfx = fxPlay(lf.warn, { x: z.x, y: z.y, h: 0, gain: fxGain(s), dir }, delay + 0.5);
+          fxPlay(lf.land, { x: z.x, y: z.y, h: 0, gain: fxGain(s), dir });
           z.fx = true;
         }
         zones.push(z);
       } else if (s.kind === "cage") {
         const z = { skill: s, x: c.aim.x, y: c.aim.y, wait: s.delay, total: s.delay, up: 0 };
-        if (lf) { z.vfx = fxPlay(lf.warn, { x: z.x, y: z.y, h: 0, gain: ENEMY_GAIN, dir }, s.delay + 0.5); z.fx = true; }
+        if (lf) { z.vfx = fxPlay(lf.warn, { x: z.x, y: z.y, h: 0, gain: fxGain(s), dir }, s.delay + 0.5); z.fx = true; }
         zones.push(z);
       } else if (s.kind === "beam") {
         const a = { x: c.x, y: c.y }, b = { x: c.x + c.dx * s.range, y: c.y + c.dy * s.range };
@@ -2271,7 +2274,7 @@
         const f = { skill: s, a, b, left: 0.35, max: 0.35 };
         if (lf) {
           const far = Math.min(s.range, 2500);
-          f.fx = !!fxPlay(lf.beam, { x: a.x, y: a.y, h: FX_H, gain: ENEMY_GAIN, dir, target: { x: a.x + c.dx * far, y: a.y + c.dy * far, h: FX_H } }, 1.5);
+          f.fx = !!fxPlay(lf.beam, { x: a.x, y: a.y, h: FX_H, gain: fxGain(s), dir, target: { x: a.x + c.dx * far, y: a.y + c.dy * far, h: FX_H } }, 1.5);
         }
         flashes.push(f);
         if (!f.fx) beamFx(s, a, b);
@@ -2629,7 +2632,7 @@
             z.done = 0.3;          // 터진 자리를 잠깐 보여 준다
             if (z.fx) {
               fxStop(z.vfx);
-              fxPlay(lolFx(s) && lolFx(s).boom, { x: z.x, y: z.y, h: 0, gain: ENEMY_GAIN });
+              fxPlay(lolFx(s) && lolFx(s).boom, { x: z.x, y: z.y, h: 0, gain: fxGain(s) });
               flashGround(z.x, z.y, s.radius, s.color, 0.3);       // 터지는 순간이 잘 보이게 스킬 색으로 번쩍
             }
             else boom(z.x, z.y, s.radius, s.color, s);
@@ -2643,7 +2646,7 @@
           // 테두리에 몸이 닿으면 맞는다. 안에 갇혔으면 테두리에 닿지 않게 버텨야 한다
           if (!z.formed) {
             z.formed = true;
-            if (z.fx) { fxStop(z.vfx); z.cage = fxPlay(lolFx(s) && lolFx(s).cage, { x: z.x, y: z.y, h: 0, gain: ENEMY_GAIN }, s.last + 1); }
+            if (z.fx) { fxStop(z.vfx); z.cage = fxPlay(lolFx(s) && lolFx(s).cage, { x: z.x, y: z.y, h: 0, gain: fxGain(s) }, s.last + 1); }
             else fx.push({ kind: "ring", x: z.x, y: z.y, r: s.radius, color: s.color, life: 0.4, max: 0.4 });
             skillSound(s, "form");
           }
@@ -2794,7 +2797,7 @@
       const lf = lolFx(s);
       if (lf && lf.hit && lf.hit.length) {
         const from = lastHow && lastHow.m ? { x: lastHow.m.dx, y: lastHow.m.dy } : null;
-        fxPlay(lf.hit, { x: player.x, y: player.y, h: 0, gain: ENEMY_GAIN, dir: from || undefined });
+        fxPlay(lf.hit, { x: player.x, y: player.y, h: 0, gain: fxGain(s), dir: from || undefined });
         ca = 1;
         return;
       }
