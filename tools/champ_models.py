@@ -76,8 +76,9 @@ MORE = {"riven": [1], "akali": [2, 4], "pyke": [2], "ekko": [4], "aurora": [4], 
 # 나피리 W 는 롤 스킬 이름이 NaafiriR 이라 동작이 Spell4Dash(서 있으면 Spell4_Idle, 움직이면 Spell4_Run) 다.
 # 스킬 동작으로 기본 규칙(Spell1·Spell1_0·Spell1_Base → spell1 로 시작하는 것) 대신 쓸 클립.
 # 쓰레쉬 Q 는 기본이 Spell1_Dash(끌려간 적에게 날아가는 두 번째 동작) 라 던지는 Spell1_In,
-# 사일러스 E 는 Spell3 이 0.1초 조각이라 돌진 Spell3_Dash, 트리스타나 W 는 Spell2_In(0.27초, 뛰기 시작만) 대신 Spell2_Mid
-SPELL_CLIPS = {("thresh", 1): ["Spell1_In"], ("sylas", 3): ["Spell3_Dash"], ("tristana", 2): ["Spell2_Mid"],
+# 사일러스 E 는 Spell3 이 0.1초 조각이라 돌진 Spell3_Dash, 트리스타나 W 는 Spell2_In(0.27초, 뛰기 시작만)·Spell2_Mid(이미 떠 있는 데서 시작) 대신
+# 뛰어올라 내려앉기까지 다 든 Spell2_LNG(1.33초: 0.8초 날고 나머지는 착지)
+SPELL_CLIPS = {("thresh", 1): ["Spell1_In"], ("sylas", 3): ["Spell3_Dash"], ("tristana", 2): ["Spell2_LNG"],
                ("riven", 1): ["Spell1A"], ("rakan", 4): ["Spell4_Into"], ("naafiri", 2): ["Spell4_Idle"]}
 # 스킬 말고 따로 굽는 동작: 이름 → 클립 이름 후보(칼리스타 Q 뒤의 패시브 돌진).
 # 암베사는 스킬마다 패시브 돌진 동작이 따로 있다(해시로만 적힌 클립: passivedash_spell1a·1b·2·3·4·4_fail.anm),
