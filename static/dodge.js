@@ -225,7 +225,7 @@
     akali: [
       { slot: 1, kind: "guard", shroud: { radius: 300, dur: 7 }, haste: 0.5, hasteEnd: 0, hasteDur: 2, cd: 16,
         src: "data(AkaliW BaseDuration·MovementSpeed·MovementSpeedDuration), 장막 둘레: 추정(CloudRadius 140 에서 퍼진다)" },
-      { slot: 2, kind: "dash", range: 400, fixed: true, back: true, speed: 1000, cd: 10, src: "range: data, speed: 추정" },
+      { slot: 2, kind: "dash", range: 400, fixed: true, back: true, speed: 1000, arc: 90, cd: 10, src: "range: data, speed·arc(뒤로 공중제비 높이): 추정" },
       { slot: 3, kind: "dash", ranges: [675, 715], fixed: true, speed: 1600, charges: 2, gap: 2.5, window: 10, chargeAnims: ["spell4", "spell4b"], cd: 60,
         desc: "무결처형: 커서 쪽으로 675 돌진. 2.5초 뒤부터 10초 안에 한 번 더 715 돌진",
         src: "data(AkaliR castRange·DashDistance·CooldownBetweenCasts), 빠르기·10초: 추정" },
