@@ -790,6 +790,19 @@ table.dodge-table { min-width: 0; }
 .spell-pop-info b { color: #f0e6d2; }
 .spell-pop-info small { color: #a09b8c; margin-left: 6px; }
 .spell-pop-info p { margin: 4px 0 0; color: #a09b8c; font-size: 13px; line-height: 1.5; }
+/* 키 설정: 스킬 Q W E R 과 주문 두 칸의 키. 칸을 누르면 다음에 누른 키·마우스 버튼이 들어간다 */
+/* 칸이 여섯 개라 이름표 아래 한 줄을 다 쓴다 */
+.key-binds { display: flex; flex-wrap: wrap; gap: 6px; flex-basis: 100%; }
+.key-bind {
+  display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 48px; padding: 4px 5px; border-radius: 2px;
+  background: #010a13; border: 1px solid #785a28; color: #a09b8c; cursor: pointer; font: 11px/1.2 "IBM Plex Sans KR", sans-serif;
+}
+.key-bind kbd { color: #f0e6d2; font: 700 13px/1.3 "IBM Plex Sans KR", sans-serif; }
+.key-bind:hover, .key-bind:focus-visible { border-color: #c8aa6e; box-shadow: 0 0 8px rgba(200, 170, 110, .55); filter: none; }
+.key-bind.wait { border-color: #0bc6e3; box-shadow: 0 0 10px rgba(11, 198, 227, .6); }
+.key-bind.wait kbd { color: #0bc6e3; }
+.key-reset { justify-content: center; color: #cdbe91; font-size: 12px; }
+.dodge-setup > div > .key-help { flex-basis: 100%; color: #a09b8c; font-size: 12px; }
 .dodge-stage .dodge-actions button, .dodge-stage .dodge-actions .btn {
   border-radius: 2px; font-family: Georgia, "Times New Roman", serif; letter-spacing: .04em;
   background: #1e2328; color: #cdbe91; border: 1px solid #c8aa6e;

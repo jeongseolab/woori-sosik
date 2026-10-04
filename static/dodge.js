@@ -359,20 +359,57 @@
     const slots = {};
     for (const m of ["normal", "hard"]) slots[m] = ok(c.slots && c.slots[m]) ? c.slots[m].slice() : DEFAULT_SLOTS[m].slice();
     // champ: 시작 창에서 고른 내 챔피언(MOBILITY 의 키). 없으면 myChamp() 의 기본값
+    // binds: 이동 방식마다 스킬·주문 여섯 칸의 키(사용자가 시작 창에서 바꾼다)
+    const binds = {};
+    for (const m of ["mouse", "wasd"]) binds[m] = okBinds(c.binds && c.binds[m], m) ? c.binds[m].slice() : DEFAULT_BINDS[m].slice();
     return { move: c.move === "wasd" ? "wasd" : "mouse", mode: c.mode === "hard" ? "hard" : "normal", slots,
-             champ: MOBILITY[c.champ] ? c.champ : null };
+             champ: MOBILITY[c.champ] ? c.champ : null, binds };
   }
   function saveControls(c) { try { localStorage.setItem(CONTROL_KEY, JSON.stringify(c)); } catch {} }
   // 이번 판의 주문 두 개(앞 키 칸, 뒤 키 칸 순서)
   function spellsOf(c) { return c.slots[c.mode]; }
-  // 이동 방식에 따른 주문 두 키
-  function keyPair(move) { return move === "wasd" ? ["V", "F"] : ["D", "F"]; }
-  // 스킬 Q W E R 칸의 입력 코드와 화면에 보일 글자. WASD 는 W 가 이동이라 Q·W 를 우클릭·왼쪽 Shift 로 옮긴다.
-  // "Mouse2" 는 우클릭을 뜻하는 이 게임만의 코드(키보드 e.code 에는 없다)
-  function skillKeys(move) { return move === "wasd" ? ["Mouse2", "ShiftLeft", "KeyE", "KeyR"] : ["KeyQ", "KeyW", "KeyE", "KeyR"]; }
-  function skillLabels(move) { return move === "wasd" ? ["Mb2", "Shift", "E", "R"] : ["Q", "W", "E", "R"]; }
+
+  // ── 키 설정 ──
+  // 여섯 칸: 스킬 Q W E R, 주문 앞 칸, 주문 뒤 칸. 값은 키보드 e.code 또는 마우스 버튼 "Mouse0"~"Mouse4"
+  // (이 게임만의 코드. e.button 번호 그대로: 0 왼쪽, 1 가운데(휠), 2 오른쪽, 3 뒤로, 4 앞으로).
+  // 기본값: 마우스 방식 Q W E R · D F, WASD 방식은 W 가 이동이라 Q·W 를 우클릭·왼쪽 Shift 로, 주문 V F
+  const BIND_SLOTS = ["Q 스킬", "W 스킬", "E 스킬", "R 스킬", "주문 1", "주문 2"];
+  const DEFAULT_BINDS = {
+    mouse: ["KeyQ", "KeyW", "KeyE", "KeyR", "KeyD", "KeyF"],
+    wasd: ["Mouse2", "ShiftLeft", "KeyE", "KeyR", "KeyV", "KeyF"],
+  };
+  const MOVE_KEYS = ["KeyW", "KeyA", "KeyS", "KeyD", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"];
+  // 칸에 넣을 수 없는 키. Esc 는 키 바꾸기 취소, 이동에 쓰는 키(마우스 방식 우클릭, WASD 방식 이동 키)는 이동이 먼저다
+  function reservedKey(code, move) {
+    if (code === "Escape" || code === "Tab" || code.startsWith("Meta") || code.startsWith("OS")) return true;
+    return move === "wasd" ? MOVE_KEYS.includes(code) : code === "Mouse2";
+  }
+  function okBinds(v, move) {
+    return Array.isArray(v) && v.length === BIND_SLOTS.length && new Set(v).size === v.length
+      && v.every(k => typeof k === "string" && k && !reservedKey(k, move));
+  }
+  // 롤처럼 마우스 버튼은 Mb1(왼쪽)·Mb2(오른쪽)·Mb3(휠)·Mb4·Mb5(옆 버튼)
+  const MOUSE_LABEL = { Mouse0: "Mb1", Mouse1: "Mb3", Mouse2: "Mb2", Mouse3: "Mb4", Mouse4: "Mb5" };
+  const KEY_LABEL = {
+    ShiftLeft: "Shift", ShiftRight: "R Shift", ControlLeft: "Ctrl", ControlRight: "R Ctrl", AltLeft: "Alt", AltRight: "R Alt",
+    Space: "Space", Enter: "Enter", Backspace: "Back", CapsLock: "Caps", Backquote: "`", Minus: "-", Equal: "=",
+    BracketLeft: "[", BracketRight: "]", Backslash: "\\", Semicolon: ";", Quote: "'", Comma: ",", Period: ".", Slash: "/",
+    ArrowUp: "↑", ArrowDown: "↓", ArrowLeft: "←", ArrowRight: "→", Lang1: "한/영", Lang2: "한자",
+  };
+  function keyLabel(code) {
+    if (MOUSE_LABEL[code]) return MOUSE_LABEL[code];
+    if (KEY_LABEL[code]) return KEY_LABEL[code];
+    const m = /^(?:Key|Digit)(.)$/.exec(code) || /^Numpad(.+)$/.exec(code);
+    return m ? (code.startsWith("Numpad") ? "Num" + m[1] : m[1]) : code;
+  }
+  // 이동 방식의 여섯 칸 코드
+  function bindsOf(c) { return c.binds[c.move]; }
+  // 스킬 Q W E R 칸에 보일 글자
+  function skillLabels(c) { return bindsOf(c).slice(0, 4).map(keyLabel); }
+  // 주문 두 칸에 보일 글자(앞 칸, 뒤 칸)
+  function keyPair(c) { return bindsOf(c).slice(4).map(keyLabel); }
   function spellKeys(c) {
-    const [a, b] = keyPair(c.move), [s1, s2] = spellsOf(c);
+    const [a, b] = keyPair(c), [s1, s2] = spellsOf(c);
     return { [s1]: a, [s2]: b };
   }
   const HP_MAX = 1500;            // 체력(한 번 맞을 때마다 HP_MAX / LIVES)
@@ -1092,7 +1129,6 @@
     // 그래서 시작 창에서 챔피언을 바꿀 때는 로딩이 없다
     ensureModels([faceKey, ...SKILLS.map(s => s.champ), ...Object.keys(MOBILITY)]);
     ensureEnemyFx();
-    const keyOf = id => spellKeys(controls)[id];
     const keys = new Set();
     let holding = false;
 
@@ -4653,7 +4689,7 @@
     // 아이콘은 늦게 오므로 그사이 챔피언이 바뀌었으면 버린다
     let skillNames = null;     // 내 챔피언의 Q W E R 한국어 이름(받기 전엔 null)
     function paintSkills() {
-      const champ = faceKey, sks = mySkills(), labels = skillLabels(controls.move);
+      const champ = faceKey, sks = mySkills(), labels = skillLabels(controls);
       const show = list => {
         if (champ !== faceKey) return;
         skillNames = list && list.map(x => x.name);
@@ -4776,14 +4812,27 @@
     }
 
     // ── 입력 ──
+    // 키 설정의 칸 번호(0~3 스킬 Q W E R, 4·5 주문 앞·뒤 칸)를 쓴다
+    function pressSlot(i) {
+      if (i < 4) useSkill(i);
+      else useSpell(spellsOf(controls)[i - 4]);
+    }
+    // 칸에 넣은 마우스 버튼이면 그 칸을 쓰고 true. 스킬·점멸은 커서 쪽으로 나가니 커서를 먼저 갱신한다
+    function mouseSlot(e) {
+      const i = bindsOf(controls).indexOf("Mouse" + e.button);
+      if (i < 0) return false;
+      cursor = toArena(e);
+      pressSlot(i);
+      return true;
+    }
     function onPointerDown(e) {
       if (state !== "play") return;
-      e.preventDefault();
+      // 옆 버튼은 막지 않는다(막으면 mouseup 이 오지 않아 noMouseDefault 가 뒤로 가기를 못 막는다)
+      if (e.button < 3) e.preventDefault();
+      if (e.pointerType === "mouse" && mouseSlot(e)) return;
       // WASD 방식이면 마우스 클릭으로는 움직이지 않는다(커서는 점멸 방향으로만). 터치는 늘 움직인다
-      // 우클릭은 Q 스킬(커서 쪽으로 나가야 하니 커서를 먼저 갱신)
       if (controls.move === "wasd" && e.pointerType === "mouse") {
         cursor = toArena(e);
-        if (e.button === 2) useSkill(0);
         return;
       }
       // 우클릭이 기본. 왼쪽 클릭·터치도 받아 준다(트랙패드·휴대폰).
@@ -4796,12 +4845,14 @@
       holding = e.pointerType !== "mouse";
       if (holding) canvas.setPointerCapture?.(e.pointerId);
     }
+    // 버튼 하나를 누른 채 다른 버튼을 누르면 pointerdown 이 아니라 pointermove 로 온다(button 에 새 버튼)
+    const BUTTON_BIT = [1, 4, 2, 8, 16];
     function onPointerMove(e) {
+      if (state === "play" && e.pointerType === "mouse" && e.button > 0 && (e.buttons & BUTTON_BIT[e.button])) mouseSlot(e);
       cursor = toArena(e);                  // 점멸은 커서 쪽으로
       if (holding && state === "play") target = cursor;
     }
     function onPointerUp() { holding = false; }
-    const MOVE_KEYS = ["KeyW", "KeyA", "KeyS", "KeyD", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"];
     // 지금 누르고 있는 WASD·방향키의 방향(단위 벡터, 없으면 null)
     function keyDir() {
       let mx = 0, my = 0;
@@ -4814,14 +4865,10 @@
     }
     function onKeyDown(e) {
       if (e.target.closest && e.target.closest("input, textarea, select")) return;
-      const sp = SPELLS.find(x => "Key" + keyOf(x.id) === e.code);
-      const si = skillKeys(controls.move).indexOf(e.code);
+      const si = bindsOf(controls).indexOf(e.code);
       if (si >= 0 && state === "play") {
         e.preventDefault();
-        if (!e.repeat) useSkill(si);
-      } else if (sp && state === "play") {
-        e.preventDefault();
-        if (!e.repeat) useSpell(sp.id);
+        if (!e.repeat) pressSlot(si);
       } else if (controls.move === "wasd" && MOVE_KEYS.includes(e.code)) {
         e.preventDefault();
         if (state === "play") {
@@ -4840,6 +4887,9 @@
 
     canvas.tabIndex = 0;
     canvas.addEventListener("contextmenu", e => e.preventDefault());
+    // 휠 클릭(자동 스크롤)과 옆 버튼(브라우저 뒤로·앞으로)도 칸에 넣을 수 있으니 경기장 안에서는 기본 동작을 막는다
+    const noMouseDefault = e => { if (e.button === 1 || e.button === 3 || e.button === 4) e.preventDefault(); };
+    for (const ev of ["mousedown", "mouseup", "auxclick"]) root.addEventListener(ev, noMouseDefault);
     canvas.addEventListener("pointerdown", onPointerDown);
     canvas.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", onPointerUp);
@@ -4883,7 +4933,7 @@
 
     // 시작 창. 모드·이동 방식·주문을 고르면 바로 다시 그린다
     function showIntro() {
-      const keys2 = keyPair(controls.move);
+      const keys2 = keyPair(controls);
       const [s1, s2] = spellsOf(controls).map(spellById);
       const k = spellKeys(controls);
       const hard = controls.mode === "hard";
@@ -4920,6 +4970,15 @@
               </button>`).join("")}
             <small>칸을 눌러 바꿔요</small>
           </div></div>
+        <div><span>키 설정</span>
+          <div class="key-binds" role="group" aria-label="키 설정">
+            ${bindsOf(controls).map((code, i) => `
+              <button type="button" class="key-bind" data-bind="${i}" aria-label="${i < 4 ? BIND_SLOTS[i] : [s1, s2][i - 4].name} 키 ${esc(keyLabel(code))}, 눌러서 바꾸기">
+                <small>${i < 4 ? "QWER"[i] + " 스킬" : [s1, s2][i - 4].name}</small><kbd>${esc(keyLabel(code))}</kbd>
+              </button>`).join("")}
+            <button type="button" class="key-bind key-reset" data-bind-reset title="${controls.move === "wasd" ? "WASD" : "마우스 클릭"} 방식 기본 키로">기본값</button>
+          </div>
+          <small class="key-help" data-bind-help>칸을 누른 뒤 쓸 키나 마우스 버튼(휠·옆 버튼도)을 눌러요. 이동 방식마다 따로 기억해요</small></div>
       </div>
       <ul class="dodge-keys">
         <li><b>투사체</b> 바닥 그림자가 실제 판정이에요. 옆으로 갈라지는 것도 있어요</li>
@@ -4937,16 +4996,15 @@
         ${controls.move === "mouse"
           ? `<li><b>우클릭</b> 찍은 곳으로 이동 (한 번 찍을 때마다 그곳으로 가요)</li>`
           : `<li><b>WASD</b> 누른 쪽으로 이동 (방향키도 돼요). 마우스는 점멸·이동기 방향만 정해요</li>`}
-        ${mySkills().length ? mySkills().map((sk, n, all) => `<li><b>${skillLabels(controls.move)[sk.slot]}</b> ${skillNames && skillNames[sk.slot] ? esc(skillNames[sk.slot]) + ". " : ""}${skillText(sk)}. 쿨타임 ${skillCd(sk)}초${n === all.length - 1 ? " (나머지 스킬 칸은 못 써요)" : ""}</li>`).join("")
-          : `<li><b>${skillLabels(controls.move).join(" ")}</b> 스킬 칸. 이 챔피언은 연습장에서 쓸 이동기가 없어요</li>`}
+        ${mySkills().length ? mySkills().map((sk, n, all) => `<li><b>${skillLabels(controls)[sk.slot]}</b> ${skillNames && skillNames[sk.slot] ? esc(skillNames[sk.slot]) + ". " : ""}${skillText(sk)}. 쿨타임 ${skillCd(sk)}초${n === all.length - 1 ? " (나머지 스킬 칸은 못 써요)" : ""}</li>`).join("")
+          : `<li><b>${skillLabels(controls).join(" ")}</b> 스킬 칸. 이 챔피언은 연습장에서 쓸 이동기가 없어요</li>`}
         <li><b>${k[s1.id]} · ${k[s2.id]}</b> ${s1.name} · ${s2.name}. 쿨타임 ${s1.cd}초 · ${s2.cd}초
           (점멸은 커서 쪽 400, 유체화는 3초 동안 이동 속도 +40%)</li>
         <li><b>휴대폰</b> 화면을 누른 곳으로 이동, 주문·스킬은 아래 칸을 눌러요</li>
       </ul>
       <p class="note">이동 속도 ${CHAMP.speed}. 스킬 수치·CC·그림은 롤 클라이언트, 소리는 롤 위키 것이에요.</p>
       <div class="dodge-actions"><button type="button" data-start>시작 <small>Space</small></button>${opts.links || ""}</div>`);
-      const pick = fn => btn => btn.onclick = () => {
-        fn(btn);
+      const redo = () => {
         saveControls(controls);
         keys.clear();
         reset();          // 모드·주문이 바뀌면 HUD 도 새 주문으로
@@ -4956,10 +5014,75 @@
         showIntro();
         if (opts.onMode) opts.onMode(controls.mode);
       };
+      const pick = fn => btn => btn.onclick = () => { fn(btn); redo(); };
+      over.querySelectorAll("[data-bind]").forEach(btn => btn.onclick = e => { e.stopPropagation(); bindCapture(btn, redo); });
+      over.querySelector("[data-bind-reset]").onclick = () => { controls.binds[controls.move] = DEFAULT_BINDS[controls.move].slice(); redo(); };
       over.querySelectorAll("[data-mode]").forEach(pick(btn => { controls.mode = btn.dataset.mode; }));
       over.querySelectorAll("[data-move]").forEach(pick(btn => { controls.move = btn.dataset.move; }));
       over.querySelectorAll("[data-slot-pick]").forEach(btn => btn.onclick = e => { e.stopPropagation(); spellPopup(btn, pick); });
       over.querySelector("[data-champ-pick]").onclick = e => { e.stopPropagation(); champPopup(e.currentTarget, pick); };
+    }
+
+    // 키 바꾸기: 칸을 누르면 다음에 누른 키나 마우스 버튼이 그 칸의 키가 된다. Esc·터치는 취소.
+    // 다른 칸이 쓰던 키면 두 칸의 키를 서로 바꾼다. 이동에 쓰는 키는 넣지 않는다(reservedKey)
+    let endCapture = null;     // 키 바꾸기를 기다리는 중이면 그것을 끝내는 함수(화면을 떠날 때 부른다)
+    function bindCapture(btn, done) {
+      if (endCapture) endCapture();
+      const i = +btn.dataset.bind, help = over.querySelector("[data-bind-help]"), helpText = help.textContent;
+      over.querySelectorAll(".key-bind.wait").forEach(b => b.classList.remove("wait"));
+      btn.classList.add("wait");
+      btn.querySelector("kbd").textContent = "…";
+      help.textContent = "쓸 키나 마우스 버튼을 누르세요(왼쪽 버튼은 이 칸 위에서) · Esc 는 취소";
+      // 옆 버튼(Mb4·Mb5)의 누름은 막지 않는다. 막으면 mouseup 이 오지 않아 뒤로 가기를 거기서 막을 수 없다
+      const stop = e => { if (!(e.type === "pointerdown" && e.button >= 3)) e.preventDefault(); e.stopPropagation(); };
+      const take = code => {
+        if (reservedKey(code, controls.move)) {
+          help.textContent = keyLabel(code) + (code === "Escape" || code === "Tab" || !MOVE_KEYS.concat("Mouse2").includes(code)
+            ? " 키는 넣을 수 없어요" : " 은(는) 이동에 써서 넣을 수 없어요") + ". 다른 키를 누르세요 · Esc 는 취소";
+          return;
+        }
+        const b = controls.binds[controls.move], j = b.indexOf(code);
+        if (j >= 0) b[j] = b[i];
+        b[i] = code;
+        finish(true, code.startsWith("Mouse"));
+      };
+      const onKey = e => {
+        if (!btn.isConnected) return finish(false);
+        stop(e);
+        if (e.repeat || !e.code) return;
+        if (e.code === "Escape") finish(false);
+        else take(e.code);
+      };
+      const onPointer = e => {
+        if (!btn.isConnected) return finish(false);
+        stop(e);
+        // 터치, 또는 기다리는 칸 밖을 왼쪽 클릭하면 취소(왼쪽 버튼은 그 칸 위에서 눌러야 넣는다)
+        if (e.pointerType !== "mouse" || (e.button === 0 && !btn.contains(e.target))) return finish(false, true);
+        take("Mouse" + e.button);
+      };
+      // 누른 버튼을 뗄 때 오는 click·우클릭 메뉴·옆 버튼의 뒤로 가기를 막는다
+      const swallow = e => stop(e);
+      const evs = [["keydown", onKey], ["pointerdown", onPointer], ["mousedown", swallow], ["mouseup", swallow],
+                   ["click", swallow], ["auxclick", swallow], ["contextmenu", swallow]];
+      evs.forEach(([n, f]) => document.addEventListener(n, f, true));
+      let ended = false;
+      endCapture = () => finish(false);
+      function finish(changed, byMouse = false) {
+        if (ended) return;
+        ended = true;
+        endCapture = null;
+        // 마우스 버튼으로 끝났으면 그 버튼을 뗄 때 오는 click·contextmenu·뒤로 가기까지 삼킨 뒤에 풀어 준다
+        const release = () => evs.forEach(([n, f]) => document.removeEventListener(n, f, true));
+        if (!byMouse) release();
+        else {
+          evs.slice(0, 2).forEach(([n, f]) => document.removeEventListener(n, f, true));
+          // pointerdown 을 막으면 mouseup 은 오지 않을 수 있어서 pointerup 을 기다린다
+          const up = () => { document.removeEventListener("pointerup", up, true); setTimeout(release, 50); };
+          document.addEventListener("pointerup", up, true);
+        }
+        if (changed) done();
+        else { btn.classList.remove("wait"); btn.querySelector("kbd").textContent = keyLabel(bindsOf(controls)[i]); help.textContent = helpText; }
+      }
     }
 
     // 내 챔피언 고르기: 이동기와 그 3D 동작이 있는 챔피언(MOBILITY).
@@ -4982,7 +5105,7 @@
       const info = pop.querySelector(".spell-pop-info");
       const show = k => {
         info.innerHTML = `<b>${esc(champName(k))}</b>
-          ${skillsOf(k).map(sk => `<p>${skillLabels(controls.move)[sk.slot]} · ${skillText(sk)}. 쿨타임 ${skillCd(sk)}초</p>`).join("")}`;
+          ${skillsOf(k).map(sk => `<p>${skillLabels(controls)[sk.slot]} · ${skillText(sk)}. 쿨타임 ${skillCd(sk)}초</p>`).join("")}`;
       };
       show(myChamp());
       card.appendChild(pop);
@@ -5084,6 +5207,7 @@
     }
 
     function destroy() {
+      if (endCapture) endCapture();
       cancelAnimationFrame(raf);
       clearTimeout(bannerTimer);
       clearTimeout(overTimer);
