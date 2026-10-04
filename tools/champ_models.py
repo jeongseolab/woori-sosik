@@ -83,11 +83,12 @@ SPELL_CLIPS = {("thresh", 1): ["Spell1_In"], ("sylas", 3): ["Spell3_Dash"], ("tr
 # 스킬 말고 따로 굽는 동작: 이름 → 클립 이름 후보(칼리스타 Q 뒤의 패시브 돌진).
 # 암베사는 스킬마다 패시브 돌진 동작이 따로 있다(해시로만 적힌 클립: passivedash_spell1a·1b·2·3·4·4_fail.anm),
 # Q2(Spell1B), R 내려찍기(spell4_hit). spell4 는 R 시전(Spell4_Windup)
+# 갈리오 E 는 돌진 전에 뒤로 빠지는 시전 동작(windup3) 이 따로
 # skrun: 이속 스킬 중의 달리기(가렌 Q·파이크 W …). 리븐 Q 는 세 번 동작이 다르고, 아칼리 R 은 두 번째 돌진 동작이 따로
 EXTRA_CLIPS = {"kalista": {"dash": ["Spell1_Dash_0", "Attack1_Dash_0"]},
                "riven": {"spell1b": ["Spell1B"], "spell1c": ["Spell1C"]}, "akali": {"spell4b": ["Spell4_Dash2"]},
                "warwick": {"dash4": ["Spell4Dash"]}, "pyke": {"skrun": ["Spell2_Move"]}, "kayn": {"skrun": ["Spell3_Run"]},
-               "rakan": {"skrun": ["Spell4_Run"]}, "hecarim": {"skrun": ["Spell3run"]}, "twitch": {"skrun": ["Run_Stealth"]},
+               "rakan": {"skrun": ["Spell4_Run"]}, "galio": {"windup3": ["Spell3_Windup"]}, "hecarim": {"skrun": ["Spell3run"]}, "twitch": {"skrun": ["Run_Stealth"]},
                "volibear": {"skrun": ["Spell1_Run"]}, "udyr": {"skrun": ["Spell3_Run"]}, "masteryi": {"skrun": ["Run_Haste"]},
                "poppy": {"skrun": ["Spell2_Run"]}, "naafiri": {"skrun": ["Spell4_Run"]}, "garen": {"skrun": ["Run_Spell1"]}, "khazix": {"skrun": ["Run_Haste"]},
                "ambessa": {"spell1b": ["Spell1B"], "dash1": ["{99834a45}"], "dash1b": ["{6e4a0e24}"], "dash2": ["{5ed08d9d}"],
