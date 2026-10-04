@@ -1835,6 +1835,8 @@
       burst(player.x, player.y, 70, "#d0ebff", 14, 260);
       mySfx("cleanse");
     }
+    // 3D 모델이 지금 facing 쪽을 곧바로 본다(이동기를 쓸 때. 걸을 때는 TURN 으로 천천히 돈다)
+    const faceNow = () => { viewAngle = Math.atan2(facing.y, facing.x); };
     // 움직임을 예약한다. 시전 시간(wind) 동안은 제자리에서 스킬 동작, 그 뒤 돌진하거나 순간이동(step)
     function go(sk, dx, dy, len, o) {
       if (sk.back) { dx = -dx; dy = -dy; }
@@ -1849,8 +1851,9 @@
       target = null;
       skillAt = t; skillUsed = sk;
       facing = sk.back ? { x: -dx, y: -dy } : { x: dx, y: dy };     // 뒤로 뛸 때는 커서 쪽을 본 채로
-      // 갈리오 E: 누르자마자 커서 쪽으로 돌아서서 그쪽을 본 채 뒤로 물러난다
-      if (sk.backstep) viewAngle = Math.atan2(dy, dx);
+      // 롤처럼 누르자마자 그쪽으로 돌아선다(천천히 돌면 짧은 돌진은 도는 중에 끝나 하던 이동 방향을 보는 것 같다).
+      // 갈리오 E 는 커서 쪽을 본 채 뒤로 물러난다
+      faceNow();
       if (!sk.amb) mySkillStart(sk);
       // 몇 번째인지에 따라 동작이 다르다(리븐 Q 세 번, 아칼리 R 두 번)
       if (o.anim) act = { anim: o.anim, t0: t, hold: dash.t0 + dash.dur, until: dash.t0 + dash.dur + 0.3 };
@@ -1973,6 +1976,7 @@
         target = null;
         skillAt = t; skillUsed = sk;
         facing = { x: dx, y: dy };
+        faceNow();
         act = { anim: sk.anim, t0: t, hold: t + sk.windup, until: t + sk.windup };
         amb.aimR = { dx, dy, from: t, until: t + sk.windup };
         sfx("ambR");
@@ -1985,6 +1989,7 @@
       target = null;
       skillAt = t; skillUsed = sk;
       facing = { x: dx, y: dy };
+      faceNow();
       amb.buf = null;
       if (!sk.amb) mySkillStart(sk);
       act = { anim: q2 ? "spell1b" : sk.anim, t0: t, hold: t + sk.windup, until: t + sk.windup };
@@ -2115,6 +2120,7 @@
       dash = { sk, fx: player.x, fy: player.y, tx: end.x, ty: end.y, t0: t, dur: sk.dur, blink: false, ambStep: true, q2: s.q2, a: s.a,
                walkTo: controls.move !== "wasd" && d > sk.range ? to : null };
       facing = { x: dx, y: dy };
+      faceNow();
       // 돌진 동작은 act 가 맡는다. 내려앉은 뒤 걸어가면 시전 동작을 다시 하지 않게 시각을 앞당겨 둔다
       skillAt = t - 0.5 + sk.dur; skillUsed = sk;
       moveStarts(dash);
