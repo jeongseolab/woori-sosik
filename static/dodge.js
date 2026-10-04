@@ -41,10 +41,15 @@
 
 (function () {
   // 게임 규칙이 바뀌면 올린다. 서버는 같은 버전의 기록끼리만 순위를 매긴다
-  const VERSION = 17;
+  const VERSION = 18;
 
   const ARENA = { w: 1400, h: 900 };
   const CHAMP = { radius: 65, speed: 335 };
+  // 챔피언마다 다른 판정 반지름(롤 데이터 <챔피언>.bin 의 overrideGameplayCollisionRadius, 2026-10-04 확인). 없으면 CHAMP.radius(65)
+  const BODY = { bard: 80, blitzcrank: 80, chogath: 80, galio: 80, gragas: 80, hecarim: 80, malphite: 80, ornn: 80, renekton: 80,
+                 sejuani: 80, urgot: 80, volibear: 80,
+                 fizz: 55, gnar: 55, kennen: 55, lulu: 55, poppy: 55, teemo: 55, tristana: 55, veigar: 55, zoe: 55 };
+  const bodyR = champ => BODY[String(champ || "").toLowerCase()] || CHAMP.radius;
   const STEP = 1 / 240;
   const FAR = 4000;            // 경기장보다 긴 사거리(레이저 등)
   // 소환사 주문. 아이콘·실제 쿨타임(점멸 300초, 유체화 240초) 은 롤 데이터(summoner-spells.json),
@@ -1138,6 +1143,7 @@
     let cdLeft, cdMax, dirLeft, charges, dash, untarget, ret, recall, pole, soul;   // 내 챔피언 이동기(useSkill)
     let hidden, seen, haste, realm, skillAt, skillUsed;
     let fade, detect, shroud, rift, trail, followUp, slowFree, hurtAt;     // 더 넣은 스킬(투명·영혼 세계·되감기 …)
+    let myR = CHAMP.radius;      // 내 판정 반지름(고른 챔피언, reset 에서 정한다)
     let amb, act;      // 암베사 스킬 상태, 내 3D 동작을 정해 두는 것(act: {anim, t0, hold, until})
     let parry, shieldUp, barrier, wall, blades, ccImmune, undying, lambs;     // 막기 스킬(kind: guard)
     let lastGuardFx = -1;
@@ -1154,6 +1160,7 @@
     let holding = false;
 
     function reset() {
+      myR = bodyR(myChamp());
       player = { x: ARENA.w / 2, y: ARENA.h / 2, vx: 0, vy: 0 };
       target = null;
       casters = [];      // 시전 중인 적
@@ -1507,7 +1514,7 @@
     function applyCC(s, how) {
       const from = how.c || (how.m && { x: how.m.ox, y: how.m.oy });
       const flown = how.m ? how.m.flown : 0;
-      const center = how.d != null && s.inner && how.d < s.inner + CHAMP.radius;   // 중심부에 몸이 걸쳤다
+      const center = how.d != null && s.inner && how.d < s.inner + myR;   // 중심부에 몸이 걸쳤다
       let got = true;
       const n0 = effects.length;
       switch (s.name.replace(" (갈라짐)", "")) {
@@ -1595,7 +1602,7 @@
         Object.assign(player, inArena(player.x + dx * len, player.y + dy * len));
         target = null;
         flashFx(from, player);
-        fx.push({ kind: "ring", x: player.x, y: player.y, r: CHAMP.radius + 20, color: "#ffe066", life: 0.35, max: 0.35 });
+        fx.push({ kind: "ring", x: player.x, y: player.y, r: myR + 20, color: "#ffe066", life: 0.35, max: 0.35 });
         sfx("flash");
       } else if (id === "ghost") {
         ghostLeft = sp.last;
@@ -1618,8 +1625,8 @@
       }
       return { dx, dy, len };
     }
-    const inArena = (x, y) => ({ x: Math.min(ARENA.w - CHAMP.radius, Math.max(CHAMP.radius, x)),
-                                 y: Math.min(ARENA.h - CHAMP.radius, Math.max(CHAMP.radius, y)) });
+    const inArena = (x, y) => ({ x: Math.min(ARENA.w - myR, Math.max(myR, x)),
+                                 y: Math.min(ARENA.h - myR, Math.max(myR, y)) });
     // 내 챔피언의 이동기 칸들
     const mySkills = () => skillsOf(modelKey(faceKey));
     // 방향 번호: 위 0, 오른쪽 1, 아래 2, 왼쪽 3(벨베스 Q)
@@ -1882,7 +1889,7 @@
       } else if (m.blink) { if (!myArt(sk)) flashFx({ x: m.fx, y: m.fy }, player); mySfx("flash"); }
       // 레넥톤 E: 지나간 길에 적이 있으면 한 번 더
       if (sk.followHit && !m.again) {
-        const got = casters.filter(c => segDist(c, { x: m.fx, y: m.fy }, { x: m.tx, y: m.ty }) < CHAMP.radius * 2);
+        const got = casters.filter(c => segDist(c, { x: m.fx, y: m.fy }, { x: m.tx, y: m.ty }) < myR + bodyR(c.skill.champ));
         got.forEach(c => burst(c.x, c.y, 90, "#ff922b", 12, 360));
         if (got.length) followUp = { slot: sk.slot, until: t + sk.followHit };
       }
@@ -1991,10 +1998,10 @@
     function ambTargets(x, y, r, o = {}) {
       return casters.filter(c => {
         if (c.supUntil > t) return false;
-        const dx = c.x - x, dy = c.y - y;
-        if (o.dir != null && dx * Math.cos(o.dir) + dy * Math.sin(o.dir) <= -CHAMP.radius) return false;     // 등 뒤는 안 맞는다
-        if (o.line) return segDist(c, o.line[0], o.line[1]) < o.hw + CHAMP.radius;
-        return Math.hypot(dx, dy) <= r + CHAMP.radius;
+        const dx = c.x - x, dy = c.y - y, cr = bodyR(c.skill.champ);
+        if (o.dir != null && dx * Math.cos(o.dir) + dy * Math.sin(o.dir) <= -cr) return false;     // 등 뒤는 안 맞는다
+        if (o.line) return segDist(c, o.line[0], o.line[1]) < o.hw + cr;
+        return Math.hypot(dx, dy) <= r + cr;
       });
     }
     function ambHit(c, color = AMB.orange) {
@@ -2129,7 +2136,7 @@
       const L = Math.min(1150, cx > 0 ? (ARENA.w - x) / cx : cx < 0 ? -x / cx : 1150, cy > 0 ? (ARENA.h - y) / cy : cy < 0 ? -y / cy : 1150);
       emit({ x, y, z: 80, vx: cx * 1200, vy: cy * 1200, size: 60, size1: 50, color: "#e6fcf5", color1: "#12b886", shape: "glow", life: L / 1200 });
       emit({ x, y, z: 80, line: [x, y, x + cx * L, y + cy * L], size: 26, size1: 6, color: "#e6fcf5", color1: "#0ca678", shape: "spark", life: 0.5, a: 0.8 });
-      casters.filter(c => segDist(c, { x, y }, { x: x + cx * L, y: y + cy * L }) < CHAMP.radius + 40).forEach(c => burst(c.x, c.y, 90, "#63e6be", 12, 320));
+      casters.filter(c => segDist(c, { x, y }, { x: x + cx * L, y: y + cy * L }) < bodyR(c.skill.champ) + 40).forEach(c => burst(c.x, c.y, 90, "#63e6be", 12, 320));
       sfx("ambWhip");
     }
     // 전투 태세: 지나간 자리에 청록 영혼 빛
@@ -2334,7 +2341,7 @@
     // (305 유닛을 가야 하는데 0.627초에 216 유닛). 그래서 표시가 뜬 뒤 REACT 초 늦게 움직여도
     // 딱 빠져나갈 만큼만 내 자리에서 비껴 찍는다. 원은 여전히 내 몸에 걸쳐서 움직이지 않으면 맞는다
     function fairSpot(aim, s, delay, c) {
-      const need = s.radius + CHAMP.radius - CHAMP.speed * Math.max(0, delay - REACT);
+      const need = s.radius + myR - CHAMP.speed * Math.max(0, delay - REACT);
       const d = dist(aim, player);
       if (d >= need) return aim;
       let ux, uy;
@@ -2455,7 +2462,7 @@
         zones.push(z);
       } else if (s.kind === "beam") {
         const a = { x: c.x, y: c.y }, b = { x: c.x + c.dx * s.range, y: c.y + c.dy * s.range };
-        if (!(segDist(player, a, b) < CHAMP.radius + s.radius && hit(s, { c }))) dodged += 1;
+        if (!(segDist(player, a, b) < myR + s.radius && hit(s, { c }))) dodged += 1;
         const f = { skill: s, a, b, left: 0.35, max: 0.35 };
         if (lf) {
           const far = Math.min(s.range, 2500);
@@ -2721,8 +2728,8 @@
       }
       viewAngle = turnToward(viewAngle, Math.atan2(facing.y, facing.x), dt, TURN);
       const was = { x: player.x, y: player.y };
-      player.x = Math.min(ARENA.w - CHAMP.radius, Math.max(CHAMP.radius, player.x + player.vx * dt));
-      player.y = Math.min(ARENA.h - CHAMP.radius, Math.max(CHAMP.radius, player.y + player.vy * dt));
+      player.x = Math.min(ARENA.w - myR, Math.max(myR, player.x + player.vx * dt));
+      player.y = Math.min(ARENA.h - myR, Math.max(myR, player.y + player.vy * dt));
       // 오로라 R: 영혼 세계 안에서 가장자리로 걸어 나가면 반대편 가장자리로 넘어간다
       if (rift && t < rift.until && !dash && dist(was, rift) <= rift.r && dist(player, rift) > rift.r) {
         const d = dist(player, rift);
@@ -2738,7 +2745,7 @@
       if (lv > level) {
         level = lv;
         sfx("level");
-        fx.push({ kind: "ring", x: player.x, y: player.y, r: CHAMP.radius + 30, color: "#f0e6d2", life: 0.6, max: 0.6 });
+        fx.push({ kind: "ring", x: player.x, y: player.y, r: myR + 30, color: "#f0e6d2", life: 0.6, max: 0.6 });
       }
       // 30초마다 생존 안내, 연속으로 피한 수에 따라 롤 안내 문구
       if (Math.floor(t / 30) > lastMark) { lastMark = Math.floor(t / 30); announce(lastMark * 30 + "초 생존!", "gold"); }
@@ -2797,7 +2804,7 @@
           burst(m.x, m.y, 60, "#d0ebff", 8, 200);
           continue;
         }
-        const reach = CHAMP.radius + m.skill.radius;
+        const reach = myR + m.skill.radius;
         if ((m.x - player.x) ** 2 + (m.y - player.y) ** 2 < reach * reach && hit(m.skill, { m, c: m.caster })) {
           m.gone = true;          // 맞힌 투사체는 사라진다
           if (dead) return;
@@ -2811,7 +2818,7 @@
             const along = (player.x - m.x) * m.dx + (player.y - m.y) * m.dy;
             const side = Math.abs((player.x - m.x) * m.dy - (player.y - m.y) * m.dx);
             const soon = sp.telegraph * m.speed;
-            const miss = side > CHAMP.radius + m.skill.radius;
+            const miss = side > myR + m.skill.radius;
             if ((miss && along >= 0 && along <= soon) || m.left <= soon) m.splitIn = sp.telegraph;
           } else {
             m.splitIn -= dt;
@@ -2846,7 +2853,7 @@
             }
             else boom(z.x, z.y, s.radius, s.color, s);
             skillSound(s, "land");
-            if (d < s.radius + CHAMP.radius && hit(s, { d })) { if (dead) return; }
+            if (d < s.radius + myR && hit(s, { d })) { if (dead) return; }
             else dodged += 1;
             continue;
           }
@@ -2859,7 +2866,7 @@
             else fx.push({ kind: "ring", x: z.x, y: z.y, r: s.radius, color: s.color, life: 0.4, max: 0.4 });
             skillSound(s, "form");
           }
-          if (!z.struck && Math.abs(d - s.radius) < CHAMP.radius && hit(s, { d })) {
+          if (!z.struck && Math.abs(d - s.radius) < myR && hit(s, { d })) {
             z.struck = true;        // 감옥은 한 번만 스턴한다
             if (dead) return;
           }
@@ -4068,14 +4075,14 @@
         ctx.globalAlpha = 1;
       }
 
-      // 내 발밑 초록 링, 적 발밑 빨간 링(롤처럼)
-      groundCircle(player.x, player.y, CHAMP.radius);
+      // 내 발밑 초록 링, 적 발밑 빨간 링(롤처럼). 크기는 그 챔피언의 판정 반지름
+      groundCircle(player.x, player.y, myR);
       ctx.strokeStyle = safe > 0 ? "#ffa8a8" : "#51cf66";
       ctx.lineWidth = 2.5;
       ctx.stroke();
       for (const c of casters) {
         ctx.globalAlpha = c.wind > 0 ? 1 : Math.max(0, c.fade / 0.5);
-        groundCircle(c.x, c.y, 60, 0, 32);
+        groundCircle(c.x, c.y, bodyR(c.skill.champ), 0, 32);
         ctx.strokeStyle = "#ff4d4f";
         ctx.lineWidth = 2.5;
         ctx.stroke();
