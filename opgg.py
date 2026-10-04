@@ -459,20 +459,33 @@ async def champion_index():
 _LANES = ("top", "jungle", "mid", "adc", "support")
 
 
-async def main_lanes():
-    """챔피언 이름 -> 가장 많이 가는 라인. 내 경기에 그 챔피언이 없을 때 쓴다."""
+async def lane_meta():
+    """라인 -> 챔피언 이름 -> {play, tier, rank, win_rate}. 전체 구간 공식 티어표다.
+
+    한 번 부르면 모든 챔피언이 다 오니(1초 남짓) 챔피언마다 묻는 champion_meta(한 번에 3~4초)
+    가 늦을 때 대신 쓴다.
+    """
     async def fetch():
         got = await call("lol_list_lane_meta_champions", {
             "position": "all", "lang": LANG,
-            "desired_output_fields": ["data.positions.%s[].{champion,play}" % l for l in _LANES]})
-        best = {}
-        for lane in _LANES:
-            for c in _dig(got, "data", "positions", lane) or []:
-                name, play = c.get("champion"), c.get("play") or 0
-                if name and play > best.get(name, ("", -1))[1]:
-                    best[name] = (lane, play)
-        return {name: lane for name, (lane, _) in best.items()}
-    return await _cached("lanes:" + LANG, META_TTL, fetch)
+            "desired_output_fields": ["data.positions.%s[].{champion,play,tier,rank,win_rate}" % l
+                                      for l in _LANES]})
+        return {lane: {c["champion"]: {k: c.get(k) for k in ("play", "tier", "rank", "win_rate")}
+                       for c in _dig(got, "data", "positions", lane) or []
+                       if isinstance(c, dict) and c.get("champion")}
+                for lane in _LANES}
+    return await _cached("lane_meta:" + LANG, META_TTL, fetch)
+
+
+async def main_lanes():
+    """챔피언 이름 -> 가장 많이 가는 라인. 내 경기에 그 챔피언이 없을 때 쓴다."""
+    best = {}
+    for lane, champs in (await lane_meta()).items():
+        for name, c in champs.items():
+            play = c.get("play") or 0
+            if play > best.get(name, ("", -1))[1]:
+                best[name] = (lane, play)
+    return {name: lane for name, (lane, _) in best.items()}
 
 
 async def champion_meta(champion_key: str, lane: str, tier: str | None):
