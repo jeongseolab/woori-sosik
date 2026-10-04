@@ -97,12 +97,13 @@ def finish_run(account_id: int, token: str, ms: int, dodged: int, ver: int = 1, 
 
 
 def _dodge_stats(account_ids, since=None, mode="normal"):
-    """{account_id: (최고 ms, 판수)}. 지금 버전, 그 모드의 판만. since 를 주면 그 뒤의 판만."""
+    """{account_id: (최고 ms, 판수)}. 그 모드의 판만. since 를 주면 그 뒤의 판만.
+    최고 기록은 지금 버전의 판만(규칙이 달라 견줄 수 없다), 판수는 버전이 바뀌어도 이어서 모든 버전을 센다."""
     if not account_ids:
         return {}
     marks = ",".join("?" * len(account_ids))
-    sql = ("SELECT account_id, MAX(ms) AS best, COUNT(*) AS n FROM dodge_runs"
-           " WHERE ver = ? AND COALESCE(mode, 'normal') = ? AND account_id IN (%s)" % marks)
+    sql = ("SELECT account_id, MAX(CASE WHEN ver = ? THEN ms END) AS best, COUNT(*) AS n FROM dodge_runs"
+           " WHERE COALESCE(mode, 'normal') = ? AND account_id IN (%s)" % marks)
     params = [DODGE_VERSION, mode] + list(account_ids)
     if since is not None:
         sql += " AND played_at >= ?"
