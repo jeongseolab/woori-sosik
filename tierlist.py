@@ -29,6 +29,8 @@ RECENT_GAMES = 20
 PRIOR_GAMES = 2
 # 한 판 더 할 때마다 붙는 점수와 그 한도(판)
 PLAY_BONUS, PLAY_BONUS_CAP = 0.75, 8
+# 내 티어 구간의 공식 티어를 기다리는 최대 시간(초). 넘으면 전체 구간 공식 티어를 쓴다
+META_WAIT = 2.5
 
 # 이미지 주소. key 는 OP.GG 챔피언 키(예: MonkeyKing)
 CHAMP_IMG = "https://opgg-static.akamaized.net/meta/images/lol/latest/champion/%s.png"
@@ -186,20 +188,31 @@ async def build(game_name: str, tagline: str, fresh=False, puuid=None):
             "kda": t["kda"], "cs_per_min": t["cs_per_min"],
         })
 
-    async def official(c):
-        """내 티어 구간의 공식 티어. 못 받으면 전체 구간 것을 쓰고 그렇다고 표시한다."""
-        if not c["key"]:
-            return None, None
-        if bracket:
-            got = await opgg.champion_meta(c["key"], c["lane"], bracket)
-            if got and got.get("tier"):
-                return got, "bracket"
-        got = await opgg.champion_meta(c["key"], c["lane"], None)
+    # 내 티어 구간의 공식 티어는 챔피언마다 OP.GG 에 물어야 하고 한 번에 3~4초 걸린다.
+    # 그룹방(4명, 챔피언 40개 남짓)이 처음 열릴 때 이것만 20초 넘게 기다렸다.
+    # 그래서 META_WAIT 초까지만 기다리고, 못 받은 챔피언은 전체 구간 공식 티어(한 번에 다 온다)
+    # 를 쓴다. 못 받은 것도 뒤에서 마저 받아 쌓아 두니 다음에 열 때는 구간 티어가 나온다
+    asked = {}
+    if bracket:
+        for c in champs:
+            if c["key"]:
+                asked[c["name"]] = asyncio.ensure_future(
+                    opgg.champion_meta(c["key"], c["lane"], bracket))
+    if asked:
+        await asyncio.wait(asked.values(), timeout=META_WAIT)
+    by_lane = await opgg.lane_meta()
+
+    def official(c):
+        """내 티어 구간의 공식 티어. 아직 없으면 전체 구간 것을 쓰고 그렇다고 표시한다."""
+        task = asked.get(c["name"])
+        got = task.result() if task and task.done() else None
+        if got and got.get("tier"):
+            return got, "bracket"
+        got = by_lane.get(c["lane"], {}).get(c["name"])
         return (got, "all") if got and got.get("tier") else (None, None)
 
-    metas = await asyncio.gather(*[official(c) for c in champs])
-
-    for c, (meta, scope) in zip(champs, metas):
+    for c in champs:
+        meta, scope = official(c)
         meta = meta or {}
         c["meta_tier"] = meta.get("tier")
         c["meta_rank"] = meta.get("rank")
