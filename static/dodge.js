@@ -5342,6 +5342,58 @@
       if (name) opts.name = name;
     }
 
+    // 다른 화면으로 갈 때 멈춰 둔다(로딩한 모델·텍스처·WebGL 을 그대로 두고 돌아오면 resume 으로 바로 이어 쓴다).
+    // 판 도중이었으면 그 판은 버린다(기록하지 않음). 창에 건 입력 받기는 다 뗀다(다른 화면에서 Space 로 판이 시작되지 않게)
+    let parked = false, parkedLoop = false;
+    function unlisten() {
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", onBlur);
+      window.removeEventListener("resize", fit);
+      document.removeEventListener("fullscreenchange", onFullChange);
+      if (isFull()) document.exitFullscreen().catch(() => {});
+    }
+    function suspend() {
+      if (parked) return;
+      parked = true;
+      if (endCapture) endCapture();
+      keys.clear();
+      holding = false;
+      if (state === "play") {
+        state = "ready";
+        canvas.classList.remove("dead");
+        reset();
+        paintSpells();
+        paintSkills();
+        hudUpdate();
+        draw(0);
+        showIntro();
+      }
+      parkedLoop = !!raf;
+      cancelAnimationFrame(raf);
+      raf = 0;
+      unlisten();
+    }
+    function resume() {
+      if (!parked) return;
+      parked = false;
+      window.addEventListener("pointerup", onPointerUp);
+      window.addEventListener("keydown", onKeyDown);
+      window.addEventListener("keyup", onKeyUp);
+      window.addEventListener("blur", onBlur);
+      window.addEventListener("resize", fit);
+      document.addEventListener("fullscreenchange", onFullChange);
+      fit();
+      if (parkedLoop) { last = performance.now(); raf = requestAnimationFrame(loop); }
+    }
+    // 앱이 넘긴 콜백·링크를 바꾼다(다시 들어온 화면의 방 순위·기록 칸에 맞게)
+    function setOpts(o) {
+      Object.assign(opts, o);
+      // 시작 창이 떠 있으면 새 링크로 다시 그린다(고르기 목록이 열려 있을 때는 두고)
+      if (state !== "play" && over.querySelector("[data-champ-pick]") && !over.querySelector(".spell-pop")) showIntro();
+    }
+
     function destroy() {
       if (endCapture) endCapture();
       cancelAnimationFrame(raf);
@@ -5358,7 +5410,7 @@
       if (fxgl) { fxgl.destroy(); fxgl = null; }
     }
 
-    return { destroy, setBest, setChamp, mode: () => controls.mode };
+    return { destroy, suspend, resume, setOpts, setBest, setChamp, mode: () => controls.mode };
   }
 
   window.DodgeGame = { mount, fmt, SKILLS, VERSION };

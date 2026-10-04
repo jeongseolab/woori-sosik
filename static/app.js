@@ -1289,9 +1289,11 @@ document.addEventListener("click", e => {
 // 게임은 dodge.js 가 돌린다. 여기서는 판 시작·끝을 서버에 알리고 순위를 보여 준다.
 // 서버를 기다리지 않고 게임부터 띄운다. 기록과 순위는 뒤에서 채운다
 
-let dodgeGame = null;
+// 게임은 한 번 띄우면(로딩이 끝나면) 버리지 않는다. 다른 화면으로 가면 멈춰 두고(suspend),
+// 돌아오면 같은 게임 칸(dodgeRoot) 을 화면에 다시 끼워 이어 쓴다(resume). 그래서 다시 로딩하지 않는다
+let dodgeGame = null, dodgeRoot = null;
 function stopDodge() {
-  if (dodgeGame) { dodgeGame.destroy(); dodgeGame = null; }
+  if (dodgeGame) dodgeGame.suspend();
 }
 
 function renderDodge(roomArg) {
@@ -1326,9 +1328,8 @@ function renderDodge(roomArg) {
   // 내 챔피언은 티어표의 OP 챔피언(받아 둔 게 없으면 이즈리얼)
   const mine = known("/api/tierlist");
   const op = mine && mine.op;
-  dodgeGame = DodgeGame.mount(document.getElementById("dodge-root"), {
-    champ: (op && op.key) || "Ezreal",
-    name: me ? me.game_name : "",
+  // 이 화면에서 쓰는 콜백·링크(방이 바뀔 수 있어서 들어올 때마다 새로 건넨다)
+  const hooks = {
     links: `<a class="btn ghost" href="${boardHref}">무빙 순위 보기</a>`,
     onStart() {
       runPromise = api("/api/dodge/start", { method: "POST" }).then(r => r.run);
@@ -1360,7 +1361,18 @@ function renderDodge(roomArg) {
       if (r.new_week_best) return `<p class="dodge-new">이번 주 최고 기록!</p>`;
       return `<p class="note">${mode === "hard" ? "하드 " : ""}최고 기록 ${fmt(mode === "hard" ? (r.hard || {}).best : r.best)}</p>`;
     },
-  });
+  };
+  const slot = document.getElementById("dodge-root");
+  if (dodgeGame) {
+    // 전에 띄운 게임을 이 자리에 다시 끼운다
+    slot.replaceWith(dodgeRoot);
+    dodgeGame.setOpts(hooks);
+    dodgeGame.setChamp(op && op.key, me ? me.game_name : "");
+    dodgeGame.resume();
+  } else {
+    dodgeRoot = slot;
+    dodgeGame = DodgeGame.mount(slot, { champ: (op && op.key) || "Ezreal", name: me ? me.game_name : "", ...hooks });
+  }
 
   dodgeMode = dodgeGame.mode();
   load("/api/dodge/me").then(showBest, () => {});
