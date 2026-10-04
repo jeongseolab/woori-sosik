@@ -41,7 +41,7 @@
 
 (function () {
   // 게임 규칙이 바뀌면 올린다. 서버는 같은 버전의 기록끼리만 순위를 매긴다
-  const VERSION = 18;
+  const VERSION = 19;
 
   const ARENA = { w: 1400, h: 900 };
   const CHAMP = { radius: 65, speed: 335 };
@@ -194,9 +194,9 @@
     // 쉔: 스킬을 쓰면 기의 장벽(패시브) 보호막
     shen: { slot: 2, kind: "dash", range: 600, min: 300, speed: 800 + CHAMP.speed, barrier: 2.5, color: "#74c0fc", cd: 10, src: "data(DashBonusSpeed·MinimumDistance, ShenPassive ShieldDuration)" },
     urgot: { slot: 2, kind: "dash", range: 450, fixed: true, speed: 1200, barrier: 4, color: "#ff8787", cd: 14, src: "data(EShieldDuration)" },
-    galio: { slot: 2, kind: "dash", range: 650, min: 250, speed: 1400, windup: 0.4, backstep: 100, anim: "windup3", dashAnim: "spell3", cd: 7,
-             desc: "정의의 주먹: 0.4초 동안 뒤로 빠졌다가(그동안 CC 를 맞으면 끊긴다) 커서 쪽으로 최대 650 돌진",
-             src: "range·min·windup: data(GalioE castRange·MinRange·spellCastTime), 뒤로 빠지는 거리 100·speed: 추정, 동작: Spell3_Windup → Spell3" },
+    galio: { slot: 2, kind: "dash", range: 650, min: 250, speed: 2300, windup: 0.4, backstep: 200, anim: "windup3", dashAnim: "spell3", cd: 7,
+             desc: "정의의 주먹: 커서를 본 채 0.4초 동안 커서 반대쪽으로 물러났다가(그동안 CC 를 맞으면 끊긴다) 커서 쪽으로 돌진. 누른 자리에서 최대 650 앞까지",
+             src: "range·min·windup: data(GalioE MinRange·spellCastTime), speed: 롤 위키(2300), 물러나는 거리 200: 추정(데이터·위키에 없다), 동작: Spell3_Windup → Spell3" },
     zoe: { slot: 3, kind: "blink", range: 575, ret: 1, cd: 5, src: "range: data, ret: 추정" },
     yone: { slot: 2, kind: "dash", range: 300, fixed: true, speed: 1200, soul: { dur: 5, lockout: 0.5, back: 300, wind: 0.225, speed: 2500 },
             haste: 0.1, hasteEnd: 0.3, hasteDur: 5, runAnim: "skrun", cd: 10,
@@ -482,7 +482,8 @@
     // 벨코즈 Q 는 내 옆을 지날 때(벨코즈가 다시 눌러서) 또는 사거리 끝에서 양옆 직각으로 갈라진다.
     // 갈라지기 telegraph 초 전부터 구슬이 부풀며 번쩍인다(SplitTelegraphTime). 롤처럼 갈라질 경로는 안 보여 준다.
     // 갈라진 것은 VelkozQMissileSplit
-    { kind: "line", name: "벨코즈 Q", champ: "Velkoz", cast: 0.251, speed: 1300, radius: 50, range: 1100, color: "#d0bfff", fxGain: 1.1, from: 15,
+    // aid: 롤 이펙트가 멀리서 보면 작은 점이라, 그 밑에 직접 그린 꼬리·빛무리·구슬을 깐다(롤 이펙트는 그대로)
+    { kind: "line", name: "벨코즈 Q", champ: "Velkoz", cast: 0.251, speed: 1300, radius: 50, range: 1100, color: "#d0bfff", fxGain: 1.1, from: 15, aid: true,
       split: { speed: 2100, radius: 45, range: 1100, telegraph: 0.25 } },
     { kind: "line", name: "제라스 E", champ: "Xerath", cast: 0.25, speed: 1400, radius: 60, range: 1125, color: "#91a7ff", from: 15 },
     { kind: "line", name: "이즈리얼 Q", champ: "Ezreal", cast: 0.25, speed: 2000, radius: 60, range: 1200, color: "#74c0fc", fxGain: 0.7, from: 25, look: "bolt" },
@@ -1848,6 +1849,8 @@
       target = null;
       skillAt = t; skillUsed = sk;
       facing = sk.back ? { x: -dx, y: -dy } : { x: dx, y: dy };     // 뒤로 뛸 때는 커서 쪽을 본 채로
+      // 갈리오 E: 누르자마자 커서 쪽으로 돌아서서 그쪽을 본 채 뒤로 물러난다
+      if (sk.backstep) viewAngle = Math.atan2(dy, dx);
       if (!sk.amb) mySkillStart(sk);
       // 몇 번째인지에 따라 동작이 다르다(리븐 Q 세 번, 아칼리 R 두 번)
       if (o.anim) act = { anim: o.anim, t0: t, hold: dash.t0 + dash.dur, until: dash.t0 + dash.dur + 0.3 };
@@ -2706,7 +2709,12 @@
       } else {
         player.vx = player.vy = 0;
       }
-      if (steering) {
+      if (dash) {
+        // 이동기를 쓰는 중(시전·뒤로 빠지기·돌진): 이동기가 정한 쪽(go 의 facing) 을 본다.
+        // 하던 이동(WASD·클릭) 의 방향으로 되돌아가지 않게 그 기억을 지운다
+        steer = null;
+        prevFacing = null;
+      } else if (steering) {
         facing = { x: Math.cos(steer.a), y: Math.sin(steer.a) };
         prevFacing = null;
       } else if (steer) {
@@ -2715,7 +2723,7 @@
         facing = { x: Math.cos(a), y: Math.sin(a) };
         steer = null;
       }
-      if (steering) {
+      if (steering || dash) {
         // 위에서 정했다
       } else if (player.vx || player.vy) {
         const n = Math.hypot(player.vx, player.vy);
@@ -3391,7 +3399,7 @@
         band(L, frameOf("beam"), f.a, f.b, f.skill.radius * (1.6 + (1 - al) * 0.6), 0, col, al * 0.8, 1, (1 - al) * 0.7, 0.7, now * 3);
       }
       for (const m of missiles) {
-        if (m.fx) continue;
+        if (m.fx && !m.skill.aid) continue;
         const g = gfxOf(m.skill);
         floorQ(L, frameOf("glow"), m.x, m.y, m.skill.radius * 2.6, 0, rgb(g.glow || m.skill.color), 0.3, 1);
       }
@@ -3480,7 +3488,8 @@
       drawParts(L, false);
       drawAmb(L, false, now);
       for (const m of missiles) {
-        if (!m.fx) { missileFx(L, m, now); continue; }
+        if (!m.fx || m.skill.aid) missileFx(L, m, now);
+        if (!m.fx) continue;
         // 롤 이펙트 투사체: 머리에 스킬 색 빛무리(판정 크기쯤) 를 깔아 바닥 위에서도 잘 보이게
         const p = upright(m.x, m.y, FX_H), r = m.skill.radius * p.k, g = gfxOf(m.skill);
         rq(L, frameOf("glow"), p.x, p.y, r * 2.6, r * 2.6, 0, rgb(g.glow || m.skill.color), 0.32, 1);
@@ -3589,7 +3598,7 @@
       // 투사체: 지나온 길(리본 꼬리) 을 적어 두고, 표의 파티클을 흘린다
       const now = performance.now() / 1000;
       for (const m of missiles) {
-        if (m.fx) continue;
+        if (m.fx && !m.skill.aid) continue;      // aid: 롤 이펙트 밑에 꼬리·파티클도(벨코즈 Q)
         const g = gfxOf(m.skill);
         (m.hist = m.hist || []).push({ x: m.x, y: m.y, at: now });
         const keep = g.trail ? g.trail[2] : 0.2;

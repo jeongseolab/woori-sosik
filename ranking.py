@@ -33,7 +33,7 @@ RUN_SLACK_SEC = 2.0
 RUN_MIN_MS = 1000
 # 스킬샷 피하기 규칙 버전. static/dodge.js 의 VERSION 과 같아야 한다.
 # 스킬이 바뀌면 예전 기록과 견줄 수 없으니 이 버전의 기록끼리만 순위를 매긴다
-DODGE_VERSION = 18
+DODGE_VERSION = 19
 # 판수는 이 버전부터의 판을 합쳐 센다(버전이 바뀌어도 이어진다)
 DODGE_RUNS_FROM = 15
 # 모드: 노멀과 하드(CC 를 당한다) 는 순위를 따로 매긴다
