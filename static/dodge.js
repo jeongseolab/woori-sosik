@@ -41,7 +41,7 @@
 
 (function () {
   // 게임 규칙이 바뀌면 올린다. 서버는 같은 버전의 기록끼리만 순위를 매긴다
-  const VERSION = 14;
+  const VERSION = 15;
 
   const ARENA = { w: 1400, h: 900 };
   const CHAMP = { radius: 65, speed: 335 };
@@ -74,6 +74,8 @@
   //   realm: 오로라 W 처럼 "다른 차원" 에 들어간 연출(화면 색이 바뀐다)
   //   charges·gap·window: window 초 안에 gap 초 간격으로 charges 번(아리 R). dirs: 위·아래·왼쪽·오른쪽 방향마다 쿨타임이 따로(벨베스 Q)
   //   unstoppable: 돌진 중에 맞아도 CC 를 받지 않는다(말파이트 R). dashAnim: 돌진 중 3D 동작(없으면 그 스킬 동작)
+  //   arc: 뛰어오르는 높이(포물선). 롤은 엔진이 띄우고 동작 클립에는 높이가 거의 없는 도약기(카직스 E·르블랑 W …)
+  //   leap: 동작 클립에서 날아가는 부분의 길이(초). 돌진 거리와 상관없이 그 부분을 돌진 동안 다 재생하고, 나머지(착지) 는 내려앉은 뒤(트리스타나 W)
   //   passive: 스킬을 쓰면 패시브 돌진이 따라 나오는 챔피언(칼리스타·암베사). 설명에 "패시브" 를 붙인다
   //   step: 시전 뒤 이 초 동안 이동 입력(클릭한 곳·WASD 방향) 을 기다렸다가 그쪽으로 돌진한다. 없으면 안 간다(칼리스타·암베사)
   //   charges 와 함께 ranges·chargeAnims: 몇 번째인지에 따라 거리·동작(리븐 Q·아칼리 R). extend: 쓸 때마다 window 가 새로 시작(리븐 Q)
@@ -98,6 +100,7 @@
   //   stealth·stealthDelay·detect: 투명(그 초 뒤부터). detect 안에 적이 있으면 들킨다. shroud: {radius, dur} 안에 있으면 투명(아칼리 W)
   //   slowCleanse: 걸린 둔화를 푼다(가렌 Q). slowImmune: 그동안 둔화를 받지 않는다(마스터 이 R). cdAfter: 이속이 끝난 뒤에 쿨타임
   //   noAnim: 시전 동작이 없는 스킬(카직스 R·마스터 이 R)
+  //   quick: {pct, lost} 패시브 이동 속도 +pct. 맞으면 lost 초 동안 꺼진다. 스킬 이속(haste) 과는 더하지 않고 큰 쪽(티모 W)
   //   src: 거리·속도의 출처. data = 롤 클라이언트 데이터(CommunityDragon, 2026-10-02 받음.
   //   DashSpeed·DashDistance·castRangeDisplayOverride 등), 추정 = 데이터에 없어(챔피언 스크립트 안의 값) 롤 지식으로 적은 값.
   //   "DashBonusSpeed"·"DashSpeedRatio" 는 이동 속도에 더하는 값이라 CHAMP.speed 를 더했다
@@ -107,19 +110,20 @@
     graves: { slot: 2, kind: "dash", range: 375, min: 275, speed: 750, cd: 12, src: "data" },
     vayne: { slot: 0, kind: "dash", range: 300, fixed: true, speed: 900, cd: 2, src: "range: data, speed: 추정" },
     corki: { slot: 1, kind: "dash", range: 600, min: 300, speed: 650 + CHAMP.speed, cd: 12, src: "data" },
-    tristana: { slot: 1, kind: "dash", range: 900, speed: 1100, cd: 14, src: "range: data, speed: 추정" },
+    tristana: { slot: 1, kind: "dash", range: 900, speed: 1100, leap: 0.8, cd: 14, src: "range: data, speed: 추정, leap: 클립 Spell2_LNG 의 나는 부분" },
     gragas: { slot: 2, kind: "dash", range: 600, fixed: true, speed: 900, cd: 12, src: "data" },
-    gnar: { slot: 2, kind: "dash", range: 475, dur: 0.6, cd: 12, src: "data(TravelTime)" },
+    gnar: { slot: 2, kind: "dash", range: 475, dur: 0.6, arc: 120, cd: 12, src: "data(TravelTime), arc: 추정" },
     kindred: [
       { slot: 0, kind: "dash", range: 340, fixed: true, speed: 500, cd: 9, src: "data" },
       { slot: 3, kind: "guard", lambs: { radius: 530, dur: 4 }, cd: 120, src: "data(AoERadius·BuffDuration)" },
     ],
-    caitlyn: { slot: 2, kind: "dash", range: 390, fixed: true, back: true, speed: 1000, cd: 8, src: "추정" },
+    caitlyn: { slot: 2, kind: "dash", range: 390, fixed: true, back: true, speed: 1000, arc: 60, cd: 8, src: "추정" },
     ahri: [
       { slot: 1, kind: "guard", haste: 0.4, hasteEnd: 0, hasteDur: 2, cd: 5, src: "data(AhriW MovementSpeed·MovementSpeedDuration), 줄어드는 것: 롤 설명" },
       { slot: 3, kind: "dash", range: 500, speed: 1200, charges: 3, gap: 1, window: 10, cd: 100, src: "data" },
     ],
     fizz: { slot: 2, kind: "dash", range: 400, dur: 0.25, untarget: 0.75, recast: { range: 400, dur: 0.25 }, cd: 8,
+            desc: "장난치기: 커서 쪽 400 장대 위로 뛰어 0.75초 동안 스킬이 통과한다(장대 위에서는 못 걷는다). 그사이 다시 누르면 한 번 더 400 뛴다",
             src: "range·recast.range: data(FizzE·FizzETwo), dur·untarget: 추정" },
     riven: [
       { slot: 0, kind: "dash", range: 260, fixed: true, dur: 0.25, charges: 3, gap: 0.35, window: 4, extend: true, chargeAnims: ["spell1", "spell1b", "spell1c"], cd: 13,
@@ -149,7 +153,7 @@
       { slot: 2, kind: "guard", haste: 0.4, hasteDur: 9, runAnim: "skrun", cd: 13, src: "data(KaynE MS·WallWalkDuration), 벽 지나가기는 빼고(경기장에 벽이 없다)" },
     ],
     khazix: [
-      { slot: 2, kind: "dash", range: 700, speed: 1000, cd: 12, src: "range: data, speed: 추정" },
+      { slot: 2, kind: "dash", range: 700, speed: 1000, arc: 150, cd: 12, src: "range: data, speed·arc: 추정" },
       { slot: 3, kind: "guard", stealth: 1.25, haste: 0.4, charges: 2, gap: 2, window: 12, noAnim: true, runAnim: "skrun", cd: 70,
         src: "data(KhazixR StealthDuration·BonusMovementSpeedPercent·NumberOfCasts·RecastCD·RecastWindow)" },
     ],
@@ -189,8 +193,8 @@
     ],
     shaco: { slot: 0, kind: "blink", range: 400, windup: 0.125, stealth: 3.5, cd: 11, src: "data(PseudoCastTime·StealthDuration)" },
     leblanc: [
-      { slot: 1, kind: "dash", range: 600, speed: 1450, recall: 4, cd: 10, src: "range·recall: data(SnapbackTimeAllowed), speed: 추정" },
-      { slot: 3, kind: "dash", range: 600, speed: 1450, recall: 4, anim: "spell2", cd: 25,
+      { slot: 1, kind: "dash", range: 600, speed: 1450, recall: 4, arc: 110, cd: 10, src: "range·recall: data(SnapbackTimeAllowed), speed: 추정" },
+      { slot: 3, kind: "dash", range: 600, speed: 1450, recall: 4, arc: 110, anim: "spell2", cd: 25,
         desc: "흉내: 왜곡(W) 을 한 번 더. 커서 쪽으로 최대 600 돌진, 4초 안에 다시 누르면 처음 자리로",
         src: "cd: data(LeblancR 3레벨), 나머지는 W 와 같다" },
     ],
@@ -232,8 +236,8 @@
     yasuo: { slot: 1, kind: "guard", wall: { width: 600, life: 4, range: 450, thick: 100 }, cd: 17,
              src: "data(Width·WallLife·TravelRange·Thickness), 장막이 나아가는 빠르기: 추정" },
     samira: { slot: 1, kind: "guard", blades: { dur: 0.75, radius: 325 }, cd: 22, src: "data(SlashDuration·castRange)" },
-    vladimir: { slot: 1, kind: "guard", untarget: 2, sink: true, haste: 0.375, hasteDur: 1, cd: 16,
-                src: "haste: data(HasteBoost·HasteDuration), untarget: 추정(데이터에 없다)" },
+    vladimir: { slot: 1, kind: "guard", untarget: 2, sink: true, haste: 0.375, hasteEnd: 0, hasteDur: 1, cd: 16,
+                src: "haste: data(HasteBoost·HasteDuration), 줄어드는 것: 롤 설명, untarget: 추정(데이터에 없다)" },
     olaf: { slot: 3, kind: "guard", ccImmune: 3, whileCC: true, cd: 80, src: "data(Duration), CC 중 사용: 추정" },
     // 패시브 돌진(전투 태세): 칼리스타는 Q(꿰뚫기) 를 던지는 동안이나 던진 직후 들어온 이동 입력(클릭한 곳·WASD 방향) 쪽으로 뛴다.
     // 이동 입력이 없으면 안 뛴다(암베사와 같은 방식). 뛰는 거리는 신발에 따라 달라서 데이터에 없다
@@ -254,7 +258,8 @@
               src: "최대 +100%(MSMultiplier)·6초(RollDuration): data, 오르는 모양: 추정, 쿨타임은 구르기가 끝난 뒤(롤 설명)" },
     twitch: { slot: 0, kind: "guard", stealth: 14, stealthDelay: 1, detect: 500, haste: 0.3, runAnim: "skrun", cd: 16,
               src: "data(TwitchHideInShadows StealthDuration·MaxFadeTime·HiddenSpeed·StealthDetectionRange), 500 안의 적에게 들키는 것: 추정(롤은 경고 표시)" },
-    teemo: { slot: 1, kind: "guard", haste: 0.48, hasteDur: 3, cd: 14, src: "data(TeemoW ActiveMoveSpeedBonus·ActiveMoveSpeedBuffDuration)" },
+    teemo: { slot: 1, kind: "guard", haste: 0.48, hasteDur: 3, quick: { pct: 0.24, lost: 5 }, cd: 14,
+             src: "data(TeemoW ActiveMoveSpeedBonus·ActiveMoveSpeedBuffDuration·PassiveMoveSpeedBonus·PassiveCooldownOnDamageTaken)" },
     blitzcrank: { slot: 1, kind: "guard", haste: 0.75, hasteEnd: 0.1, hasteRamp: 2.5, hasteDur: 5, hasteAfter: { pct: -0.3, dur: 1.5 }, cd: 15,
                   src: "data(Overdrive MoveSpeedMod·MoveSpeedModMin·MoveSpeedModMinTime·Duration·MoveSpeedModReduction·SlowDuration)" },
     zilean: { slot: 2, kind: "guard", haste: 0.99, hasteDur: 2.5, cd: 15, src: "data(TimeWarp SpeedAmount·Duration)" },
@@ -268,7 +273,7 @@
     udyr: { slot: 2, kind: "guard", haste: 0.49, hasteEnd: 0, hasteDur: 4, runAnim: "skrun", cd: 6, src: "data(UdyrE BaseMoveSpeed·MoveSpeedDuration), 줄어드는 것: 롤 설명" },
     masteryi: { slot: 3, kind: "guard", haste: 0.6, hasteDur: 7, slowImmune: true, noAnim: true, runAnim: "skrun", cd: 85, src: "data(Highlander RMSBonus 3레벨·RDuration)" },
     poppy: { slot: 1, kind: "guard", haste: 0.4, hasteDur: 2, runAnim: "skrun", cd: 12, src: "data(PoppyW Haste·Duration)" },
-    warwick: { slot: 3, kind: "dash", range: Math.round(2.5 * CHAMP.speed), speed: 1800, dashAnim: "dash4", cd: 70, src: "range: 롤 설명(이동 속도의 250%), speed: 추정" },
+    warwick: { slot: 3, kind: "dash", range: Math.round(2.5 * CHAMP.speed), speed: 1800, arc: 110, dashAnim: "dash4", cd: 70, src: "range: 롤 설명(이동 속도의 250%), speed·arc: 추정" },
     bard: { slot: 2, kind: "dash", range: 900, fixed: true, speed: 900, untarget: 1, portal: true, cd: 16,
             desc: "신비한 여정: 커서 쪽으로 900 길이의 차원문을 열고 그 안을 지나간다. 지나가는 동안(1초) 스킬이 통과",
             src: "data(BardE castRange·BaseTravelSpeed)" },
@@ -331,6 +336,7 @@
       if (sk.slowCleanse) out.push("걸린 둔화를 푼다");
       if (sk.slowImmune) out.push("그동안 둔화를 받지 않는다");
       if (sk.charges) out.push(`${sk.window}초 안에 ${sk.charges}번`);
+      if (sk.quick) out.push(`패시브: 이동 속도 +${pct(sk.quick.pct)}%(맞으면 ${sk.quick.lost}초 동안 꺼짐)`);
       return out.join(". ");
     }
     const how = sk.kind === "blink" ? `커서 쪽으로 최대 ${sk.range} 순간이동`
@@ -1570,6 +1576,7 @@
       const sk = mySkills().find(x => x.slot === i);
       if (state !== "play" || !sk) return;
       if ((held() && !sk.whileCC) || dash) { sfx("deny"); return; }
+      if (act && act.land) act = null;      // 앞 스킬의 착지 동작은 새 스킬이 끊는다
       if (sk.amb || sk.step) { ambCast(sk, i); return; }
       if (sk.kind === "guard") {
         if (cdLeft[i] > 0) { sfx("deny"); return; }
@@ -1654,6 +1661,8 @@
       haste = { sk, a: sk.haste, b: sk.hasteEnd != null ? sk.hasteEnd : sk.haste, from: t, ramp: sk.hasteRamp || dur, until: t + dur, after: sk.hasteAfter };
     }
     const hastePct = () => !haste ? 0 : haste.a + (haste.b - haste.a) * Math.min(1, (t - haste.from) / haste.ramp);
+    // 패시브 이속(티모 W 날쌘 발놀림): 맞은 뒤 lost 초 동안은 없다
+    const quickPct = () => { const q = mySkills().find(x => x.quick); return q && t - hurtAt >= q.quick.lost ? q.quick.pct : 0; };
     // 막기 스킬을 켠다
     function guard(sk) {
       skillAt = t; skillUsed = sk;
@@ -1798,6 +1807,7 @@
       const sk = m.sk;
       if (!sk.amb) {
         fxStop(m.fxDash);
+        if (!sk.step) landAct(m);
         myPlay(myPart(sk, "land"));
         myBuff(sk, Math.max(sk.hasteDur || 0, sk.barrier || 0, sk.stealth || 0, sk.untarget || 0));
       }
@@ -1820,6 +1830,20 @@
         if (sk.haste) startHaste(sk, sk.stealth);
         if (sk.realm) { realm = { from: t, until: hidden }; flashGround(player.x, player.y, 150, "#9775fa", 0.5); }
       }
+    }
+
+    // 내려앉은 뒤에도 스킬 동작 클립이 남았으면 끝까지(착지·마무리). 움직이면 롤처럼 끊는다(landAct 의 hold 가 지금)
+    function landAct(m) {
+      const sk = m.sk, now = act && t < act.until;
+      const anim = now ? act.anim : sk.dashAnim || sk.anim || "spell" + (sk.slot + 1);
+      const at = now ? t - act.t0 : sk.leap || (sk.dashAnim ? t - m.t0 : t - skillAt);
+      const rest = clipLen(anim) - at;
+      if (rest > 0.05) act = { anim, t0: t - at, hold: t, until: t + rest, land: true };
+    }
+    // 내 챔피언 동작 클립의 길이(초). 모델을 아직 못 받았으면 0
+    function clipLen(anim) {
+      const md = fxgl && fxgl.model(modelKey(faceKey)), an = md && md.m.anims[anim];
+      return an ? an.F / an.fps : 0;
     }
 
     // ── 암베사 ──
@@ -2476,7 +2500,7 @@
         target = null;
         flashFx(from, player);
       }
-      const base = CHAMP.speed * (ghostLeft > 0 ? 1 + spellById("ghost").bonus : 1) * (1 + hastePct());
+      const base = CHAMP.speed * (ghostLeft > 0 ? 1 + spellById("ghost").bonus : 1) * (1 + (hastePct() < 0 ? hastePct() : Math.max(hastePct(), quickPct())));
       // 둔화: 가장 센 것 하나만. 줄어드는 둔화(to) 는 시간에 따라 pct → to. 이동 속도는 110 아래로 안 내려간다
       let slow = 0;
       for (const e of effects) {
@@ -2532,6 +2556,10 @@
         // 매혹: 시전자 쪽으로 느리게 걸어간다(매혹의 둔화는 110 밑으로도 내려간다)
         target = null;
         toward(charm.from, base * (1 - charm.slow));
+      } else if (pole && t < pole.until) {
+        // 피즈 E: 장대 위에서는 걷지 못한다(다시 눌러 한 번 더 뛰는 것만)
+        player.vx = player.vy = 0;
+        target = null;
       } else if (mx || my) {
         // 이동 방향은 키 방향으로 빠르게 휘어 돈다(서 있다가 누르면 바로 그쪽으로)
         target = null;
@@ -3015,6 +3043,7 @@
         // 이동기를 쓰면 그 스킬 동작(spell1~4) 을 한 번. 돌진이 길면 돌진이 끝날 때까지.
         // 돌진 동작이 따로 있으면(칼리스타 패시브) 시전 뒤 돌진하는 동안은 그 동작
         const sk = skillUsed, since = t - skillAt;
+        if (act && act.land && moving) act = null;      // 착지 동작은 움직이면 끝
         const acting = act && t < act.until && (t < act.hold || !moving);
         const casting = !acting && sk && !sk.noAnim && (dash || since < (sk.parry || sk.cast || 0.5));
         // 나피리 W 는 시전하는 동안 움직일 수 있어서, 움직이면 시전 달리기(Spell4_Run)
@@ -3025,7 +3054,9 @@
         out.push({ key: modelKey(faceKey), x: player.x, y: player.y, z: lift(), angle: viewAngle,
                    anim: acting ? act.anim : leaping ? sk.dashAnim : castRun ? sk.castRun : casting ? sk.anim || "spell" + (sk.slot + 1)
                      : moving ? (fast ? fast.runAnim : "run") : fast && fast.runIdle ? fast.runAnim : "idle",
-                   time: acting ? t - act.t0 : leaping ? t - dash.t0 : casting ? since : animClock, loop: (!casting || !!sk.castRun) && !acting,
+                   time: acting ? t - act.t0 : leaping ? t - dash.t0
+                     : casting && dash && dash.started && sk.leap ? sk.leap * (dash.dur ? Math.min(1, (t - dash.t0) / dash.dur) : 1)
+                     : casting ? since : animClock, loop: (!casting || !!sk.castRun) && !acting,
                    // 투명하면 내 화면에서만 흐리게 보인다(롤에서 내 챔피언이 반투명해지는 것처럼)
                    // 블라디미르 W 는 핏물 웅덩이로 가라앉아 거의 안 보인다
                    alpha: untarget > t && skillUsed && skillUsed.sink ? 0.15 : hidden > t ? 0.35 : untarget > t ? 0.4 : safe > 0 && Math.floor(safe * 10) % 2 ? 0.45 : 1,
@@ -3198,8 +3229,11 @@
     }
     // 공중에 뜬 높이(그림). 끌려가는 동안은 살짝, 띄우는 스킬은 포물선
     function lift() {
+      // 도약기(arc): 돌진하는 동안 포물선으로 뜬다
+      const k = dash && dash.started && dash.sk.arc && dash.dur ? Math.min(1, (t - dash.t0) / dash.dur) : 0;
+      const jump = k ? dash.sk.arc * 4 * k * (1 - k) : 0;
       const e = mode === "hard" && cc("air");
-      if (!e) return 0;
+      if (!e) return jump;
       if (e.pull) return 50;
       return (e.lift ? 170 : 70) * Math.sin(Math.PI * Math.min(1, (t - e.start) / (e.end - e.start)));
     }
