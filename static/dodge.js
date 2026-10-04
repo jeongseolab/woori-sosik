@@ -41,7 +41,7 @@
 
 (function () {
   // 게임 규칙이 바뀌면 올린다. 서버는 같은 버전의 기록끼리만 순위를 매긴다
-  const VERSION = 15;
+  const VERSION = 16;
 
   const ARENA = { w: 1400, h: 900 };
   const CHAMP = { radius: 65, speed: 335 };
@@ -74,6 +74,7 @@
   //   realm: 오로라 W 처럼 "다른 차원" 에 들어간 연출(화면 색이 바뀐다)
   //   charges·gap·window: window 초 안에 gap 초 간격으로 charges 번(아리 R). dirs: 위·아래·왼쪽·오른쪽 방향마다 쿨타임이 따로(벨베스 Q)
   //   unstoppable: 돌진 중에 맞아도 CC 를 받지 않는다(말파이트 R). dashAnim: 돌진 중 3D 동작(없으면 그 스킬 동작)
+  //   backstep: 시전 시간(windup) 동안 이만큼 뒤로 빠졌다가 돌진한다(갈리오 E). 도착 자리는 누른 자리 기준
   //   arc: 뛰어오르는 높이(포물선). 롤은 엔진이 띄우고 동작 클립에는 높이가 거의 없는 도약기(카직스 E·르블랑 W …)
   //   leap: 동작 클립에서 날아가는 부분의 길이(초). 돌진 거리와 상관없이 그 부분을 돌진 동안 다 재생하고, 나머지(착지) 는 내려앉은 뒤(트리스타나 W)
   //   passive: 스킬을 쓰면 패시브 돌진이 따라 나오는 챔피언(칼리스타·암베사). 설명에 "패시브" 를 붙인다
@@ -185,7 +186,9 @@
     // 쉔: 스킬을 쓰면 기의 장벽(패시브) 보호막
     shen: { slot: 2, kind: "dash", range: 600, min: 300, speed: 800 + CHAMP.speed, barrier: 2.5, color: "#74c0fc", cd: 10, src: "data(DashBonusSpeed·MinimumDistance, ShenPassive ShieldDuration)" },
     urgot: { slot: 2, kind: "dash", range: 450, fixed: true, speed: 1200, barrier: 4, color: "#ff8787", cd: 14, src: "data(EShieldDuration)" },
-    galio: { slot: 2, kind: "dash", range: 650, min: 250, speed: 1400, cd: 7, src: "range: data, speed: 추정" },
+    galio: { slot: 2, kind: "dash", range: 650, min: 250, speed: 1400, windup: 0.4, backstep: 100, anim: "windup3", dashAnim: "spell3", cd: 7,
+             desc: "정의의 주먹: 0.4초 동안 뒤로 빠졌다가(그동안 CC 를 맞으면 끊긴다) 커서 쪽으로 최대 650 돌진",
+             src: "range·min·windup: data(GalioE castRange·MinRange·spellCastTime), 뒤로 빠지는 거리 100·speed: 추정, 동작: Spell3_Windup → Spell3" },
     zoe: { slot: 3, kind: "blink", range: 575, ret: 1, cd: 5, src: "range: data, ret: 추정" },
     kassadin: [
       { slot: 0, kind: "guard", barrier: 1.5, color: "#da77f2", cd: 7, src: "data(NullLance ShieldDuration), 롤은 마법 피해만 막는다(여기 스킬은 거의 마법 피해)" },
@@ -300,7 +303,9 @@
   // 그 챔피언의 이동기 칸들(없으면 빈 배열)
   const skillsOf = key => { const v = MOBILITY[String(key).toLowerCase()]; return !v ? [] : Array.isArray(v) ? v : [v]; };
   // 고를 수 있는 내 챔피언은 이동기·막기 스킬과 그 3D 동작이 다 들어간 이 71명. 키(소문자) → OP.GG·모델에 쓰는 이름(첫 글자만 대문자)
-  const champAlias = k => k[0].toUpperCase() + k.slice(1);
+  // OP.GG 그림 이름은 대소문자를 가린다. 두 단어 이름(MasterYi) 은 첫 글자만 대문자로 하면 못 받는다
+  const ALIAS = { masteryi: "MasterYi" };
+  const champAlias = k => ALIAS[k] || k[0].toUpperCase() + k.slice(1);
   const champName = key => CHAMP_NAMES[String(key).toLowerCase()] || key;
   // 롤 쿨타임 그대로면 궁극기(100초) 는 한 판에 한 번, 벨베스 Q(1초) 는 쉬지 않고 쓴다. 소환사 주문(15·20초) 쪽으로 맞춘다
   const skillCd = sk => Math.min(20, Math.max(4, sk.cd));
@@ -1807,9 +1812,12 @@
     function go(sk, dx, dy, len, o) {
       if (sk.back) { dx = -dx; dy = -dy; }
       const to = inArena(player.x + dx * len, player.y + dy * len);
-      const d = Math.hypot(to.x - player.x, to.y - player.y);
+      // 갈리오 E: 시전하는 동안 뒤로 빠진 자리에서 돌진이 시작된다
+      const from = sk.backstep && o.wind ? inArena(player.x - dx * sk.backstep, player.y - dy * sk.backstep) : { x: player.x, y: player.y };
+      const d = Math.hypot(to.x - from.x, to.y - from.y);
       const blink = sk.kind === "blink";
-      dash = { sk, fx: player.x, fy: player.y, tx: to.x, ty: to.y, t0: t + (o.wind || 0), blink, again: !!o.again,
+      dash = { sk, fx: from.x, fy: from.y, tx: to.x, ty: to.y, t0: t + (o.wind || 0), blink, again: !!o.again,
+               bx: player.x, by: player.y, w0: t,
                dur: blink ? 0 : Math.max(0.05, o.dur || sk.dur || d / sk.speed) };
       target = null;
       skillAt = t; skillUsed = sk;
@@ -2569,6 +2577,12 @@
       } else if (dash) {
         // 이동기: 시전 시간에는 제자리, 그 뒤 정해진 시간 동안 곧게 가거나 순간이동. 돌진 중에 걸린 CC 는 끝난 뒤에 느낀다
         player.vx = player.vy = 0;
+        if (t < dash.t0 && dash.sk.backstep) {
+          // 시전 중에 뒤로 빠진다(처음엔 빠르고 끝에서 멈추듯)
+          const k = Math.min(1, (t - dash.w0) / (dash.t0 - dash.w0)), e = 1 - (1 - k) * (1 - k);
+          player.x = dash.bx + (dash.fx - dash.bx) * e;
+          player.y = dash.by + (dash.fy - dash.by) * e;
+        }
         if (t >= dash.t0) {
           if (!dash.started) moveStarts(dash);
           const k = dash.dur ? Math.min(1, (t - dash.t0) / dash.dur) : 1;

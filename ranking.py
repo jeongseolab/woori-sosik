@@ -33,7 +33,9 @@ RUN_SLACK_SEC = 2.0
 RUN_MIN_MS = 1000
 # 스킬샷 피하기 규칙 버전. static/dodge.js 의 VERSION 과 같아야 한다.
 # 스킬이 바뀌면 예전 기록과 견줄 수 없으니 이 버전의 기록끼리만 순위를 매긴다
-DODGE_VERSION = 15
+DODGE_VERSION = 16
+# 판수는 이 버전부터의 판을 합쳐 센다(버전이 바뀌어도 이어진다)
+DODGE_RUNS_FROM = 15
 # 모드: 노멀과 하드(CC 를 당한다) 는 순위를 따로 매긴다
 DODGE_MODES = ("normal", "hard")
 # 주간 순위에 들려면 이번 주에 이만큼은 해야 한다(1판 운으로 1등이 되지 않게)
@@ -97,13 +99,14 @@ def finish_run(account_id: int, token: str, ms: int, dodged: int, ver: int = 1, 
 
 
 def _dodge_stats(account_ids, since=None, mode="normal"):
-    """{account_id: (최고 ms, 판수)}. 지금 버전, 그 모드의 판만. since 를 주면 그 뒤의 판만."""
+    """{account_id: (최고 ms, 판수)}. 그 모드의 판만. since 를 주면 그 뒤의 판만.
+    최고 기록은 지금 버전의 판만(규칙이 달라 견줄 수 없다), 판수는 DODGE_RUNS_FROM 버전부터 합친다."""
     if not account_ids:
         return {}
     marks = ",".join("?" * len(account_ids))
-    sql = ("SELECT account_id, MAX(ms) AS best, COUNT(*) AS n FROM dodge_runs"
-           " WHERE ver = ? AND COALESCE(mode, 'normal') = ? AND account_id IN (%s)" % marks)
-    params = [DODGE_VERSION, mode] + list(account_ids)
+    sql = ("SELECT account_id, MAX(CASE WHEN ver = ? THEN ms END) AS best, COUNT(*) AS n FROM dodge_runs"
+           " WHERE ver >= ? AND COALESCE(mode, 'normal') = ? AND account_id IN (%s)" % marks)
+    params = [DODGE_VERSION, DODGE_RUNS_FROM, mode] + list(account_ids)
     if since is not None:
         sql += " AND played_at >= ?"
         params.append(since)
