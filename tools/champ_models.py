@@ -60,7 +60,8 @@ MOBILITY = {"ezreal": 3, "lucian": 3, "graves": 3, "vayne": 1, "corki": 2, "tris
             "kindred": 1, "caitlyn": 3, "ahri": 4, "fizz": 3, "riven": 3, "sejuani": 1, "malphite": 4, "sylas": 3,
             "zeri": 3, "tryndamere": 3, "renekton": 3, "ornn": 3, "rakan": 2, "aatrox": 3, "kled": 3, "kayn": 1,
             "khazix": 3, "naafiri": 3, "aurora": 2, "belveth": 1, "gwen": 3, "fiora": 1, "pyke": 3, "shen": 3,
-            "urgot": 3, "galio": 3, "zoe": 4, "kassadin": 4, "shaco": 1, "leblanc": 2, "ekko": 3, "akali": 3}
+            "urgot": 3, "galio": 3, "zoe": 4, "kassadin": 4, "shaco": 1, "leblanc": 2, "ekko": 3, "akali": 3,
+            "yone": 3}
 # 패시브로 움직이는 챔피언(스킬을 쓰면 패시브 돌진이 따라 나온다) 과 그 스킬(Q=1 … R=4)
 PASSIVE = {"kalista": [1], "ambessa": [1, 2, 3, 4]}
 # 움직이지 않고 적 스킬을 막는 스킬(피오라 W 응수, 시비르 E 주문 보호막, 야스오 W 바람 장막 …) 과 그 스킬(Q=1 … R=4)
@@ -79,7 +80,8 @@ MORE = {"riven": [1], "akali": [2, 4], "pyke": [2], "ekko": [4], "aurora": [4], 
 # 사일러스 E 는 Spell3 이 0.1초 조각이라 돌진 Spell3_Dash, 트리스타나 W 는 Spell2_In(0.27초, 뛰기 시작만)·Spell2_Mid(이미 떠 있는 데서 시작) 대신
 # 뛰어올라 내려앉기까지 다 든 Spell2_LNG(1.33초: 0.8초 날고 나머지는 착지)
 SPELL_CLIPS = {("thresh", 1): ["Spell1_In"], ("sylas", 3): ["Spell3_Dash"], ("tristana", 2): ["Spell2_LNG"],
-               ("riven", 1): ["Spell1A"], ("rakan", 4): ["Spell4_Into"], ("naafiri", 2): ["Spell4_Idle"]}
+               ("riven", 1): ["Spell1A"], ("rakan", 4): ["Spell4_Into"], ("naafiri", 2): ["Spell4_Idle"],
+               ("yone", 3): ["Spell3_Spirit"]}
 # 스킬 말고 따로 굽는 동작: 이름 → 클립 이름 후보(칼리스타 Q 뒤의 패시브 돌진).
 # 암베사는 스킬마다 패시브 돌진 동작이 따로 있다(해시로만 적힌 클립: passivedash_spell1a·1b·2·3·4·4_fail.anm),
 # Q2(Spell1B), R 내려찍기(spell4_hit). spell4 는 R 시전(Spell4_Windup)
@@ -89,7 +91,10 @@ EXTRA_CLIPS = {"kalista": {"dash": ["Spell1_Dash_0", "Attack1_Dash_0"]},
                "warwick": {"dash4": ["Spell4Dash"]}, "pyke": {"skrun": ["Spell2_Move"]}, "kayn": {"skrun": ["Spell3_Run"]},
                "rakan": {"skrun": ["Spell4_Run"]}, "hecarim": {"skrun": ["Spell3run"]}, "twitch": {"skrun": ["Run_Stealth"]},
                "volibear": {"skrun": ["Spell1_Run"]}, "udyr": {"skrun": ["Spell3_Run"]}, "masteryi": {"skrun": ["Run_Haste"]},
-               "poppy": {"skrun": ["Spell2_Run"]}, "naafiri": {"skrun": ["Spell4_Run"]}, "garen": {"skrun": ["Run_Spell1"]}, "khazix": {"skrun": ["Run_Haste"]},
+               "poppy": {"skrun": ["Spell2_Run"]},
+               # 요네 E: 영혼 상태 달리기, 남은 몸(밀려나며 서기·서 있기), 몸으로 돌아가는 돌진과 도착
+               "yone": {"skrun": ["Spell3_Run01"], "bodyin": ["Spell3_BodyIn"], "body": ["Spell3_BodyLoop"],
+                        "back": ["Spell3_Dash"], "out": ["Spell3_Out"]}, "naafiri": {"skrun": ["Spell4_Run"]}, "garen": {"skrun": ["Run_Spell1"]}, "khazix": {"skrun": ["Run_Haste"]},
                "ambessa": {"spell1b": ["Spell1B"], "dash1": ["{99834a45}"], "dash1b": ["{6e4a0e24}"], "dash2": ["{5ed08d9d}"],
                            "dash3": ["{ed14ca10}"], "miss4": ["{0e9701b2}"], "hit4": ["Spell4_Hit_ToIdle"]}}
 FPS = 15

@@ -41,7 +41,7 @@
 
 (function () {
   // 게임 규칙이 바뀌면 올린다. 서버는 같은 버전의 기록끼리만 순위를 매긴다
-  const VERSION = 15;
+  const VERSION = 16;
 
   const ARENA = { w: 1400, h: 900 };
   const CHAMP = { radius: 65, speed: 335 };
@@ -62,7 +62,7 @@
   ];
   const spellById = id => SPELLS.find(sp => sp.id === id);
 
-  // 내 챔피언의 이동기와 막기 스킬(tools/champ_models.py 의 MOBILITY·PASSIVE·GUARD·SHIELD·MORE 와 같은 71명). 그 칸만 켜지고 나머지 칸은 어둡다.
+  // 내 챔피언의 이동기와 막기 스킬(tools/champ_models.py 의 MOBILITY·PASSIVE·GUARD·SHIELD·MORE 와 같은 72명). 그 칸만 켜지고 나머지 칸은 어둡다.
   // 여러 칸을 쓰는 챔피언(암베사 Q·W·E) 은 배열로 적는다
   //   slot: 0~3(Q W E R). kind: blink(순간이동) | dash(돌진)
   //   range: 최대 거리. min: 커서가 더 가까워도 이만큼은 간다. fixed: 늘 range 만큼. back: 커서 반대쪽으로(뒤로 뛰기)
@@ -83,6 +83,9 @@
   //   rewind: 이 초 전에 있던 자리로 돌아간다(에코 R). rift: {range, radius, dur} 영혼 세계(오로라 R).
   //   portal: 차원문 그림(바드 E). granite: 이 초 동안 안 맞으면 보호막이 생기는 패시브(말파이트)
   //   steady: 시전 중에도 CC 로 끊기지 않고 저지 불가(암베사 R). anim: 시전 동작(없으면 spell1~4). desc: 설명을 통째로
+  //   soul: 요네 E 영혼해방 {dur, lockout, back, wind, speed}. 돌진하면 몸은 시전한 자리 뒤 back 에 남고 dur 초 동안 영혼 상태
+  //     (이속은 haste → hasteEnd 로 오른다). lockout 초 뒤 다시 누르거나 dur 초가 지나면 wind 초 시전 뒤 speed 로 몸까지 돌아간다.
+  //     돌아가는 동안(시전 포함) 공중에 뜨지 않는다. 쿨타임은 몸으로 돌아온 뒤부터
   //   amb: 암베사 스킬(q·w·e·r). 시전·돌진·도착 때 그 스킬의 효과를 낸다(ambStrike·ambLand)
   //   cd: 롤 최대 레벨 쿨타임(기본 스킬 5레벨, 궁극기 3레벨). 게임에서는 skillCd() 로 4~20초 안으로 맞춘다
   // kind: guard 는 움직이지 않고 적 스킬을 막는다
@@ -187,6 +190,13 @@
     urgot: { slot: 2, kind: "dash", range: 450, fixed: true, speed: 1200, barrier: 4, color: "#ff8787", cd: 14, src: "data(EShieldDuration)" },
     galio: { slot: 2, kind: "dash", range: 650, min: 250, speed: 1400, cd: 7, src: "range: data, speed: 추정" },
     zoe: { slot: 3, kind: "blink", range: 575, ret: 1, cd: 5, src: "range: data, ret: 추정" },
+    yone: { slot: 2, kind: "dash", range: 300, fixed: true, speed: 1200, soul: { dur: 5, lockout: 0.5, back: 300, wind: 0.225, speed: 2500 },
+            haste: 0.1, hasteEnd: 0.3, hasteDur: 5, runAnim: "skrun", cd: 10,
+            desc: "영혼해방: 커서 쪽으로 300 돌진해 5초 동안 영혼 상태가 된다(몸은 시전한 자리 뒤 300 에 남는다). "
+              + "이동 속도가 +10% 에서 5초에 걸쳐 +30% 까지 오른다. 0.5초 뒤 다시 누르거나 5초가 지나면 몸으로 돌아간다(돌아가는 동안 공중에 뜨지 않는다)",
+            src: "data(YoneE EDashRange·EDashSpeed·ReturnTimer·StartingMS·MovementSpeed·RecastLockout, cd 5레벨), "
+              + "몸 자리·돌아갈 때 공중에 뜸 면역·재사용 시전 0.225초: 롤 위키, 이속이 고르게 오르는 것: 롤 설명(시간에 따라), "
+              + "돌아가는 속도 2500·쿨타임이 돌아온 뒤부터: 추정" },
     kassadin: [
       { slot: 0, kind: "guard", barrier: 1.5, color: "#da77f2", cd: 7, src: "data(NullLance ShieldDuration), 롤은 마법 피해만 막는다(여기 스킬은 거의 마법 피해)" },
       { slot: 3, kind: "blink", range: 500, cd: 2, src: "data" },
@@ -299,7 +309,7 @@
   };
   // 그 챔피언의 이동기 칸들(없으면 빈 배열)
   const skillsOf = key => { const v = MOBILITY[String(key).toLowerCase()]; return !v ? [] : Array.isArray(v) ? v : [v]; };
-  // 고를 수 있는 내 챔피언은 이동기·막기 스킬과 그 3D 동작이 다 들어간 이 71명. 키(소문자) → OP.GG·모델에 쓰는 이름(첫 글자만 대문자)
+  // 고를 수 있는 내 챔피언은 이동기·막기 스킬과 그 3D 동작이 다 들어간 이 72명. 키(소문자) → OP.GG·모델에 쓰는 이름(첫 글자만 대문자)
   const champAlias = k => k[0].toUpperCase() + k.slice(1);
   const champName = key => CHAMP_NAMES[String(key).toLowerCase()] || key;
   // 롤 쿨타임 그대로면 궁극기(100초) 는 한 판에 한 번, 벨베스 Q(1초) 는 쉬지 않고 쓴다. 소환사 주문(15·20초) 쪽으로 맞춘다
@@ -1120,7 +1130,7 @@
     let cds, ghostLeft, cursor, facing, prevFacing, facingAt, viewAngle, steer, level, pops, lastSpree, lastMark;
     let mode, spells;                    // 이번 판의 모드(normal | hard) 와 주문 두 개
     let effects, tenacity, ablaze, marked, tethers;   // 하드 모드 CC(applyCC)
-    let cdLeft, cdMax, dirLeft, charges, dash, untarget, ret, recall, pole;   // 내 챔피언 이동기(useSkill)
+    let cdLeft, cdMax, dirLeft, charges, dash, untarget, ret, recall, pole, soul;   // 내 챔피언 이동기(useSkill)
     let hidden, seen, haste, realm, skillAt, skillUsed;
     let fade, detect, shroud, rift, trail, followUp, slowFree, hurtAt;     // 더 넣은 스킬(투명·영혼 세계·되감기 …)
     let amb, act;      // 암베사 스킬 상태, 내 3D 동작을 정해 두는 것(act: {anim, t0, hold, until})
@@ -1128,7 +1138,7 @@
     let lastGuardFx = -1;
     let bannerTimer = 0, overTimer = 0;
     let controls = loadControls();
-    // 내 챔피언: 시작 창에서 고른 챔피언. 고른 적이 없으면 앱이 넘긴 챔피언이 고를 수 있는 71명 안에 있을 때 그 챔피언, 아니면 이즈리얼
+    // 내 챔피언: 시작 창에서 고른 챔피언. 고른 적이 없으면 앱이 넘긴 챔피언이 고를 수 있는 72명 안에 있을 때 그 챔피언, 아니면 이즈리얼
     const myChamp = () => controls.champ || (MOBILITY[modelKey(opFace)] ? modelKey(opFace) : "ezreal");
     faceKey = champAlias(myChamp());
     // 고를 수 있는 챔피언과 적 챔피언의 모델을 처음 열 때 한꺼번에 받는다(다음부터는 브라우저 저장소에서 읽는다).
@@ -1179,6 +1189,7 @@
       untarget = -1;           // 이 시각까지 스킬이 통과(피즈 E)
       ret = null;              // 돌아올 자리와 시각(조이 R) {x, y, at}
       recall = null;           // 다시 누르면 돌아갈 자리(르블랑 W) {slot, x, y, until}
+      soul = null;             // 요네 E 영혼 상태 {sk, slot, x, y(남은 몸), x0, y0, angle, from, slide, until}
       pole = null;             // 한 번 더 뛸 수 있는 동안(피즈 E) {until}
       hidden = -1;             // 이 시각까지 투명(적은 seen 을 노린다)
       seen = null;
@@ -1456,6 +1467,8 @@
     function addCC(type, dur, s, extra = {}, at = 0) {
       if (type !== "air" && tenacity > t) dur = Math.max(Math.min(dur, 0.5), dur * (1 - spellById("cleanse").tenacity));
       const e = { type, start: t + at, end: t + at + dur, skill: s, ...extra };
+      // 요네 E 로 몸에 돌아가는 동안(시전 포함) 은 공중에 뜨지 않는다(밀려나기 면역)
+      if (type === "air" && dash && dash.sk.airImmune) { e.end = e.start; return e; }
       effects.push(e);
       if (type !== "slow" && at === 0) target = null;     // 롤처럼 이동 명령이 끊긴다
       return e;
@@ -1611,6 +1624,12 @@
     function useSkill(i) {
       const sk = mySkills().find(x => x.slot === i);
       if (state !== "play" || !sk) return;
+      // 요네 E 를 다시 누르면 몸으로 돌아간다(처음 lockout 초는 안 된다)
+      if (soul && soul.slot === i) {
+        if (dash || held() || t < soul.from + sk.soul.lockout) { sfx("deny"); return; }
+        soulBack();
+        return;
+      }
       if ((held() && !sk.whileCC) || dash) { sfx("deny"); return; }
       if (act && act.land) act = null;      // 앞 스킬의 착지 동작은 새 스킬이 끊는다
       if (sk.amb || sk.step) { ambCast(sk, i); return; }
@@ -1827,6 +1846,7 @@
       if (!m.blink && !sk.amb && !sk.step) mySfx("ghost");
       if (sk.untarget && !m.again) { untarget = t + sk.untarget; if (sk.recast) pole = { until: untarget }; }
       if (sk.recall) recall = { slot: sk.slot, x: m.fx, y: m.fy, until: t + sk.recall };
+      if (sk.soul) soulStart(m);
       if (sk.barrier && !m.again) giveBarrier(sk);
       if (sk.amb || sk.step) { if (m.ambStep) ambStepStart(m); else ambStrike(m); }
       // 바드 E: 양 끝에 차원문
@@ -1845,7 +1865,8 @@
         fxStop(m.fxDash);
         if (!sk.step) landAct(m);
         myPlay(myPart(sk, "land"));
-        myBuff(sk, Math.max(sk.hasteDur || 0, sk.barrier || 0, sk.stealth || 0, sk.untarget || 0));
+        // 요네 E 의 buf(Yone_E_Invulnerable_Buf) 는 밀려나기 면역이라 몸으로 돌아갈 때만 붙인다(soulBack)
+        if (!sk.soul) myBuff(sk, Math.max(sk.hasteDur || 0, sk.barrier || 0, sk.stealth || 0, sk.untarget || 0));
       }
       if (sk.amb || sk.step) {
         if (m.ambCast) ambOpen(m);
@@ -1859,6 +1880,7 @@
       }
       if (m.again) { untarget = t; pole = null; }
       if (sk.ret) ret = { x: m.fx, y: m.fy, at: t + sk.ret };
+      if (sk.soulBack) soulEnd();
       if (sk.stealth) {
         hidden = t + sk.stealth;
         // 순간이동(샤코 Q) 은 사라진 자리를, 뛰어간 것(오로라 W) 은 내려앉은 자리를 마지막으로 본다
@@ -1866,6 +1888,40 @@
         if (sk.haste) startHaste(sk, sk.stealth);
         if (sk.realm) { realm = { from: t, until: hidden }; flashGround(player.x, player.y, 150, "#9775fa", 0.5); }
       }
+    }
+
+    // 요네 E: 영혼이 나가면 몸은 시전한 자리 뒤 back 에 남고(돌진하는 동안 밀려난다), 영혼은 이속이 붙는다
+    function soulStart(m) {
+      const sk = m.sk, d = Math.hypot(m.tx - m.fx, m.ty - m.fy);
+      const ux = d > 1 ? (m.tx - m.fx) / d : facing.x, uy = d > 1 ? (m.ty - m.fy) / d : facing.y;
+      const body = inArena(m.fx - ux * sk.soul.back, m.fy - uy * sk.soul.back);
+      soul = { sk, slot: sk.slot, x0: m.fx, y0: m.fy, x: body.x, y: body.y, angle: Math.atan2(uy, ux),
+               from: t, slide: m.dur || 0.25, until: t + sk.soul.dur };
+      startHaste(sk, sk.soul.dur);
+    }
+    // 몸으로 돌아간다: wind 초 시전(제자리) 뒤 몸까지 곧게. 그동안 공중에 뜨지 않는다(addCC)
+    function soulBack() {
+      const sk = soul.sk, d = Math.hypot(soul.x - player.x, soul.y - player.y);
+      const back = { slot: sk.slot, kind: "dash", soulBack: true, airImmune: true, anim: "back", dashAnim: "back" };
+      dash = { sk: back, fx: player.x, fy: player.y, tx: soul.x, ty: soul.y, t0: t + sk.soul.wind, blink: false, again: false,
+               dur: Math.max(0.05, d / sk.soul.speed) };
+      if (d > 1) facing = { x: (soul.x - player.x) / d, y: (soul.y - player.y) / d };
+      target = null;
+      skillAt = t; skillUsed = back;
+      myPlay(myPart(sk, "buf"), sk.soul.wind + dash.dur);
+      lolSound("Play_sfx_Yone_YoneE_return_cast", 0.5);
+      soul.until = Infinity;          // 돌아가는 중에는 저절로 또 돌아가지 않는다
+    }
+    // 몸에 닿았다: 영혼 상태와 이속이 끝나고, 쿨타임이 돌기 시작한다
+    function soulEnd() {
+      if (!soul) return;
+      const sk = soul.sk;
+      if (haste && haste.sk === sk) haste = null;
+      cdMax[sk.slot] = cdLeft[sk.slot] = skillCd(sk);
+      emit({ x: player.x, y: player.y, z: 80, size: 170, size1: 60, color: "#ffffff", color1: "#91a7ff", shape: "glow", life: 0.35, a: 0.7 });
+      emit({ x: player.x, y: player.y, ground: 1, size: 50, size1: 120, color: "#e5dbff", color1: "#5c7cfa", shape: "ring", life: 0.4, a: 0.8 });
+      act = { anim: "out", t0: t, hold: t, until: t + clipLen("out"), land: true };
+      soul = null;
     }
 
     // 내려앉은 뒤에도 스킬 동작 클립이 남았으면 끝까지(착지·마무리). 움직이면 롤처럼 끊는다(landAct 의 hold 가 지금)
@@ -2464,6 +2520,13 @@
                  color: purple ? "#ffffff" : "#495057", color1: purple ? "#9775fa" : "#212529", shape: "glow", add: purple ? 1 : 0, life: 0.9, a: purple ? 1 : 0.4 });
         }
       }
+      // 요네 E: 남은 몸 발밑에 푸른 고리, 몸과 영혼 사이에 옅은 줄
+      if (soul && !(t - (soul.fxAt || -1) < 0.3)) {
+        soul.fxAt = t;
+        emit({ x: soul.x, y: soul.y, ground: 1, size: 60, size1: 95, color: "#dbe4ff", color1: "#4c6ef5", shape: "ring", life: 0.6, a: 0.8 });
+        emit({ x: soul.x, y: soul.y, z: 40, line: [soul.x, soul.y, player.x, player.y], size: 26, size1: 18, color: "#edf2ff",
+               color1: "#748ffc", shape: "beam", life: 0.32, a: 0.35 });
+      }
       // 르블랑 W·조이 R 이 돌아갈 자리는 바닥에 보라 표식이 숨 쉰다
       for (const m of [recall, ret]) {
         if (m && !(t - (m.fxAt || -1) < 0.3)) {
@@ -2527,6 +2590,8 @@
         emit({ x: player.x + rand(-45, 45), y: player.y + rand(-45, 45), z: rand(10, 110), vz: 90, size: 22, size1: 4,
                color: "#ffffff", color1: "#9775fa", shape: "glow", life: 0.7 });
       }
+      // 요네 E: 영혼 상태가 끝나면 몸으로(CC 중이면 풀린 뒤에. 롤도 CC 가 돌아가기를 늦춘다)
+      if (soul && !dash && t >= soul.until && !held()) soulBack();
       // 조이 R: 정해진 시간 뒤 제자리로(CC 중이어도)
       if (ret && t >= ret.at) {
         const from = { x: player.x, y: player.y };
@@ -3098,7 +3163,14 @@
                    alpha: untarget > t && skillUsed && skillUsed.sink ? 0.15 : hidden > t ? 0.35 : untarget > t ? 0.4 : safe > 0 && Math.floor(safe * 10) % 2 ? 0.45 : 1,
                    tint: hurt > 0 ? [1, 1, 1, hurt / 0.4 * 0.55] : (realm && t < realm.until) || (rift && t < rift.until && dist(player, rift) <= rift.r) ? [0.6, 0.5, 1, 0.35]
                      : parry > t ? [0.75, 0.9, 1, 0.45] : undying > t || ccImmune > t ? [1, 0.25, 0.2, 0.3]
-                     : ghostLeft > 0 ? [0.4, 0.85, 0.95, 0.22] : null });
+                     : soul ? [0.65, 0.75, 1, 0.4] : ghostLeft > 0 ? [0.4, 0.85, 0.95, 0.22] : null });
+        // 요네 E: 남은 몸(돌진하는 동안 뒤로 밀려나서 그 자리에 선다)
+        if (soul) {
+          const k = Math.min(1, (t - soul.from) / soul.slide), since = t - soul.from, inLen = clipLen("bodyin");
+          out.push({ key: modelKey(faceKey), x: soul.x0 + (soul.x - soul.x0) * k, y: soul.y0 + (soul.y - soul.y0) * k, z: 0, angle: soul.angle,
+                     anim: since < inLen ? "bodyin" : "body", time: since < inLen ? since : since - inLen,
+                     loop: since >= inLen, alpha: 1, tint: [0.35, 0.35, 0.45, 0.35] });
+        }
       }
       for (const c of casters) {
         if (!model(c.skill.champ)) continue;
@@ -4690,12 +4762,12 @@
           || (sk.parry && parry > t) || (sk.spellShield && shieldUp && t < shieldUp.until) || (sk.barrier && barrier && t < barrier.until) || (sk.wall && wall && t < wall.until)
           || (sk.blades && blades && t < blades.until) || (sk.ccImmune && ccImmune > t) || (sk.undying && undying > t)
           || (sk.lambs && lambs && t < lambs.until) || (sk.haste && haste && haste.sk === sk) || (sk.shroud && shroud && t < shroud.until)
-          || (sk.rift && rift && t < rift.until) || (sk.stealth && fade);
+          || (sk.rift && rift && t < rift.until) || (sk.stealth && fade) || (soul && soul.slot === sk.slot);
         b.classList.toggle("active", !!using);
         b.classList.toggle("locked", !!blocked && !sk.whileCC);     // 올라프 R 은 CC 중에도 쓴다
         // 다시 누를 수 있으면(르블랑 W·피즈 E) 쿨타임이 돌아도 밝게
         b.classList.toggle("recast", !dash && !!((recall && recall.slot === sk.slot) || (sk.recast && pole) || (sk.amb === "q" && ambQ2())
-          || (followUp && followUp.slot === sk.slot)));
+          || (followUp && followUp.slot === sk.slot) || (soul && soul.slot === sk.slot && t >= soul.from + sk.soul.lockout)));
       }
       // 오로라 W: 다른 차원에 들어가면 화면 색이 바뀐다
       view.classList.toggle("realm", !!(realm && t < realm.until && state === "play"));
@@ -5234,7 +5306,7 @@
     function setBest(text) { hud("best").innerHTML = text || ""; }
 
     // 내 챔피언을 나중에 바꾼다(티어표를 늦게 받았을 때)
-    // 시작 창에서 직접 고른 챔피언이 있으면 그쪽이 먼저다(고를 수 있는 71명 밖의 챔피언이면 이즈리얼)
+    // 시작 창에서 직접 고른 챔피언이 있으면 그쪽이 먼저다(고를 수 있는 72명 밖의 챔피언이면 이즈리얼)
     function setChamp(key, name) {
       if (key) { opFace = key; if (!controls.champ) applyFace(); }
       if (name) opts.name = name;
