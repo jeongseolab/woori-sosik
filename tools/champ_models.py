@@ -114,6 +114,111 @@ EXTRA_CLIPS = {"kalista": {"dash": ["Spell1_Dash_0", "Attack1_Dash_0"], "dash90"
                         "back": ["Spell3_Dash"], "out": ["Spell3_Out"]}, "naafiri": {"skrun": ["Spell4_Run"]}, "garen": {"skrun": ["Run_Spell1"]}, "khazix": {"skrun": ["Run_Haste"]},
                "ambessa": {"spell1b": ["Spell1B"], "dash1": ["{99834a45}"], "dash1b": ["{6e4a0e24}"], "dash2": ["{5ed08d9d}"],
                            "dash3": ["{ed14ca10}"], "miss4": ["{0e9701b2}"], "hit4": ["Spell4_Hit_ToIdle"]}}
+# 21.0.0 에 더한 챔피언(연습장 내 챔피언으로 고를 수 있게) 과 그 스킬(Q=1 … R=4). 스킬이 없는 챔피언은 [] (서 있기·달리기만)
+NEW21 = {"akshan": [2],
+         "alistar": [2, 4],
+         "amumu": [1],
+         "anivia": [],
+         "annie": [3],
+         "aphelios": [],
+         "ashe": [],
+         "aurelionsol": [2],
+         "azir": [2, 3],
+         "brand": [],
+         "braum": [3],
+         "briar": [1],
+         "camille": [4],
+         "cassiopeia": [],
+         "chogath": [],
+         "darius": [4],
+         "drmundo": [4],
+         "elise": [],
+         "evelynn": [4],
+         "fiddlesticks": [4],
+         "gangplank": [2],
+         "illaoi": [2],
+         "irelia": [1, 2],
+         "ivern": [1, 3],
+         "jarvaniv": [1, 3, 4],
+         "jax": [1, 3],
+         "jayce": [1],
+         "jhin": [],
+         "jinx": [],
+         "kaisa": [3],
+         "karthus": [],
+         "katarina": [2, 3],
+         "kayle": [2, 4],
+         "kogmaw": [],
+         "ksante": [2, 3],
+         "leesin": [1, 2],
+         "leona": [3],
+         "lillia": [],
+         "lissandra": [3, 4],
+         "locke": [2, 3],
+         "malzahar": [],
+         "maokai": [2],
+         "mel": [2],
+         "milio": [3, 4],
+         "missfortune": [2],
+         "monkeyking": [2, 3],
+         "mordekaiser": [],
+         "nami": [],
+         "nasus": [],
+         "nautilus": [1, 2],
+         "neeko": [2],
+         "nidalee": [2],
+         "nilah": [2, 3],
+         "nunu": [],
+         "pantheon": [2, 3, 4],
+         "qiyana": [3],
+         "quinn": [3, 4],
+         "reksai": [3],
+         "rell": [2, 3],
+         "renata": [],
+         "rengar": [4],
+         "rumble": [2],
+         "ryze": [4],
+         "senna": [3],
+         "seraphine": [2],
+         "sett": [1],
+         "shyvana": [2],
+         "singed": [4],
+         "sion": [2],
+         "skarner": [2],
+         "smolder": [3],
+         "soraka": [],
+         "swain": [],
+         "syndra": [],
+         "tahmkench": [2],
+         "taliyah": [],
+         "talon": [4],
+         "taric": [2, 4],
+         "thresh": [2],
+         "trundle": [2],
+         "twistedfate": [4],
+         "varus": [],
+         "veigar": [],
+         "velkoz": [],
+         "vex": [2, 4],
+         "vi": [4],
+         "viego": [4],
+         "viktor": [],
+         "xayah": [4],
+         "xerath": [],
+         "xinzhao": [3, 4],
+         "yorick": [],
+         "yunara": [3],
+         "yuumi": [3],
+         "zaahen": [3, 4],
+         "zac": [3],
+         "zed": [2, 4],
+         "ziggs": [2],
+         "zyra": [],
+         "heimerdinger": [],
+         "hwei": []}
+# NEW21 스킬의 동작: 롤 스킬 데이터의 mAnimationName(칸 번호와 다른 것만. Idle1·Run·Crit 처럼 돌진 동작을 스크립트가 따로 트는 것은 빼고 칸 번호 동작)
+SPELL_CLIPS_NEW21 = {("jarvaniv", 4): ["Spell3"], ("jax", 1): ["Spell2"], ("katarina", 3): ["Spell2"], ("lissandra", 4): ["Spell4_Self"], ("missfortune", 2): ["Spell1"], ("nautilus", 2): ["Spell1"], ("pantheon", 3): ["Spell3_Cast"], ("singed", 4): ["Spell2"], ("thresh", 2): ["Spell3"], ("twistedfate", 4): ["Spell1"], ("zac", 3): ["Spell3_Windup"], ("zed", 2): ["Spell2_Cast"]}
+SPELL_CLIPS.update(SPELL_CLIPS_NEW21)
 FPS = 15
 TEX_SIZE = 512
 
@@ -676,7 +781,7 @@ def main():
         keys = sorted(str(c["alias"]).lower() for c in get_json(
             "plugins/rcp-be-lol-game-data/global/default/v1/champion-summary.json") if 0 < c["id"] < 10000 and "_" not in str(c["alias"]))
     elif a.mobility:
-        keys = sorted(set(MOBILITY) | set(PASSIVE) | set(GUARD) | set(SHIELD) | set(MORE))
+        keys = sorted(set(MOBILITY) | set(PASSIVE) | set(GUARD) | set(SHIELD) | set(MORE) | set(NEW21))
     else:
         keys = [k.lower() for k in a.champions] or sorted(CASTERS)
     index_path = os.path.join(OUT, "index.json")
@@ -685,7 +790,7 @@ def main():
         try:
             # 체력바 높이(h) 는 손으로 고친 챔피언이 있다(커밋 bf8d43a). 다시 만들어도 있던 값은 지킨다(새로 재려면 그 h 를 지운다)
             old_h = index.get(k, {}).get("h")
-            index[k] = build(k, wad_dir, sorted(set(CASTERS.get(k, [])) | ({MOBILITY[k]} if k in MOBILITY else set()) | set(PASSIVE.get(k, [])) | set(GUARD.get(k, [])) | set(SHIELD.get(k, [])) | set(MORE.get(k, []))))
+            index[k] = build(k, wad_dir, sorted(set(CASTERS.get(k, [])) | ({MOBILITY[k]} if k in MOBILITY else set()) | set(PASSIVE.get(k, [])) | set(GUARD.get(k, [])) | set(SHIELD.get(k, [])) | set(MORE.get(k, [])) | set(NEW21.get(k, []))))
             if old_h is not None:
                 index[k]["h"] = old_h
             index[k]["v"] = file_version(k)
