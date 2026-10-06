@@ -42,7 +42,7 @@
 (function () {
   // 게임 버전 "앞.가운데.끝". 앞 = 새 챔피언 추가, 가운데 = 스킬 추가·버그 수정, 끝 = 아주 미묘한 변화.
   // 하나를 올리면 그 뒤 숫자는 0 으로. 서버는 앞 숫자가 같은 기록끼리만 순위를 매긴다(ranking.py 의 DODGE_VERSION 과 같게)
-  const VERSION = "20.4.0";
+  const VERSION = "20.5.0";
 
   const ARENA = { w: 1400, h: 900 };
   const CHAMP = { radius: 65, speed: 335 };
@@ -119,7 +119,12 @@
   //   DashSpeed·DashDistance·castRangeDisplayOverride 등), 추정 = 데이터에 없어(챔피언 스크립트 안의 값) 롤 지식으로 적은 값.
   //   "DashBonusSpeed"·"DashSpeedRatio" 는 이동 속도에 더하는 값이라 CHAMP.speed 를 더했다
   const MOBILITY = {
-    ezreal: { slot: 2, kind: "blink", range: 475, windup: 0.25, cd: 14, src: "data(windup: spellCastTime)" },
+    // 이즈리얼 E: 돌아서지 않고 순간이동한다. 동작은 지금 보는 쪽에서 순간이동 쪽까지의 각도로 고른다
+    // (롤 그래프: 40° 미만 Spell3_0, 130° 미만 ±90, 그 위 ±180. 시전 0.25초 동안 몸이 그쪽으로 쏠린다).
+    // 순간이동하면 그쪽을 보고 착지 동작(Spell3_Exit_NoTarget_Idle, 공중에서 내려앉는다)
+    ezreal: { slot: 2, kind: "blink", range: 475, windup: 0.25, dirAnims: { cut: [40, 130], spin: "turn", anims: ["spell3", "e90", "em90", "e180", "em180"] },
+              exitAnim: "eexit",
+              cd: 14, src: "data(windup: spellCastTime), dirAnims: 로컬 16.19 애니메이션 그래프" },
     lucian: { slot: 2, kind: "dash", range: 425, min: 200, speed: 1350, cd: 14, src: "data" },
     graves: { slot: 2, kind: "dash", range: 375, min: 275, speed: 750, cd: 12, src: "data" },
     vayne: { slot: 0, kind: "dash", range: 300, fixed: true, speed: 900, cd: 2, src: "range: data, speed: 추정" },
@@ -274,7 +279,10 @@
     olaf: { slot: 3, kind: "guard", ccImmune: 3, whileCC: true, cd: 80, src: "data(Duration), CC 중 사용: 추정" },
     // 패시브 돌진(전투 태세): 칼리스타는 Q(꿰뚫기) 를 던지는 동안이나 던진 직후 들어온 이동 입력(클릭한 곳·WASD 방향) 쪽으로 뛴다.
     // 이동 입력이 없으면 안 뛴다(암베사와 같은 방식). 뛰는 거리는 신발에 따라 달라서 데이터에 없다
-    kalista: { slot: 0, kind: "dash", range: 250, min: 250, dur: 0.3, windup: 0.25, step: 0.2, spear: true, passive: true, anim: "spell1", dashAnim: "dash", cd: 9,
+    // 칼리스타 패시브 돌진: 뛰는 쪽을 보고, 직전에 보던 쪽(창을 던진 쪽) 의 각도로 클립을 고른다
+    // (롤 그래프: 45° 미만 Spell1_Dash_0, 135° 미만 ±90, 그 위 ±180. 클립 처음에 몸이 그쪽을 보다가 앞으로 돈다)
+    kalista: { slot: 0, kind: "dash", range: 250, min: 250, dur: 0.3, windup: 0.25, step: 0.2, spear: true, passive: true, anim: "spell1", dashAnim: "dash",
+               dirAnims: { cut: [45, 135], anims: ["dash", "dash90", "dashm90", "dash180", "dashm180"] }, cd: 9,
                desc: "꿰뚫기: 커서 쪽으로 창을 던진다. 던지는 동안이나 던진 직후(0.2초) 이동 입력(클릭한 곳·WASD 방향) 이 있으면 그쪽으로 250 뛴다(전투 태세). 없으면 안 뛴다",
                src: "cd·windup·창(사거리 1150·빠르기 1200): data(KalistaMysticShot), 거리·뛰는 시간·입력 기다리는 시간: 추정" },
     // 이동 속도를 올려 달아나는 챔피언(값은 기본 스킬 5레벨, 궁극기 3레벨)
@@ -1990,6 +1998,13 @@
       }
       return { base, spd: slow > 0 ? Math.max(110, base * (1 - slow)) : base };
     }
+    // 방향별 클립 고르기. deg: 기준 쪽에서 잰 각도(모델 +x = 오른쪽이 +). anims: [0, 90, -90, 180, -180]
+    function dirClip(spec, deg) {
+      const a = Math.abs(deg), [c1, c2] = spec.cut, A = spec.anims;
+      return a < c1 ? A[0] : a < c2 ? (deg >= 0 ? A[1] : A[2]) : (deg >= 0 ? A[3] : A[4]);
+    }
+    // 벡터 v 가 방향 f 에서 몇 도 돌아가 있는지(오른쪽 +). 바닥 좌표에서 f 의 오른쪽은 (-f.y, f.x)(dodge-gl.js 의 모델 +x)
+    const sideDeg = (f, v) => Math.atan2(f.x * v.y - f.y * v.x, f.x * v.x + f.y * v.y) * 180 / Math.PI;
     // 3D 모델이 지금 facing 쪽을 곧바로 본다(이동기를 쓸 때. 걸을 때는 TURN 으로 천천히 돈다)
     const faceNow = () => { viewAngle = Math.atan2(facing.y, facing.x); };
     // 움직임을 예약한다. 시전 시간(wind) 동안은 제자리에서 스킬 동작, 그 뒤 돌진하거나 순간이동(step)
@@ -2007,10 +2022,17 @@
       if (sk.leaps) { const L = sk.leaps.find(l => d < l[0]); dash.leapAnim = L[1]; dash.leap = L[2]; }
       target = null;
       skillAt = t; skillUsed = sk;
-      facing = sk.back ? { x: -dx, y: -dy } : { x: dx, y: dy };     // 뒤로 뛸 때는 커서 쪽을 본 채로
-      // 롤처럼 누르자마자 그쪽으로 돌아선다(천천히 돌면 짧은 돌진은 도는 중에 끝나 하던 이동 방향을 보는 것 같다).
-      // 갈리오 E 는 커서 쪽을 본 채 뒤로 물러난다
-      faceNow();
+      const look = sk.back ? { x: -dx, y: -dy } : { x: dx, y: dy };     // 뒤로 뛸 때는 커서 쪽을 본 채로
+      if (sk.dirAnims && sk.dirAnims.spin === "turn") {
+        // 이즈리얼 E: 보던 쪽 그대로 방향별 동작을 하고, 동작이 끝나면 순간이동한 쪽을 본다
+        const anim = dirClip(sk.dirAnims, sideDeg({ x: Math.cos(viewAngle), y: Math.sin(viewAngle) }, look));
+        act = { anim, t0: t, hold: dash.t0, until: t + clipLen(anim), faceAfter: look };
+      } else {
+        facing = look;
+        // 롤처럼 누르자마자 그쪽으로 돌아선다(천천히 돌면 짧은 돌진은 도는 중에 끝나 하던 이동 방향을 보는 것 같다).
+        // 갈리오 E 는 커서 쪽을 본 채 뒤로 물러난다
+        faceNow();
+      }
       if (!sk.amb) mySkillStart(sk);
       // 몇 번째인지에 따라 동작이 다르다(리븐 Q 세 번, 아칼리 R 두 번)
       if (o.anim) act = { anim: o.anim, t0: t, hold: dash.t0 + dash.dur, until: dash.t0 + dash.dur + 0.3 };
@@ -2041,7 +2063,12 @@
       const sk = m.sk;
       if (!sk.amb) {
         fxStop(m.fxDash);
-        if (!sk.step) landAct(m);
+        if (sk.exitAnim) {
+          // 이즈리얼 E: 도착하면 순간이동한 쪽을 보고 착지 동작. 몸이 이미 그쪽으로 쏠려 있어 섞지 않는다(돌린 채 섞으면 몸이 두 번 돈다)
+          if (act && act.faceAfter) { facing = act.faceAfter; faceNow(); }
+          act = { anim: sk.exitAnim, t0: t, hold: t, until: t + clipLen(sk.exitAnim), land: true };
+          lastPose = null; blendFrom = null;
+        } else if (!sk.step) landAct(m);
         myPlay(myPart(sk, "land"));
         // 요네 E 의 buf(Yone_E_Invulnerable_Buf) 는 밀려나기 면역이라 몸으로 돌아갈 때만 붙인다(soulBack)
         if (!sk.soul) myBuff(sk, Math.max(sk.hasteDur || 0, sk.barrier || 0, sk.stealth || 0, sk.untarget || 0));
@@ -2108,7 +2135,7 @@
       const anim = now ? act.anim : m.leapAnim || sk.dashAnim || sk.anim || "spell" + (sk.slot + 1);
       const at = now ? t - act.t0 : m.leap || sk.leap || (sk.dashAnim ? t - m.t0 : t - skillAt);
       const rest = clipLen(anim) - at;
-      if (rest > 0.05) act = { anim, t0: t - at, hold: t, until: t + rest, land: true };
+      if (rest > 0.05) act = { anim, t0: t - at, hold: t, until: t + rest, land: true, faceAfter: now ? act.faceAfter : null };
     }
     // 내 챔피언 동작 클립의 길이(초). 모델을 아직 못 받았으면 0
     function clipLen(anim) {
@@ -2276,6 +2303,8 @@
       const end = inArena(player.x + dx * len, player.y + dy * len);
       dash = { sk, fx: player.x, fy: player.y, tx: end.x, ty: end.y, t0: t, dur: sk.dur, blink: false, ambStep: true, q2: s.q2, a: s.a,
                walkTo: controls.move !== "wasd" && d > sk.range ? to : null };
+      // 칼리스타: 뛰는 쪽에서 본, 직전에 보던 쪽(창) 의 각도로 방향별 돌진 동작
+      if (sk.dirAnims) dash.dirAnim = dirClip(sk.dirAnims, sideDeg({ x: dx, y: dy }, { x: Math.cos(viewAngle), y: Math.sin(viewAngle) }));
       facing = { x: dx, y: dy };
       faceNow();
       // 돌진 동작은 act 가 맡는다. 내려앉은 뒤 걸어가면 시전 동작을 다시 하지 않게 시각을 앞당겨 둔다
@@ -2283,7 +2312,8 @@
       moveStarts(dash);
     }
     function ambStepStart(m) {
-      act = { anim: m.q2 ? "dash1b" : m.sk.dashAnim, t0: t, hold: t + m.dur, until: t + m.dur + 0.45 };
+      // 칼리스타는 내려앉은 뒤 움직이면 남은 동작을 끝낸다(land). 암베사는 그대로
+      act = { anim: m.dirAnim || (m.q2 ? "dash1b" : m.sk.dashAnim), t0: t, hold: t + m.dur, until: t + m.dur + 0.45, land: !m.sk.amb };
       if (m.sk.amb) ambDashFx(m); else kalistaDashFx(m);
       sfx("ghost");
     }
@@ -3345,10 +3375,17 @@
           risenAt = skillAt;
           act = { anim: sk.riseAnim, t0: untarget, hold: untarget + sk.rise, until: untarget + clipLen(sk.riseAnim), land: true };
         }
+        if (act && act.faceAfter && (t >= act.until || (moving && t >= act.hold))) {
+          if (!moving) { facing = act.faceAfter; faceNow(); }
+          act.faceAfter = null;
+          lastPose = null; blendFrom = null;
+        }
         if (act && act.land && moving && t >= act.hold) act = null;      // 착지 동작은 움직이면 끝(꼭 할 부분 hold 까지는 한다)
         const acting = act && t < act.until && (t < act.hold || !moving);
         // 웅덩이(블라디미르 W) 는 웅덩이인 동안 가라앉은 동작 그대로(Spell2Down 은 땅속에 머문다)
-        const casting = !acting && sk && !sk.noAnim && (dash || since < (sk.parry || (sk.sink && untarget > t ? sk.untarget : 0) || sk.cast || 0.5));
+        // 방향별 동작으로 순간이동한 것(이즈리얼 E) 은 그 동작(act) 이 끝나면 시전 동작으로 돌아가지 않는다
+        const casting = !acting && sk && !sk.noAnim && (dash || (!(sk.dirAnims && sk.dirAnims.spin === "turn")
+          && since < (sk.parry || (sk.sink && untarget > t ? sk.untarget : 0) || sk.cast || 0.5)));
         // 나피리 W 는 시전하는 동안 움직일 수 있어서, 움직이면 시전 달리기(Spell4_Run)
         const castRun = casting && !dash && moving && sk.castRun;
         const leaping = casting && dash && dash.started && sk.dashAnim;
