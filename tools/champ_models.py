@@ -79,7 +79,14 @@ MORE = {"riven": [1], "akali": [2, 4], "pyke": [2], "ekko": [4], "aurora": [4], 
 # 쓰레쉬 Q 는 기본이 Spell1_Dash(끌려간 적에게 날아가는 두 번째 동작) 라 던지는 Spell1_In,
 # 사일러스 E 는 Spell3 이 0.1초 조각이라 돌진 Spell3_Dash, 트리스타나 W 는 Spell2_In(0.27초, 뛰기 시작만)·Spell2_Mid(이미 떠 있는 데서 시작) 대신
 # 뛰어올라 내려앉기까지 다 든 Spell2_LNG(1.33초: 0.8초 날고 나머지는 착지)
-SPELL_CLIPS = {("thresh", 1): ["Spell1_In"], ("sylas", 3): ["Spell3_Dash"], ("tristana", 2): ["Spell2_LNG"],
+# 롤 스킬 데이터의 mAnimationName 이 스킬 칸 번호와 다른 것(로컬 16.19 로 확인, 2026-10-06): 롤이 그 스킬에 실제로 재생하는 클립.
+# 소나 Q·W·E 는 모두 Spell1, 바드 W·E 는 Spell3·Spell2, 조이 W·R 은 Spell4·Spell2 처럼 동작 번호가 칸과 다르다.
+# 블라디미르 W 는 가라앉기(Spell2Down) 만, 떠오르기는 따로(spell2up)
+SPELL_CLIPS = {("corki", 2): ["Spell3"], ("gragas", 3): ["Spell1"], ("gnar", 3): ["Spell2"], ("kindred", 4): ["Spell2"],
+               ("zoe", 4): ["Spell2"], ("sivir", 3): ["Spell2"], ("sivir", 4): ["Spell2"], ("orianna", 2): ["Spell1"],
+               ("vladimir", 2): ["Spell2Down"], ("blitzcrank", 2): ["Spell3"], ("zilean", 3): ["Spell1"],
+               ("sona", 2): ["Spell1"], ("sona", 3): ["Spell1"], ("udyr", 3): ["Spell2"], ("bard", 3): ["Spell2"],
+               ("thresh", 1): ["Spell1_In"], ("sylas", 3): ["Spell3_Dash"], ("tristana", 2): ["Spell2_LNG"],
                ("riven", 1): ["Spell1A"], ("rakan", 4): ["Spell4_Into"], ("naafiri", 2): ["Spell4_Idle"],
                ("yone", 3): ["Spell3_Spirit"]}
 # 스킬 말고 따로 굽는 동작: 이름 → 클립 이름 후보(칼리스타 Q 뒤의 패시브 돌진).
@@ -90,6 +97,7 @@ SPELL_CLIPS = {("thresh", 1): ["Spell1_In"], ("sylas", 3): ["Spell3_Dash"], ("tr
 EXTRA_CLIPS = {"kalista": {"dash": ["Spell1_Dash_0", "Attack1_Dash_0"]},
                # 트리스타나 W: 시전(Spell2_In) 뒤 거리에 따라 짧은·중간 점프(공중에서 시작). 긴 점프는 spell2(Spell2_LNG)
                "tristana": {"spell2in": ["Spell2_In"], "spell2s": ["Spell2_Shrt"], "spell2m": ["Spell2_Mid"]},
+               "vladimir": {"spell2up": ["Spell2Up"]},
                "riven": {"spell1b": ["Spell1B"], "spell1c": ["Spell1C"]}, "akali": {"spell4b": ["Spell4_Dash2"]},
                "warwick": {"dash4": ["Spell4Dash"]}, "pyke": {"skrun": ["Spell2_Move"]}, "kayn": {"skrun": ["Spell3_Run"]},
                "rakan": {"skrun": ["Spell4_Run"]}, "galio": {"windup3": ["Spell3_Windup"]}, "hecarim": {"skrun": ["Spell3run"]}, "twitch": {"skrun": ["Run_Stealth"]},

@@ -42,7 +42,7 @@
 (function () {
   // 게임 버전 "앞.가운데.끝". 앞 = 새 챔피언 추가, 가운데 = 스킬 추가·버그 수정, 끝 = 아주 미묘한 변화.
   // 하나를 올리면 그 뒤 숫자는 0 으로. 서버는 앞 숫자가 같은 기록끼리만 순위를 매긴다(ranking.py 의 DODGE_VERSION 과 같게)
-  const VERSION = "20.2.0";
+  const VERSION = "20.3.0";
 
   const ARENA = { w: 1400, h: 900 };
   const CHAMP = { radius: 65, speed: 335 };
@@ -265,7 +265,8 @@
     yasuo: { slot: 1, kind: "guard", wall: { width: 600, life: 4, range: 450, thick: 100 }, cd: 17,
              src: "data(Width·WallLife·TravelRange·Thickness), 장막이 나아가는 빠르기: 추정" },
     samira: { slot: 1, kind: "guard", blades: { dur: 0.75, radius: 325 }, cd: 22, src: "data(SlashDuration·castRange)" },
-    vladimir: { slot: 1, kind: "guard", untarget: 2, sink: true, haste: 0.375, hasteEnd: 0, hasteDur: 1, cd: 16,
+    // 블라디미르 W: 가라앉아(Spell2Down) 2초 동안 웅덩이, 끝나면 떠오른다(spell2up = Spell2Up, 처음 0.4초가 몸이 올라오는 부분이라 그동안은 움직여도 안 끊긴다)
+    vladimir: { slot: 1, kind: "guard", untarget: 2, sink: true, riseAnim: "spell2up", rise: 0.4, haste: 0.375, hasteEnd: 0, hasteDur: 1, cd: 16,
                 src: "haste: data(HasteBoost·HasteDuration), 줄어드는 것: 롤 설명, untarget: 추정(데이터에 없다)" },
     olaf: { slot: 3, kind: "guard", ccImmune: 3, whileCC: true, cd: 80, src: "data(Duration), CC 중 사용: 추정" },
     // 패시브 돌진(전투 태세): 칼리스타는 Q(꿰뚫기) 를 던지는 동안이나 던진 직후 들어온 이동 입력(클릭한 곳·WASD 방향) 쪽으로 뛴다.
@@ -3315,7 +3316,7 @@
     let animClock = 0;      // 실제 시간(애니메이션이 게임이 끝나도 흐르게)
     // 내 챔피언 동작이 바뀌면 롤처럼 앞 동작에서 BLEND 초 동안 섞어 넘어간다(롤 애니메이션 그래프의 섞기 시간은 대개 0.1초)
     const BLEND = 0.1;
-    let lastPose = null, blendFrom = null;
+    let lastPose = null, blendFrom = null, risenAt = null;
     function blendPose(a) {
       if (lastPose && lastPose.anim !== a.anim) blendFrom = { anim: lastPose.anim, time: lastPose.time, loop: lastPose.loop, at: animClock };
       lastPose = { anim: a.anim, time: a.time, loop: a.loop };
@@ -3333,9 +3334,15 @@
         // 이동기를 쓰면 그 스킬 동작(spell1~4) 을 한 번. 돌진이 길면 돌진이 끝날 때까지.
         // 돌진 동작이 따로 있으면(칼리스타 패시브) 시전 뒤 돌진하는 동안은 그 동작
         const sk = skillUsed, since = t - skillAt;
-        if (act && act.land && moving) act = null;      // 착지 동작은 움직이면 끝
+        // 웅덩이(블라디미르 W) 가 끝나면 떠오르는 동작
+        if (sk && sk.riseAnim && untarget <= t && risenAt !== skillAt) {
+          risenAt = skillAt;
+          act = { anim: sk.riseAnim, t0: untarget, hold: untarget + sk.rise, until: untarget + clipLen(sk.riseAnim), land: true };
+        }
+        if (act && act.land && moving && t >= act.hold) act = null;      // 착지 동작은 움직이면 끝(꼭 할 부분 hold 까지는 한다)
         const acting = act && t < act.until && (t < act.hold || !moving);
-        const casting = !acting && sk && !sk.noAnim && (dash || since < (sk.parry || sk.cast || 0.5));
+        // 웅덩이(블라디미르 W) 는 웅덩이인 동안 가라앉은 동작 그대로(Spell2Down 은 땅속에 머문다)
+        const casting = !acting && sk && !sk.noAnim && (dash || since < (sk.parry || (sk.sink && untarget > t ? sk.untarget : 0) || sk.cast || 0.5));
         // 나피리 W 는 시전하는 동안 움직일 수 있어서, 움직이면 시전 달리기(Spell4_Run)
         const castRun = casting && !dash && moving && sk.castRun;
         const leaping = casting && dash && dash.started && sk.dashAnim;
