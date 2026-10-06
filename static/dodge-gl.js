@@ -688,16 +688,27 @@
       asked.set(key, p);
       return p;
     }
-    // 애니메이션 name 의 time 초 자세로 뼈를 섞어 정점을 옮긴다(앞뒤 프레임 사이는 행렬을 그대로 섞는다)
-    function pose(md, name, time, loop) {
-      const m = md.m, an = m.anims[name] || m.anims.idle || Object.values(m.anims)[0];
-      const mats = md.mats, out = md.out;
-      if (!an) { out.set(m.pos); return; }
+    // 애니메이션 name 의 time 초 자세의 뼈 행렬을 dst 에(앞뒤 프레임 사이는 행렬을 그대로 섞는다). 동작이 없으면 false
+    function boneMats(m, name, time, loop, dst) {
+      const an = m.anims[name] || m.anims.idle || Object.values(m.anims)[0];
+      if (!an) return false;
       let f = time * an.fps;
       f = loop ? ((f % an.F) + an.F) % an.F : Math.min(an.F - 1, Math.max(0, f));
       const f0 = Math.floor(f), f1 = loop ? (f0 + 1) % an.F : Math.min(an.F - 1, f0 + 1), k = f - f0;
       const a0 = f0 * m.B * 12, a1 = f1 * m.B * 12, src = an.m;
-      for (let i = 0; i < m.B * 12; i++) mats[i] = src[a0 + i] + (src[a1 + i] - src[a0 + i]) * k;
+      for (let i = 0; i < m.B * 12; i++) dst[i] = src[a0 + i] + (src[a1 + i] - src[a0 + i]) * k;
+      return true;
+    }
+    // 애니메이션 name 의 time 초 자세로 뼈를 섞어 정점을 옮긴다. from 이 있으면 그 자세에서 mix(0~1) 만큼 넘어간 자세
+    function pose(md, name, time, loop, from, mix) {
+      const m = md.m, mats = md.mats, out = md.out;
+      if (!boneMats(m, name, time, loop, mats)) { out.set(m.pos); return; }
+      if (from && mix < 1) {
+        const prev = md.prev || (md.prev = new Float32Array(mats.length));
+        if (boneMats(m, from.anim, from.time, from.loop !== false, prev)) {
+          for (let i = 0; i < mats.length; i++) mats[i] = prev[i] + (mats[i] - prev[i]) * mix;
+        }
+      }
       const P = m.pos, Bn = m.bones, Wt = m.weights;
       for (let v = 0, n = m.V; v < n; v++) {
         const x = P[v * 3], y = P[v * 3 + 1], z = P[v * 3 + 2];
@@ -713,7 +724,7 @@
         out[v * 3] = ox; out[v * 3 + 1] = oy; out[v * 3 + 2] = oz;
       }
     }
-    // actors: [{ key, x, y, z, angle, anim, time, loop, alpha, tint: [r, g, b, a] }], cam: dodge.js 의 투영 값
+    // actors: [{ key, x, y, z, angle, anim, time, loop, alpha, tint: [r, g, b, a], from: { anim, time, loop }, mix }], cam: dodge.js 의 투영 값
     function drawModels(actors, cam) {
       if (!actors || !actors.length || !cam) return;
       const q = P.model, u = q.u;
@@ -732,7 +743,7 @@
       for (const ac of actors) {
         const md = models.get(ac.key);
         if (!md) continue;
-        pose(md, ac.anim, ac.time, ac.loop !== false);
+        pose(md, ac.anim, ac.time, ac.loop !== false, ac.from, ac.mix == null ? 1 : ac.mix);
         gl.bindBuffer(gl.ARRAY_BUFFER, md.posBuf);
         gl.bufferSubData(gl.ARRAY_BUFFER, 0, md.out);
         gl.vertexAttribPointer(aPos, 3, gl.FLOAT, false, 12, 0);

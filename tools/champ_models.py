@@ -88,6 +88,8 @@ SPELL_CLIPS = {("thresh", 1): ["Spell1_In"], ("sylas", 3): ["Spell3_Dash"], ("tr
 # 갈리오 E 는 돌진 전에 뒤로 빠지는 시전 동작(windup3) 이 따로
 # skrun: 이속 스킬 중의 달리기(가렌 Q·파이크 W …). 리븐 Q 는 세 번 동작이 다르고, 아칼리 R 은 두 번째 돌진 동작이 따로
 EXTRA_CLIPS = {"kalista": {"dash": ["Spell1_Dash_0", "Attack1_Dash_0"]},
+               # 트리스타나 W: 시전(Spell2_In) 뒤 거리에 따라 짧은·중간 점프(공중에서 시작). 긴 점프는 spell2(Spell2_LNG)
+               "tristana": {"spell2in": ["Spell2_In"], "spell2s": ["Spell2_Shrt"], "spell2m": ["Spell2_Mid"]},
                "riven": {"spell1b": ["Spell1B"], "spell1c": ["Spell1C"]}, "akali": {"spell4b": ["Spell4_Dash2"]},
                "warwick": {"dash4": ["Spell4Dash"]}, "pyke": {"skrun": ["Spell2_Move"]}, "kayn": {"skrun": ["Spell3_Run"]},
                "rakan": {"skrun": ["Spell4_Run"]}, "galio": {"windup3": ["Spell3_Windup"]}, "hecarim": {"skrun": ["Spell3run"]}, "twitch": {"skrun": ["Run_Stealth"]},

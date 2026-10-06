@@ -42,7 +42,7 @@
 (function () {
   // 게임 버전 "앞.가운데.끝". 앞 = 새 챔피언 추가, 가운데 = 스킬 추가·버그 수정, 끝 = 아주 미묘한 변화.
   // 하나를 올리면 그 뒤 숫자는 0 으로. 서버는 앞 숫자가 같은 기록끼리만 순위를 매긴다(ranking.py 의 DODGE_VERSION 과 같게)
-  const VERSION = "20.1.0";
+  const VERSION = "20.2.0";
 
   const ARENA = { w: 1400, h: 900 };
   const CHAMP = { radius: 65, speed: 335 };
@@ -124,7 +124,13 @@
     graves: { slot: 2, kind: "dash", range: 375, min: 275, speed: 750, cd: 12, src: "data" },
     vayne: { slot: 0, kind: "dash", range: 300, fixed: true, speed: 900, cd: 2, src: "range: data, speed: 추정" },
     corki: { slot: 1, kind: "dash", range: 600, min: 300, speed: 650 + CHAMP.speed, cd: 12, src: "data" },
-    tristana: { slot: 1, kind: "dash", range: 900, speed: 1100, leap: 0.8, cd: 14, src: "range: data, speed: 추정, leap: 클립 Spell2_LNG 의 나는 부분" },
+    // 트리스타나 W: 0.25초 제자리 시전(Spell2_In) 뒤 1100 으로 날아간다. 롤은 거리에 따라 점프 클립이 셋(Shrt·Mid·LNG)이고
+    // 각 클립이 땅에 닿는 시각(0.267·0.433·0.767초, 30fps 로 구워 잼) 이 1100 으로 약 293·476·844 를 나는 시간이라,
+    // 나는 시간이 가장 가까운 클립을 고른다(경계는 두 착지 시각의 가운데: 0.35초 = 385, 0.6초 = 660).
+    // leaps: [이 거리 미만, 동작, 그 동작에서 땅에 닿는 시각]. 짧은·중간 점프는 공중에서 시작해서 시전 동작과 0.1초 섞인다(롤 그래프의 섞기 시간)
+    tristana: { slot: 1, kind: "dash", range: 900, speed: 1100, windup: 0.25, anim: "spell2in",
+                leaps: [[385, "spell2s", 0.267], [660, "spell2m", 0.433], [Infinity, "spell2", 0.767]], cd: 14,
+                src: "range·cd: data, speed·windup: 롤 위키·나무위키(돌진 속도 1100, 시전 0.25), leaps: 로컬 16.19 애니메이션 그래프" },
     gragas: { slot: 2, kind: "dash", range: 600, fixed: true, speed: 900, cd: 12, src: "data" },
     gnar: { slot: 2, kind: "dash", range: 475, dur: 0.6, arc: 120, cd: 12, src: "data(TravelTime), arc: 추정" },
     kindred: [
@@ -1983,6 +1989,8 @@
       dash = { sk, fx: from.x, fy: from.y, tx: to.x, ty: to.y, t0: t + (o.wind || 0), blink, again: !!o.again,
                bx: player.x, by: player.y, w0: t,
                dur: blink ? 0 : Math.max(0.05, o.dur || sk.dur || d / sk.speed) };
+      // 거리에 따라 다른 점프 클립(트리스타나 W)
+      if (sk.leaps) { const L = sk.leaps.find(l => d < l[0]); dash.leapAnim = L[1]; dash.leap = L[2]; }
       target = null;
       skillAt = t; skillUsed = sk;
       facing = sk.back ? { x: -dx, y: -dy } : { x: dx, y: dy };     // 뒤로 뛸 때는 커서 쪽을 본 채로
@@ -2083,8 +2091,8 @@
     // 내려앉은 뒤에도 스킬 동작 클립이 남았으면 끝까지(착지·마무리). 움직이면 롤처럼 끊는다(landAct 의 hold 가 지금)
     function landAct(m) {
       const sk = m.sk, now = act && t < act.until;
-      const anim = now ? act.anim : sk.dashAnim || sk.anim || "spell" + (sk.slot + 1);
-      const at = now ? t - act.t0 : sk.leap || (sk.dashAnim ? t - m.t0 : t - skillAt);
+      const anim = now ? act.anim : m.leapAnim || sk.dashAnim || sk.anim || "spell" + (sk.slot + 1);
+      const at = now ? t - act.t0 : m.leap || sk.leap || (sk.dashAnim ? t - m.t0 : t - skillAt);
       const rest = clipLen(anim) - at;
       if (rest > 0.05) act = { anim, t0: t - at, hold: t, until: t + rest, land: true };
     }
@@ -3305,6 +3313,17 @@
     // 스킬 이름의 마지막 글자(Q W E R) → 롤 애니메이션 이름(spell1 … spell4)
     const spellAnim = s => "spell" + ("QWER".indexOf(s.name.replace(" (갈라짐)", "").slice(-1)) + 1);
     let animClock = 0;      // 실제 시간(애니메이션이 게임이 끝나도 흐르게)
+    // 내 챔피언 동작이 바뀌면 롤처럼 앞 동작에서 BLEND 초 동안 섞어 넘어간다(롤 애니메이션 그래프의 섞기 시간은 대개 0.1초)
+    const BLEND = 0.1;
+    let lastPose = null, blendFrom = null;
+    function blendPose(a) {
+      if (lastPose && lastPose.anim !== a.anim) blendFrom = { anim: lastPose.anim, time: lastPose.time, loop: lastPose.loop, at: animClock };
+      lastPose = { anim: a.anim, time: a.time, loop: a.loop };
+      const k = blendFrom ? (animClock - blendFrom.at) / BLEND : 1;
+      if (k >= 1) { blendFrom = null; return; }
+      a.from = { anim: blendFrom.anim, time: blendFrom.time + (animClock - blendFrom.at), loop: blendFrom.loop };
+      a.mix = Math.max(0, k);
+    }
     // 효과층에 넘길 3D 챔피언들
     function modelActors() {
       const out = [];
@@ -3320,12 +3339,14 @@
         // 나피리 W 는 시전하는 동안 움직일 수 있어서, 움직이면 시전 달리기(Spell4_Run)
         const castRun = casting && !dash && moving && sk.castRun;
         const leaping = casting && dash && dash.started && sk.dashAnim;
+        const hop = casting && dash && dash.started && dash.leapAnim;      // 거리별 점프 클립(나는 부분을 돌진 시간에 맞춘다)
         // 이속 스킬 중에는 그 스킬의 달리기(가렌 Q 칼 들고 달리기, 람머스 Q 구르기 …)
         const fast = haste && !haste.slowed && haste.sk.runAnim ? haste.sk : null;
-        out.push({ key: modelKey(faceKey), x: player.x, y: player.y, z: lift(), angle: viewAngle,
-                   anim: acting ? act.anim : leaping ? sk.dashAnim : castRun ? sk.castRun : casting ? sk.anim || "spell" + (sk.slot + 1)
+        const me = { key: modelKey(faceKey), x: player.x, y: player.y, z: lift(), angle: viewAngle,
+                   anim: acting ? act.anim : leaping ? sk.dashAnim : hop ? dash.leapAnim : castRun ? sk.castRun : casting ? sk.anim || "spell" + (sk.slot + 1)
                      : moving ? (fast ? fast.runAnim : "run") : fast && fast.runIdle ? fast.runAnim : "idle",
                    time: acting ? t - act.t0 : leaping ? t - dash.t0
+                     : hop ? dash.leap * (dash.dur ? Math.min(1, (t - dash.t0) / dash.dur) : 1)
                      : casting && dash && dash.started && sk.leap ? sk.leap * (dash.dur ? Math.min(1, (t - dash.t0) / dash.dur) : 1)
                      : casting ? since : animClock, loop: (!casting || !!sk.castRun) && !acting,
                    // 투명하면 내 화면에서만 흐리게 보인다(롤에서 내 챔피언이 반투명해지는 것처럼)
@@ -3333,7 +3354,9 @@
                    alpha: untarget > t && skillUsed && skillUsed.sink ? 0.15 : hidden > t ? 0.35 : untarget > t ? 0.4 : safe > 0 && Math.floor(safe * 10) % 2 ? 0.45 : 1,
                    tint: hurt > 0 ? [1, 1, 1, hurt / 0.4 * 0.55] : (realm && t < realm.until) || (rift && t < rift.until && dist(player, rift) <= rift.r) ? [0.6, 0.5, 1, 0.35]
                      : parry > t ? [0.75, 0.9, 1, 0.45] : undying > t || ccImmune > t ? [1, 0.25, 0.2, 0.3]
-                     : soul ? [0.65, 0.75, 1, 0.4] : ghostLeft > 0 ? [0.4, 0.85, 0.95, 0.22] : null });
+                     : soul ? [0.65, 0.75, 1, 0.4] : ghostLeft > 0 ? [0.4, 0.85, 0.95, 0.22] : null };
+        blendPose(me);
+        out.push(me);
         // 요네 E: 남은 몸(돌진하는 동안 뒤로 밀려나서 그 자리에 선다)
         if (soul) {
           const k = Math.min(1, (t - soul.from) / soul.slide), since = t - soul.from, inLen = clipLen("bodyin");
