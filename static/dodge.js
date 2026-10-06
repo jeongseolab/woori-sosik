@@ -42,7 +42,7 @@
 (function () {
   // 게임 버전 "앞.가운데.끝". 앞 = 새 챔피언 추가, 가운데 = 스킬 추가·버그 수정, 끝 = 아주 미묘한 변화.
   // 하나를 올리면 그 뒤 숫자는 0 으로. 서버는 앞 숫자가 같은 기록끼리만 순위를 매긴다(ranking.py 의 DODGE_VERSION 과 같게)
-  const VERSION = "21.1.0";
+  const VERSION = "21.2.0";
 
   const ARENA = { w: 1400, h: 900 };
   const CHAMP = { radius: 65, speed: 335 };
@@ -1450,6 +1450,9 @@
         loading = false; loadingEl.hidden = true; root.classList.remove("dodge-loading");
       });
     }
+    // 내 챔피언 스킬이 세우는 소환물의 모델(아지르 W 모래 병사). 내 챔피언과 같이 받는다
+    const SUMMONS = { azir: ["azirsoldier"] };
+    const withSummons = ks => ks.flatMap(k => [k, ...(SUMMONS[modelKey(k)] || [])]);
     // 아직 안 받은 모델이 있으면 로딩 화면을 띄우고 받는다(시작 창에서 내 챔피언을 바꿨을 때도)
     function ensureModels(champs) {
       return gate(loadModelIndex().then(() => {
@@ -1501,7 +1504,7 @@
     faceKey = champAlias(myChamp());
     // 내 챔피언과 적 챔피언의 모델을 처음 열 때 받는다(다음부터는 브라우저 저장소에서 읽는다).
     // 고를 수 있는 챔피언이 173명(약 82MB) 이라 나머지는 시작 창에서 고를 때 그 하나만 받는다(applyFace)
-    ensureModels([faceKey, ...SKILLS.map(s => s.champ)]);
+    ensureModels([...withSummons([faceKey]), ...SKILLS.map(s => s.champ)]);
     ensureEnemyFx();
     const keys = new Set();
     let holding = false;
@@ -2246,7 +2249,7 @@
     function useSpecial(sk, i) {
       // 갈고리에 맞힌 적에게 다시 눌러 돌진(리 신 Q 2타 …). 쿨타임과 상관없이
       if (sk.kind === "grapple" && hooked && hooked.slot === i && t < hooked.until) {
-        const c = hooked.c; hooked = null;
+        const c = hooked.c; fxStop(hooked.vfx); hooked = null;
         if (casters.includes(c) && !c.out) goTarget(sk, c);
         return;
       }
@@ -2357,11 +2360,17 @@
           if (!myAt(sk, "tar", got.x, got.y, 3)) burst(got.x, got.y, 80, sk.color || "#ffd43b", 12, 300);
           fxStop(hook.vfx);
           const slot = hook.slot; hook = null;
-          if (sk.recast) hooked = { c: got, slot, until: t + sk.recast };
+          // 다시 누를 수 있는 동안 맞은 적에게 표식(리 신 Q 음파 표식). 적을 따라간다
+          // 표식 이펙트는 몸 가운데(80) 기준이라 그대로면 몸에 가려진다 → 머리 위(체력바 높이 아래) 로 올린다
+          if (sk.recast) {
+            const mi = modelIndex && modelIndex[modelKey(got.champ)], mh = mi ? Math.max(0, mi.h - 115) : 0;
+            hooked = { c: got, slot, until: t + sk.recast, mh, vfx: myAt(sk, "mark", got.x, got.y, sk.recast, mh) };
+          }
           else goTarget(sk, got);
         } else if (hook.left <= 0 || hook.x < -200 || hook.y < -200 || hook.x > ARENA.w + 200 || hook.y > ARENA.h + 200) { fxStop(hook.vfx); hook = null; }
       }
-      if (hooked && t >= hooked.until) hooked = null;
+      if (hooked && hooked.vfx) fxMove(hooked.vfx, { x: hooked.c.x, y: hooked.c.y, h: hooked.mh });
+      if (hooked && t >= hooked.until) { fxStop(hooked.vfx); hooked = null; }
       for (const a of anchors) {
         if (a.vx != null && t < a.stopAt) { a.x += a.vx * dt; a.y += a.vy * dt; if (a.vfx) fxMove(a.vfx, { x: a.x, y: a.y, h: FX_H }); }
         // 자리를 잡았다: 날던 이펙트를 끄고 표식 이펙트(없으면 날던 것을 그대로 둔다)
@@ -2702,8 +2711,9 @@
       if (rest > 0.05) act = { anim, t0: t - at, hold: t, until: t + rest, land: true, faceAfter: now ? act.faceAfter : null };
     }
     // 내 챔피언 동작 클립의 길이(초). 모델을 아직 못 받았으면 0
-    function clipLen(anim) {
-      const md = fxgl && fxgl.model(modelKey(faceKey)), an = md && md.m.anims[anim];
+    function clipLen(anim) { return clipLenOf(modelKey(faceKey), anim); }
+    function clipLenOf(key, anim) {
+      const md = fxgl && fxgl.model(key), an = md && md.m.anims[anim];
       return an ? an.F / an.fps : 0;
     }
 
@@ -4065,6 +4075,15 @@
           const flying = a.vx != null && t < a.stopAt;
           out.push({ key: modelKey(faceKey), x: a.x, y: a.y, z: 0, angle: a.vx != null ? Math.atan2(a.vy, a.vx) : viewAngle,
                      anim: flying ? "run" : "idle", time: animClock, loop: true, alpha: 0.85, tint: [0.06, 0.03, 0.1, 0.75] });
+        }
+        // 아지르 W 모래 병사: 롤 병사 모델. 솟아오르는 동작(spawn) 뒤 서 있기, 세운 쪽(아지르 → 병사) 을 본다
+        for (const a of anchors) {
+          if (a.key !== "soldier" || t < a.at || !model("azirsoldier")) continue;
+          if (a.face == null) a.face = Math.atan2(a.y - player.y, a.x - player.x);
+          const since = t - a.at, spawnLen = clipLenOf("azirsoldier", "spawn");
+          out.push({ key: "azirsoldier", x: a.x, y: a.y, z: 0, angle: a.face,
+                     anim: since < spawnLen ? "spawn" : "idle", time: since < spawnLen ? since : since - spawnLen,
+                     loop: since >= spawnLen, alpha: 1 });
         }
       }
       for (const c of casters) {
@@ -6201,7 +6220,7 @@
       faceKey = champAlias(myChamp());
       root.querySelector('[data-hud="face"]').src = hudFace(faceKey);
       paintSkills();
-      ensureModels([faceKey]);
+      ensureModels(withSummons([faceKey]));
     }
 
     function setBest(text) { hud("best").innerHTML = text || ""; }

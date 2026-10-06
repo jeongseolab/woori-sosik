@@ -134,7 +134,7 @@ MINE_EXTRA = {
     ("katarina", 2): {"tar": ["Katarina_E_Tar"]},
     ("kayle", 1): {"buf": ["Kayle_W_Tar"]},
     ("kayle", 3): {"buf": ["Kayle_R_Self"]},
-    ("leesin", 0): {"mis": ["LeeSin_Q_mis_01"], "dash": ["LeeSin_Q_Dash_Trail"], "tar": ["LeeSin_Q_tar"]},
+    ("leesin", 0): {"mis": ["LeeSin_Q_mis_01"], "dash": ["LeeSin_Q_Dash_Trail"], "tar": ["LeeSin_Q_tar"], "mark": ["LeeSin_Q_SonicWave_tar_Watched_01"]},
     ("leesin", 1): {"buf": ["LeeSin_W_shield_self"]},
     ("leona", 2): {"mis": ["Leona_E_mis_weapon"], "dash": ["Leona_E_mis_dash"], "tar": ["Leona_E_tar"]},
     ("lissandra", 2): {"mis": ["Lissandra_E_Missile"], "land": ["Lissandra_E_Arrival"]},
@@ -153,6 +153,7 @@ MINE_EXTRA = {
     ("pantheon", 2): {"buf": ["Pantheon_E_Shield"]},
     ("qiyana", 2): {"dash": ["Qiyana_E_Dash"], "tar": ["Qiyana_E_tar"]},
     ("quinn", 2): {"dash": ["Quinn_E_Dash"], "tar": ["Quinn_E_Tar"]},
+    ("ryze", 3): {"cast": ["Ryze_R_Start_Ally", "Ryze_R_Being_Teleported"], "land": ["Ryze_R_Portal_Arrival"]},
     ("senna", 2): {"drop": ["Senna_E_mistArea"]},
     ("sett", 0): {"buf": ["Sett_Q_Buf_Haste", "Sett_Q_Buf_Hands"]},
     ("shyvana", 1): {"buf": ["Shyvana_W_DR"]},
@@ -314,9 +315,19 @@ class Pack:
                 open(cached, "wb").write(raw)
             img = Image.open(io.BytesIO(raw)).convert("RGBA")
         except (urllib.error.HTTPError, urllib.error.URLError, OSError) as e:
-            print("  텍스처 못 받음:", path, e, file=sys.stderr)
-            self.textures[key] = {"i": None}
-            return None
+            # CommunityDragon 이 안 되면(522 등) 로컬 WAD 의 .tex 를 직접 푼다
+            img = None
+            try:
+                b = cm.local_file(key)
+                if b:
+                    img = cm.decode_tex(b)
+                    print("  텍스처 로컬에서:", path, img.size, file=sys.stderr)
+            except (ValueError, OSError) as e2:
+                e = e2
+            if img is None:
+                print("  텍스처 못 받음:", path, e, file=sys.stderr)
+                self.textures[key] = {"i": None}
+                return None
         i = self.next
         self.next += 1
         k = TEX_MAX / max(img.size)

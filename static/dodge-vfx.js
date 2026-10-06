@@ -340,9 +340,10 @@
     const scale = ev(e.birthScale0, frac, [1, 1, 1]).map(v => v * sc);
     if (e.isUniformScale) { scale[1] = scale[0]; scale[2] = scale[0]; }
     const flip = e.texDiv ? Math.round(e.texDiv[0] * e.texDiv[1]) : 1;
-    const nFrames = e.numFrames || flip;
+    // numFrames 가 없으면 롤 기본값 1: 칸을 넘기지 않고 startFrame 칸만 쓴다(제드 R 소용돌이가 둥근 덩어리 칸으로 넘어가던 것)
+    const nFrames = e.numFrames || 1;
     let frame0 = e.startFrame || 0;
-    if (e.isRandomStartFrame) frame0 = Math.floor(Math.random() * nFrames);
+    if (e.isRandomStartFrame) frame0 = Math.floor(Math.random() * (e.numFrames || flip));
     const p = {
       age: 0, life: pl, die: pl, f: 0,
       pos, origin: inst.pos.slice(), vel: turn(vel), v: [0, 0, 0], local,

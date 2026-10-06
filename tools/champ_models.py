@@ -247,7 +247,10 @@ class Wad:
         return self.key(path) in self.entries
 
     def read(self, path):
-        off, csize, size, kind = self.entries[self.key(path)]
+        return self.read_hash(self.key(path))
+
+    def read_hash(self, h):
+        off, csize, size, kind = self.entries[h]
         self.f.seek(off)
         data = self.f.read(csize)
         if kind == 0:
@@ -537,6 +540,58 @@ def bake(skl, anim, duration):
     return np.array(frames, dtype=np.float32)
 
 
+# 롤 .tex → RGBA 그림. 밉맵은 작은 것부터 큰 것 순서로 들어 있고, 큰 밉맵은 빠져 있을 수 있다(나중에 받는 것).
+# 그래서 들어 있는 것 중 가장 큰 밉맵을 쓴다. CommunityDragon 이 안 될 때(522) 로컬 WAD 에서 텍스처를 읽는 데 쓴다
+TEX_FMT = {10: ("bcn", 1, 8), 12: ("bcn", 3, 16), 20: ("raw", "BGRA", 4)}
+
+
+def decode_tex(b):
+    if b[:4] != b"TEX\0":
+        return Image.open(io.BytesIO(b)).convert("RGBA")     # .dds 등은 PIL 이 읽는다
+    W, H = struct.unpack("<HH", b[4:8])
+    fmt, flags = b[9], b[11]
+    if fmt not in TEX_FMT:
+        raise ValueError("모르는 텍스처 형식 %d" % fmt)
+    dec, arg, unit = TEX_FMT[fmt]
+    size = (lambda w, h: max(1, (w + 3) // 4) * max(1, (h + 3) // 4) * unit) if dec == "bcn" else (lambda w, h: w * h * unit)
+    data = b[12:]
+    levels = [(max(1, W >> i), max(1, H >> i)) for i in range(32) if (W >> i) or (H >> i)] if flags & 1 else [(W, H)]
+    # 작은 밉맵부터 더해 가다 파일 길이와 맞는 단계가 들어 있는 가장 큰 밉맵
+    total, best = 0, None
+    for w, h in reversed(levels):
+        total += size(w, h)
+        if total == len(data):
+            best = (w, h)
+    if best is None:
+        best = levels[0]
+    w, h = best
+    raw = data[len(data) - size(w, h):]
+    if dec == "bcn":
+        return Image.frombytes("RGBA", (w, h), raw, "bcn", arg)
+    return Image.frombytes("RGBA", (w, h), raw, "raw", arg)
+
+
+_WADS = {}
+
+
+def local_file(path, wad_dir=r"C:\Riot Games\League of Legends\Game\DATA\FINAL\Champions"):
+    """롤 파일 경로 → 바이트(경로의 챔피언 WAD 에서, 없으면 None)"""
+    m = re.match(r"(?:assets|data)/characters/([^/]+)/", path.lower())
+    if not m:
+        return None
+    champ = m.group(1)
+    names = {f.lower(): f for f in os.listdir(wad_dir)}
+    # 아지르 병사처럼 다른 챔피언 WAD 에 든 것(azirsoldier → azir) 은 이름 앞부분이 맞는 WAD 를 찾는다
+    cands = [names[k] for k in sorted(names, key=len, reverse=True)
+             if k.endswith(".wad.client") and champ.startswith(k[:-len(".wad.client")])]
+    for f in cands:
+        if f not in _WADS:
+            _WADS[f] = Wad(os.path.join(wad_dir, f))
+        if _WADS[f].has(path):
+            return _WADS[f].read(path)
+    return None
+
+
 # ── 챔피언 하나 ──
 def get_bytes(path, tries=5):
     # 기본 User-Agent 는 CommunityDragon 이 403 으로 막는다. 연달아 받으면 가끔 연결을 끊어서 쉬었다가 다시 받는다
@@ -639,15 +694,31 @@ def pick_clip(clips, names, word, avoid=("to", "haste", "fast", "homeguard", "va
     return None
 
 
+# 다른 챔피언 WAD 에 든 캐릭터(아지르 병사 → Azir.wad.client)
+SUB_WAD = {"azirsoldier": "azir"}
+# 따로 굽는 소환물(내 챔피언 스킬이 세우는 것): 굽는 동작 이름 → 롤 클립
+EXTRA_CLIPS_SUMMON = {"azirsoldier": {"spawn": ["Spawn"], "attack": ["Attack1_BASE"]}}
+
+
+def bin_json(w, path):
+    """롤 .bin → dict. CommunityDragon(.bin.json) 이 안 되면(522 등) 로컬 WAD 를 직접 읽는다"""
+    try:
+        return get_json("game/" + path + ".json")
+    except (urllib.error.HTTPError, urllib.error.URLError, OSError):
+        import lolbin
+        d, _links = lolbin.Bin().parse(w.read(path))
+        return dict(d)
+
+
 def build(key, wad_dir, spells):
-    skin = get_json("game/data/characters/%s/skins/skin0.bin.json" % key)
-    sk = next(v for v in skin.values() if isinstance(v, dict) and "skinMeshProperties" in v)
-    mesh = sk["skinMeshProperties"]
-    graph = sk.get("skinAnimationProperties", {}).get("animationGraphData")
-    wads = [f for f in os.listdir(wad_dir) if f.lower() == key + ".wad.client"]
+    wads = [f for f in os.listdir(wad_dir) if f.lower() == SUB_WAD.get(key, key) + ".wad.client"]
     if not wads:
         raise FileNotFoundError("WAD 없음")
     w = Wad(os.path.join(wad_dir, wads[0]))
+    skin = bin_json(w, "data/characters/%s/skins/skin0.bin" % key)
+    sk = next(v for v in skin.values() if isinstance(v, dict) and "skinMeshProperties" in v)
+    mesh = sk["skinMeshProperties"]
+    graph = sk.get("skinAnimationProperties", {}).get("animationGraphData")
     skn = read_skn(w.read(mesh["simpleSkin"]))
     skl = read_skl(w.read(mesh["skeleton"]))
     scale = float(mesh.get("skinScale", 1.0))
@@ -656,22 +727,30 @@ def build(key, wad_dir, spells):
                           if s["name"].lower() not in hidden])
 
     anims = {}
-    agraph = get_json("game/" + graph.lower().replace("characters/", "data/characters/", 1) + ".bin.json") if graph else {}
+    agraph = bin_json(w, graph.lower().replace("characters/", "data/characters/", 1) + ".bin") if graph else {}
     clips = next((v["mClipDataMap"] for v in agraph.values() if isinstance(v, dict) and "mClipDataMap" in v), {})
     want = {"idle": pick_clip(clips, ["Idle_Base", "Idle1", "Idle", "Idle_In", "Idle01", "Idle1_Base", "RAW_Idle1"], "idle"),
             "run": pick_clip(clips, ["Run_Normal", "Run", "Run_Base", "Run_In", "Run1", "RAW_Run1", "RAW_Run"], "run")}
     for n in spells:
         want["spell%d" % n] = pick_clip(clips, SPELL_CLIPS.get((key, n), []) + ["Spell%d" % n, "Spell%d_0" % n, "Spell%d_Base" % n], "spell%d" % n,
                                         avoid=("to", "run", "idle", "exit", "out"))
-    for name, names in EXTRA_CLIPS.get(key, {}).items():
+    for name, names in {**EXTRA_CLIPS.get(key, {}), **EXTRA_CLIPS_SUMMON.get(key, {})}.items():
         want[name] = pick_clip(clips, names, name)
     for name, path in want.items():
-        if path and w.has(path):
-            a, dur = read_anm(w.read(path))
+        # 로컬 bin 은 파일 경로 대신 해시("{...}") 를 준다
+        h = int(path[1:-1], 16) if path and path.startswith("{") else w.key(path) if path else None
+        if h in w.entries:
+            a, dur = read_anm(w.read_hash(h))
             anims[name] = bake(skl, a, max(dur, 1 / FPS))
 
     tex_path = mesh.get("texture")
-    if tex_path:
+    local_png = None
+    if tex_path and tex_path.startswith("{"):
+        # 경로 대신 해시만 있다(로컬 bin): WAD 에서 그 해시의 .tex 를 바로 푼다
+        off = io.BytesIO()
+        decode_tex(w.read_hash(int(tex_path[1:-1], 16))).save(off, "PNG")
+        tex_path, local_png = "local:" + key, off.getvalue()
+    elif tex_path:
         tex_path = png_path(tex_path)
     else:
         # 재질(material) 에만 텍스처가 있는 챔피언(이블린 등): 스킨 폴더에서 기본 색 텍스처(*_tx_cm.png) 를 찾는다
@@ -692,7 +771,7 @@ def build(key, wad_dir, spells):
         p = o.get("texture") or material_texture(skin, o.get("material") or o.get("Material"))
         if o.get("submesh") and p:
             sub_tex[o["submesh"].lower()] = png_path(p)
-    tiles, data = [tex_path], {tex_path: get_bytes(tex_path)}
+    tiles, data = [tex_path], {tex_path: local_png or get_bytes(tex_path)}
     for s in skn["subs"]:
         if s["name"].lower() in hidden:
             continue
