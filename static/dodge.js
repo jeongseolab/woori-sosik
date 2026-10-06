@@ -141,7 +141,7 @@
                src: "windup: 롤 위키(시전 0.15)·나무위키(\"묘하게 선 딜레이\"), speed·arc: 추정" },
     ahri: [
       { slot: 1, kind: "guard", haste: 0.4, hasteEnd: 0, hasteDur: 2, cd: 5, src: "data(AhriW MovementSpeed·MovementSpeedDuration), 줄어드는 것: 롤 설명" },
-      { slot: 3, kind: "dash", range: 500, speed: 1200, msScale: true, charges: 3, gap: 1, window: 10, cd: 100, src: "data(RBaseDashSpeed 1200), + 이동 속도: 롤 위키" },
+      { slot: 3, kind: "dash", range: 500, speed: 1200, msScale: true, charges: 3, gap: 1, window: 15, cd: 100, src: "data(RBaseDashSpeed 1200·RRecastWindow 15), + 이동 속도: 롤 위키" },
     ],
     fizz: { slot: 2, kind: "dash", range: 400, dur: 0.25, untarget: 0.75, recast: { range: 400, dur: 0.25 }, cd: 8,
             desc: "장난치기: 커서 쪽 400 장대 위로 뛰어 0.75초 동안 스킬이 통과한다(장대 위에서는 못 걷는다). 그사이 다시 누르면 한 번 더 400 뛴다",
@@ -283,7 +283,7 @@
       { slot: 1, kind: "guard", barrier: 0.75, color: "#ffe066", cd: 12, src: "data(GarenW UpfrontDuration), 피해 감소·강인함은 빼고" },
     ],
     hecarim: [
-      { slot: 2, kind: "guard", haste: 0.25, hasteEnd: 0.65, hasteRamp: 2.5, hasteDur: 4, runAnim: "skrun", cd: 15,
+      { slot: 2, kind: "guard", haste: 0.25, hasteEnd: 0.65, hasteRamp: 2.5, hasteDur: 4, runAnim: "skrun", cd: 16,
         src: "data(HecarimRamp MinMoveSpeed·MaxMoveSpeed·TimeToMaxMoveSpeed·Duration)" },
       { slot: 3, kind: "dash", range: 1000, speed: 1100, cd: 100, src: "data(HecarimUlt MaxDashRange·DashSpeed)" },
     ],
@@ -293,7 +293,7 @@
               src: "data(TwitchHideInShadows StealthDuration·MaxFadeTime·HiddenSpeed·StealthDetectionRange), 500 안의 적에게 들키는 것: 추정(롤은 경고 표시)" },
     teemo: { slot: 1, kind: "guard", haste: 0.48, hasteDur: 3, quick: { pct: 0.24, lost: 5 }, cd: 14,
              src: "data(TeemoW ActiveMoveSpeedBonus·ActiveMoveSpeedBuffDuration·PassiveMoveSpeedBonus·PassiveCooldownOnDamageTaken)" },
-    blitzcrank: { slot: 1, kind: "guard", haste: 0.75, hasteEnd: 0.1, hasteRamp: 2.5, hasteDur: 5, hasteAfter: { pct: -0.3, dur: 1.5 }, cd: 15,
+    blitzcrank: { slot: 1, kind: "guard", haste: 0.8, hasteEnd: 0.1, hasteRamp: 2.5, hasteDur: 5, hasteAfter: { pct: -0.3, dur: 1.5 }, cd: 15,
                   src: "data(Overdrive MoveSpeedMod·MoveSpeedModMin·MoveSpeedModMinTime·Duration·MoveSpeedModReduction·SlowDuration)" },
     zilean: { slot: 2, kind: "guard", haste: 0.99, hasteDur: 2.5, cd: 15, src: "data(TimeWarp SpeedAmount·Duration)" },
     sona: [
@@ -301,7 +301,7 @@
       { slot: 2, kind: "guard", haste: 0.2, hasteDur: 3, cd: 14, src: "data(SonaE SelfBaseMovementSpeed·SelfMovementSpeedDurationMin)" },
     ],
     kennen: { slot: 2, kind: "guard", haste: 1, hasteDur: 2, runAnim: "spell3", runIdle: true, cd: 6, src: "data(KennenLightningRush MovementSpeed·DurationAsBall)" },
-    draven: { slot: 1, kind: "guard", haste: 0.65, hasteEnd: 0, hasteDur: 1.5, cd: 12, src: "data(DravenFury MoveSpeed·MoveSpeedDuration·Temp_MSDecay)" },
+    draven: { slot: 1, kind: "guard", haste: 0.7, hasteEnd: 0, hasteDur: 1.5, cd: 12, src: "data(DravenFury MoveSpeed·MoveSpeedDuration·Temp_MSDecay)" },
     volibear: { slot: 0, kind: "guard", haste: 0.26, hasteDur: 4, runAnim: "skrun", cd: 10, src: "data(VolibearQ MinSpeed·Duration), 적 쪽으로 갈 때 더 빠른 것(MaxSpeed) 은 빼고" },
     udyr: { slot: 2, kind: "guard", haste: 0.49, hasteEnd: 0, hasteDur: 4, runAnim: "skrun", cd: 6, src: "data(UdyrE BaseMoveSpeed·MoveSpeedDuration), 줄어드는 것: 롤 설명" },
     masteryi: { slot: 3, kind: "guard", haste: 0.6, hasteDur: 7, slowImmune: true, noAnim: true, runAnim: "skrun", cd: 85, src: "data(Highlander RMSBonus 3레벨·RDuration)" },
