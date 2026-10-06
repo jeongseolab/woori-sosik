@@ -197,10 +197,10 @@
     aurora: [
       { slot: 1, kind: "dash", range: 300, fixed: true, speed: 350, msScale: true, stealth: 1.6, haste: 0.4, realm: true, cd: 18,
         src: "data(JumpDistance·DashBonusSpeed·InvisDuration·MoveSpeedBonus)" },
-      { slot: 3, kind: "dash", range: 250, min: 25, dur: 0.3, rift: { range: 700, radius: 350, dur: 4 }, cd: 100,
-        desc: "경계 너머: 커서 쪽(700 안) 에 둘레 350 의 영혼 세계를 4초 동안 열고 그쪽으로 최대 250 뛴다. "
+      { slot: 3, kind: "dash", range: 250, min: 25, dur: 0.3, rift: { range: 700, radius: 700, dur: 4 }, cd: 100,
+        desc: "경계 너머: 커서 쪽(700 안) 에 반경 700 의 영혼 세계를 4초 동안 열고 그쪽으로 최대 250 뛴다. "
           + "영혼 세계 안에서 가장자리로 걸어 나가면 반대편 가장자리로 넘어간다",
-        src: "data(AuroraR castRange·JumpMaxDistance·JumpMinDistance·AreaDuration 3레벨, AoESize 700 을 지름으로 봄), 뛰는 시간: 추정" },
+        src: "data(AuroraR castRange·JumpMaxDistance·JumpMinDistance·AreaDuration 3레벨·AoESize 700 = 반경, 롤 위키 반경 700·나무위키 반경 750(castRadius)), 뛰는 시간: 추정" },
     ],
     belveth: { slot: 0, kind: "dash", range: 400, fixed: true, speed: 850, msScale: true, dirs: 4, cd: 1, src: "data(BaseDashSpeed 850), + 이동 속도: 롤 위키" },
     gwen: { slot: 2, kind: "dash", range: 350, fixed: true, speed: 800, cd: 11, src: "data" },
@@ -310,7 +310,9 @@
     zilean: { slot: 2, kind: "guard", haste: 0.99, hasteDur: 2.5, cd: 15, src: "data(TimeWarp SpeedAmount·Duration)" },
     sona: [
       { slot: 1, kind: "guard", barrier: 1.5, color: "#91a7ff", cd: 10, src: "data(SonaW ShieldDuration), cd: 추정" },
-      { slot: 2, kind: "guard", haste: 0.2, hasteDur: 3, cd: 14, src: "data(SonaE SelfBaseMovementSpeed·SelfMovementSpeedDurationMin)" },
+      // 소나 E: 3초 동안 이속, 피해를 입지 않으면 7초까지 이어진다(3초가 지나서 맞으면 그때 끝)
+      { slot: 2, kind: "guard", haste: 0.2, hasteDur: 7, hasteHitCut: 3, cd: 14,
+        src: "data(SonaE SelfBaseMovementSpeed·SelfMovementSpeedDurationMin 3·Max 7), 나무위키(피해를 입지 않으면 최대 7초)" },
     ],
     kennen: { slot: 2, kind: "guard", haste: 1, hasteDur: 2, runAnim: "spell3", runIdle: true, cd: 6, src: "data(KennenLightningRush MovementSpeed·DurationAsBall)" },
     draven: { slot: 1, kind: "guard", haste: 0.7, hasteEnd: 0, hasteDur: 1.5, cd: 12, src: "data(DravenFury MoveSpeed·MoveSpeedDuration·Temp_MSDecay)" },
@@ -2506,6 +2508,8 @@
         if (mode === "hard" && ccOk && took !== "cc") applyCC(s, how);
         return true;
       }
+      // 소나 E: 맞으면 이속이 끝난다(처음 hasteHitCut 초는 지킨다)
+      if (haste && haste.sk.hasteHitCut && t < haste.until) haste.until = Math.max(haste.from + haste.sk.hasteHitCut, t);
       lives -= 1;
       // 트린다미어 R·킨드레드 R: 목숨이 1 아래로 내려가지 않는다
       if (lives <= 0 && (undying > t || (lambs && t < lambs.until && dist(player, lambs) < lambs.radius))) lives = 1;
