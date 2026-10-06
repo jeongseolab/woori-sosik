@@ -473,7 +473,7 @@
   // fxGain: 롤 이펙트 밝기 배율(없으면 ENEMY_GAIN 1.8). 1.8배면 하얗게 타서 모양이 안 보이는 스킬만 낮춘다
   const SKILLS = [
     // ── 투사체 (전부 file) ──
-    { kind: "line", name: "모르가나 Q", champ: "Morgana", cast: 0.25, speed: 1200, radius: 70, range: 1300, color: "#b197fc", fxGain: 1.1, from: 0 },
+    { kind: "line", name: "모르가나 Q", champ: "Morgana", cast: 0.25, speed: 1200, radius: 70, range: 1300, color: "#b197fc", fxGain: 0.6, from: 0 },
     { kind: "line", name: "럭스 Q", champ: "Lux", cast: 0.25, speed: 1200, radius: 70, range: 1300, color: "#ffe066", from: 0 },
     { kind: "line", name: "자이라 E", champ: "Zyra", cast: 0.25, speed: 1150, radius: 70, range: 1150, color: "#69db7c", from: 0, look: "vines" },
     { kind: "line", name: "니달리 Q", champ: "Nidalee", cast: 0.25, speed: 1300, radius: 40, range: 1500, color: "#8ce99a", from: 5, look: "spear" },
