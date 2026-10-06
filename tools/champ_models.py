@@ -217,7 +217,9 @@ NEW21 = {"akshan": [2],
          "heimerdinger": [],
          "hwei": []}
 # NEW21 스킬의 동작: 롤 스킬 데이터의 mAnimationName(칸 번호와 다른 것만. Idle1·Run·Crit 처럼 돌진 동작을 스크립트가 따로 트는 것은 빼고 칸 번호 동작)
-SPELL_CLIPS_NEW21 = {("jarvaniv", 4): ["Spell3"], ("jax", 1): ["Spell2"], ("katarina", 3): ["Spell2"], ("lissandra", 4): ["Spell4_Self"], ("missfortune", 2): ["Spell1"], ("nautilus", 2): ["Spell1"], ("pantheon", 3): ["Spell3_Cast"], ("singed", 4): ["Spell2"], ("thresh", 2): ["Spell3"], ("twistedfate", 4): ["Spell1"], ("zac", 3): ["Spell3_Windup"], ("zed", 2): ["Spell2_Cast"]}
+SPELL_CLIPS_NEW21 = {("jarvaniv", 4): ["Spell3"], ("jax", 1): ["Spell2"], ("katarina", 3): ["Spell2"], ("lissandra", 4): ["Spell4_Self"], ("missfortune", 2): ["Spell1"], ("nautilus", 2): ["Spell1"], ("pantheon", 3): ["Spell3_Cast"], ("singed", 4): ["Spell2"], ("thresh", 2): ["Spell3"], ("twistedfate", 4): ["Spell1"], ("zac", 3): ["Spell3_Windup"], ("zed", 2): ["Spell2_Cast"],
+                     # 스킬 칸 클립이 없는 것: 니코 W 는 투명해져 달리는 동작, 카이사 E 는 E 자세로 들어가는 동작
+                     ("neeko", 2): ["Spell2_Run"], ("kaisa", 3): ["Idle_to_E"]}
 SPELL_CLIPS.update(SPELL_CLIPS_NEW21)
 FPS = 15
 TEX_SIZE = 512

@@ -42,7 +42,7 @@
 (function () {
   // 게임 버전 "앞.가운데.끝". 앞 = 새 챔피언 추가, 가운데 = 스킬 추가·버그 수정, 끝 = 아주 미묘한 변화.
   // 하나를 올리면 그 뒤 숫자는 0 으로. 서버는 앞 숫자가 같은 기록끼리만 순위를 매긴다(ranking.py 의 DODGE_VERSION 과 같게)
-  const VERSION = "21.0.0";
+  const VERSION = "21.1.0";
 
   const ARENA = { w: 1400, h: 900 };
   const CHAMP = { radius: 65, speed: 335 };
@@ -2212,6 +2212,7 @@
     // 적에게 돌진한다(tdash·grapple 이 맞힌 적)
     function goTarget(sk, c, o = {}) {
       const dx = c.x - player.x, dy = c.y - player.y, d = Math.hypot(dx, dy) || 1, ux = dx / d, uy = dy / d;
+      const tgt = c;
       skillAt = t; skillUsed = sk; target = null;
       facing = { x: ux, y: uy }; faceNow();
       mySkillStart(sk);
@@ -2239,6 +2240,7 @@
                  follow: c, v: sk.tdur ? Math.max(1, d - myR - bodyR(c.champ)) / sk.tdur : sk.speed + (sk.msScale ? moveSpeed().spd : 0),
                  dur: sk.tdur || d / (sk.speed + (sk.msScale ? moveSpeed().spd : 0)) };
       }
+      dash.tgt = tgt.champ ? tgt : null;
       if (dash.t0 <= t) moveStarts(dash);
     }
     function useSpecial(sk, i) {
@@ -2250,14 +2252,22 @@
       }
       // 표식으로 순간이동(제드 W 다시 누르기·리산드라 E 다시 누르기). 직스 W 다시 누르면 터진다
       if (sk.kind === "anchor" && (sk.anchor.swap || sk.anchor.blast)) {
-        const a = anchors.find(x => x.slot === i && t < x.until);
+        const a = anchors.find(x => x.slot === i && t < x.until && !x.swapped);
         if (a && t >= a.at) {
           anchors = anchors.filter(x => x !== a);
+          fxStop(a.vfx);
           if (sk.anchor.blast) { blast(sk, a); return; }
           const from = { x: player.x, y: player.y }, to = inArena(a.x, a.y);
           player.x = to.x; player.y = to.y; target = null;
           skillAt = t; skillUsed = sk;
-          flashFx(from, player);
+          myPlay(myPart(sk, "land"), 2);
+          // 제드 W: 자리를 바꾼다(그림자는 내가 있던 자리에 남은 시간 동안 선다. 다시 바꿀 수는 없다)
+          if (a.key === "shadow") {
+            Object.assign(a, { x: from.x, y: from.y, vx: null, swapped: true });
+            a.vfx = myAt(sk, "anchor", a.x, a.y, a.until - t);
+            anchors.push(a);
+          }
+          if (!myArt(sk)) flashFx(from, player);
           mySfx("flash");
           return;
         }
@@ -2268,7 +2278,7 @@
         const pick = pickTarget(sk.range, sk.targets);
         if (!pick) { sfx("deny"); return; }
         spend(sk, i);
-        if (pick.a) anchors = anchors.filter(x => x !== pick.a);
+        if (pick.a) { anchors = anchors.filter(x => x !== pick.a); fxStop(pick.a.vfx); }
         goTarget(sk, pick.c || pick.a, { wind: sk.windup || 0 });
         return;
       }
@@ -2290,6 +2300,8 @@
       mySkillStart(sk);
       if (sk.kind === "grapple") {
         hook = { sk, slot: i, x: player.x, y: player.y, dx, dy, left: sk.range, at: t + (sk.windup || 0) };
+        if (fxgl && fxgl.gl && myPart(sk, "mis"))
+          hook.vfx = fxPlay(myPart(sk, "mis"), { x: player.x, y: player.y, h: FX_H, missile: true, dir: { x: dx, y: dy } }, sk.range / sk.grapple.speed + (sk.windup || 0) + 1);
         if (sk.windup) act = { anim: sk.anim || "spell" + (sk.slot + 1), t0: t, hold: t + sk.windup, until: t + sk.windup + 0.3 };
         return;
       }
@@ -2301,6 +2313,13 @@
       const a = { key: A.key, slot: i, x: A.speed ? player.x : at.x, y: A.speed ? player.y : at.y, at: t + (A.delay || 0),
                   until: t + (A.delay || 0) + life, model: !!A.model, sk };
       if (A.speed) { a.vx = dx * A.speed; a.vy = dy * A.speed; a.stopAt = t + len / A.speed; a.at = t; }
+      if (fxgl && fxgl.gl && (myPart(sk, "mis") || myPart(sk, "anchor"))) {
+        a.fx = true;
+        // 날아가거나(제드 그림자·리산드라 갈퀴) 떨어지는 동안(카타리나 단검) 은 mis, 자리를 잡으면 anchor
+        if (myPart(sk, "mis") && (A.speed || A.delay)) a.vfx = fxPlay(myPart(sk, "mis"), { x: a.x, y: a.y, h: A.speed ? FX_H : 0, missile: !!A.speed, dir: { x: dx, y: dy } }, (A.delay || 0) + life + 0.5);
+        else a.vfx = myAt(sk, "anchor", a.x, a.y, (A.delay || 0) + life);
+        a.landed = !(myPart(sk, "mis") && (A.speed || A.delay));
+      }
       anchors = anchors.filter(x => !(x.slot === i && x.key === a.key && A.one));
       anchors.push(a);
       if (sk.haste) { startHaste(sk, sk.hasteDur); hasteFx(sk); }
@@ -2309,8 +2328,11 @@
     // 직스 W: 표식(폭탄) 이 터져 반경 안의 나를 폭탄 반대쪽으로 날린다
     function blast(sk, a) {
       const B = sk.anchor.blast, d = dist(player, a);
-      burst(a.x, a.y, 40, "#ffa94d", 24, 520);
-      flashGround(a.x, a.y, B.radius, "#ff922b", 0.5);
+      fxStop(a.vfx);
+      if (!myAt(sk, "blast", a.x, a.y, 2)) {
+        burst(a.x, a.y, 40, "#ffa94d", 24, 520);
+        flashGround(a.x, a.y, B.radius, "#ff922b", 0.5);
+      }
       sfx("thump");
       if (d > B.radius + myR) return;
       const ux = d > 1 ? (player.x - a.x) / d : facing.x, uy = d > 1 ? (player.y - a.y) / d : facing.y;
@@ -2326,26 +2348,35 @@
         const a = { x: hook.x, y: hook.y };
         hook.x += hook.dx * v; hook.y += hook.dy * v; hook.left -= v;
         const got = casters.find(c => !c.out && c.alpha > 0.5 && segDist(c, a, hook) < G.width + bodyR(c.champ));
-        if ((hook.drawAt || 0) <= t) {
+        if (hook.vfx) fxMove(hook.vfx, { x: hook.x, y: hook.y, h: FX_H });
+        else if ((hook.drawAt || 0) <= t) {
           hook.drawAt = t + 1 / 60;
           emit({ x: hook.x, y: hook.y, z: 60, size: G.width * 1.6, size1: G.width, color: "#ffffff", color1: sk.color || "#ffd43b", shape: "glow", life: 0.15 });
         }
         if (got) {
-          burst(got.x, got.y, 80, sk.color || "#ffd43b", 12, 300);
+          if (!myAt(sk, "tar", got.x, got.y, 3)) burst(got.x, got.y, 80, sk.color || "#ffd43b", 12, 300);
+          fxStop(hook.vfx);
           const slot = hook.slot; hook = null;
           if (sk.recast) hooked = { c: got, slot, until: t + sk.recast };
           else goTarget(sk, got);
-        } else if (hook.left <= 0 || hook.x < -200 || hook.y < -200 || hook.x > ARENA.w + 200 || hook.y > ARENA.h + 200) hook = null;
+        } else if (hook.left <= 0 || hook.x < -200 || hook.y < -200 || hook.x > ARENA.w + 200 || hook.y > ARENA.h + 200) { fxStop(hook.vfx); hook = null; }
       }
       if (hooked && t >= hooked.until) hooked = null;
       for (const a of anchors) {
-        if (a.vx != null && t < a.stopAt) { a.x += a.vx * dt; a.y += a.vy * dt; }
-        if (t >= a.at && (a.drawAt || 0) <= t) {
+        if (a.vx != null && t < a.stopAt) { a.x += a.vx * dt; a.y += a.vy * dt; if (a.vfx) fxMove(a.vfx, { x: a.x, y: a.y, h: FX_H }); }
+        // 자리를 잡았다: 날던 이펙트를 끄고 표식 이펙트(없으면 날던 것을 그대로 둔다)
+        if (a.fx && !a.landed && t >= a.at && (a.vx == null || t >= a.stopAt) && myPart(a.sk, "anchor")) {
+          a.landed = true;
+          fxStop(a.vfx);
+          a.vfx = myAt(a.sk, "anchor", a.x, a.y, a.until - t);
+        }
+        if (!a.fx && t >= a.at && (a.drawAt || 0) <= t) {
           a.drawAt = t + 0.12;
           emit({ x: a.x, y: a.y, ground: 1, size: 60, size1: 80, color: "#e9ecef", color1: "#868e96", shape: "ring", life: 0.25, a: 0.7 });
         }
       }
       for (const a of anchors) if (t >= a.until && a.sk && a.sk.anchor.blast) blast(a.sk, a);
+      for (const a of anchors) if (t >= a.until) fxStop(a.vfx);
       anchors = anchors.filter(a => t < a.until);
     }
     // 쿨타임을 돌린다. 여러 번 쓰는 것은 마지막 번(또는 window 가 끝날 때, step) 에 돌기 시작한다
@@ -2449,7 +2480,7 @@
       if (sk.zone) {
         const r = aim(sk.zone.range);
         zoneBoost = { x: player.x + r.dx * r.len, y: player.y + r.dy * r.len, r: sk.zone.radius, until: t + sk.zone.dur, haste: sk.zone.haste };
-        flashGround(zoneBoost.x, zoneBoost.y, zoneBoost.r, "#74c0fc", 0.6);
+        if (!myAt(sk, "zone", zoneBoost.x, zoneBoost.y, sk.zone.dur)) flashGround(zoneBoost.x, zoneBoost.y, zoneBoost.r, "#74c0fc", 0.6);
       }
     }
     // 투명해진다(fade 가 정한 동안). 적은 지금 자리를 마지막으로 본다
@@ -2582,6 +2613,7 @@
     function moveEnds(m) {
       const sk = m.sk;
       if (sk.untargetDash) untarget = t;
+      if (m.tgt && !m.again) myAt(sk, "tar", m.tgt.x, m.tgt.y, 3);
       // 퀸 E: 적에게 닿으면 뒤로 뛰어 물러난다
       if (sk.vault && m.follow && !m.again) {
         const bx = player.x - (m.follow.x - player.x), by = player.y - (m.follow.y - player.y), bd = Math.hypot(bx - player.x, by - player.y) || 1;
@@ -3159,7 +3191,9 @@
     const fxGain = s => s.fxGain || ENEMY_GAIN;
 
     // 내 챔피언 스킬 이펙트(dodge/vfx/mine/<챔피언>.json): 칸마다 cast(쓸 때) · anim([이펙트, 초], 애니메이션에 박힌 것) ·
-    // dash(돌진하는 동안) · land(내려앉을 때) · buf(이속·보호막·투명 동안). 모두 내 몸에 붙어 따라다닌다
+    // dash(돌진하는 동안) · land(내려앉을 때) · buf(이속·보호막·투명 동안). 이것들은 내 몸에 붙어 따라다닌다.
+    // 그 자리에 켜는 것: mis(갈고리·날아가는 표식을 따라간다) · tar(돌진이 닿은 적·갈고리에 맞은 적) · anchor(표식 자리) ·
+    // zone(장판 가운데) · drop(쓴 자리에 남는다: 오공 W 분신·세나 E 안개) · blast(직스 폭약이 터지는 자리)
     let mineFx = null, mineFor = null;
     const myFx = [];               // 몸에 붙은 이펙트 [{ list, until }]
     function loadMineFx() {
@@ -3183,6 +3217,7 @@
     // 스킬을 쓰는 순간: cast + 애니메이션 이펙트(제때) + 롤 소리
     function mySkillStart(sk) {
       myPlay(myPart(sk, "cast"));
+      myAt(sk, "drop", player.x, player.y, 4);
       for (const [name, at] of myPart(sk, "anim") || []) {
         if (at > 0) myFx.push({ later: name, at: t + at, until: Infinity });
         else myPlay([name]);
@@ -3202,6 +3237,11 @@
     function mySfx(kind) { if (!hasMySound(skillUsed)) sfx(kind); }
     // 버프 이펙트를 걸린 동안 붙인다
     function myBuff(sk, dur) { if (dur > 0) myPlay(myPart(sk, "buf"), dur); }
+    // 내 몸이 아닌 자리에 켠다(tar·anchor·zone·drop·blast). ttl 초 뒤에 끈다
+    function myAt(sk, part, x, y, ttl = 3, h = 0) {
+      if (!(fxgl && fxgl.gl)) return null;
+      return fxPlay(myPart(sk, part), { x, y, h, dir: { x: facing.x, y: facing.y } }, ttl);
+    }
 
     // 시전이 끝난 순간
     function release(c) {
@@ -4018,6 +4058,13 @@
           out.push({ key: modelKey(faceKey), x: soul.x0 + (soul.x - soul.x0) * k, y: soul.y0 + (soul.y - soul.y0) * k, z: 0, angle: soul.angle,
                      anim: since < inLen ? "bodyin" : "body", time: since < inLen ? since : since - inLen,
                      loop: since >= inLen, alpha: 1, tint: [0.35, 0.35, 0.45, 0.35] });
+        }
+        // 제드 W 그림자: 롤처럼 검게 물든 제드 모습(날아가는 동안 달리기, 선 뒤에는 서 있기)
+        for (const a of anchors) {
+          if (a.key !== "shadow" || t < a.at) continue;
+          const flying = a.vx != null && t < a.stopAt;
+          out.push({ key: modelKey(faceKey), x: a.x, y: a.y, z: 0, angle: a.vx != null ? Math.atan2(a.vy, a.vx) : viewAngle,
+                     anim: flying ? "run" : "idle", time: animClock, loop: true, alpha: 0.85, tint: [0.06, 0.03, 0.1, 0.75] });
         }
       }
       for (const c of casters) {

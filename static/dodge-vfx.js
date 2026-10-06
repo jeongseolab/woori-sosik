@@ -178,6 +178,7 @@
     const s = FX.systems[name];
     const inst = { s, name, age: 0, stopped: false, done: false, scale: o.scale || 1, ems: [], odom: 0, gain: o.gain || 0, mis: !!o.missile };
     place(inst, o);
+    if (!inst.pos) inst.pos = [0, 0, 0];      // 자식 시스템은 자리 없이 켜고 바로 부모 파티클 자리로 옮긴다
     inst.prev = inst.pos.slice();
     for (const e of s.emitters) inst.ems.push({ e, age: 0, acc: 0, ps: [], single: false, emitted: 0, path: 0 });
     live.push(inst);

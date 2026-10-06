@@ -110,6 +110,63 @@ MINE_EXTRA = {
     ("naafiri", 1): {"cast": ["Naafiri_R_Transform"], "buf": ["Naafiri_R_Buff", "Naafiri_R_Movespeed"]},
     ("naafiri", 2): {"land": ["Naafiri_E_SecondHit"]},
     ("volibear", 0): {"buf": ["Volibear_Q_ShieldRune_L"]},
+    # 21.0.0 에 더한 챔피언. 그 자리에 켜는 부분: mis(갈고리·날아가는 표식) · tar(돌진이 닿은 적·갈고리에 맞은 적) · anchor(표식 자리) ·
+    # zone(장판) · drop(쓴 자리) · blast(직스 폭약)
+    ("alistar", 1): {"tar": ["Alistar_W_tar"]},
+    ("alistar", 3): {"buf": ["Alistar_R_Glow"]},
+    ("amumu", 0): {"mis": ["Amumu_Q_mis"], "dash": ["Amumu_Q_Fly"], "tar": ["Amumu_Q_Tar"]},
+    ("azir", 1): {"anchor": ["Azir_W_Soldier_Cas", "Azir_W_SoldierGlowIdle", "Azir_P_Soldier_Ring"]},
+    ("briar", 0): {"tar": ["Briar_Q_Tar"]},
+    ("camille", 3): {"tar": ["Camille_R_tar"]},
+    ("darius", 3): {"cast": ["Darius_R_cast_axe"], "tar": ["Darius_R_tar"]},
+    ("drmundo", 3): {"buf": ["DrMundo_R_Haste"]},
+    ("fiddlesticks", 3): {"cast": ["FiddleSticks_R_Channel_Ground_Glow"], "land": ["Fiddlesticks_R_AOE"]},
+    ("gangplank", 1): {"cast": ["Gangplank_W_Citrus"], "buf": ["Gangplank_W_Heal"]},
+    ("illaoi", 1): {"cast": ["Illaoi_W_glow"], "tar": ["Illaoi_W_LeapSwipe", "Illaoi_W_tar"]},
+    ("irelia", 0): {"dash": ["Irelia_Q_Dash"], "tar": ["Irelia_Q_tar"]},
+    ("irelia", 1): {"buf": ["Irelia_W_DR"]},
+    ("ivern", 0): {"mis": ["Ivern_Q_Mis"], "tar": ["Ivern_Q_Tar_roots"]},
+    ("jarvaniv", 2): {"mis": ["JarvanIV_E_mis_01"], "anchor": ["JarvanIV_E_flag_hld_01"]},
+    ("jarvaniv", 3): {"tar": ["JarvanIV_R_tar_01"]},
+    ("jax", 0): {"tar": ["Jax_Q_tar"]},
+    ("jax", 2): {"buf": ["Jax_E_buf"]},
+    ("katarina", 1): {"mis": ["Katarina_W_mis"], "anchor": ["Katarina_Dagger_Ground_Indicator"], "buf": ["Katarina_W_SpeedBoost"]},
+    ("katarina", 2): {"tar": ["Katarina_E_Tar"]},
+    ("kayle", 1): {"buf": ["Kayle_W_Tar"]},
+    ("kayle", 3): {"buf": ["Kayle_R_Self"]},
+    ("leesin", 0): {"mis": ["LeeSin_Q_mis_01"], "dash": ["LeeSin_Q_Dash_Trail"], "tar": ["LeeSin_Q_tar"]},
+    ("leesin", 1): {"buf": ["LeeSin_W_shield_self"]},
+    ("leona", 2): {"mis": ["Leona_E_mis_weapon"], "dash": ["Leona_E_mis_dash"], "tar": ["Leona_E_tar"]},
+    ("lissandra", 2): {"mis": ["Lissandra_E_Missile"], "land": ["Lissandra_E_Arrival"]},
+    ("lissandra", 3): {"buf": ["Lissandra_R_iceblock"]},
+    ("maokai", 1): {"dash": ["Maokai_W_Mis"], "tar": ["Maokai_W_Tar"]},
+    ("mel", 1): {"buf": ["Mel_W_shield"]},
+    ("milio", 2): {"buf": ["Milio_E_ShieldBuf_Self"]},
+    ("milio", 3): {"buf": ["Milio_R_Tar"]},
+    ("monkeyking", 1): {"drop": ["MonkeyKing_W_cas_ally_01"]},
+    ("monkeyking", 2): {"dash": ["MonkeyKing_E_Mis_self_01"], "tar": ["MonkeyKing_E_tar_01"]},
+    ("nautilus", 0): {"mis": ["Nautilus_Q_mis"], "dash": ["Nautilus_Q_DustTrail_01"], "tar": ["Nautilus_Q_tar", "Nautilus_Q_Impact"]},
+    ("neeko", 1): {"buf": ["Neeko_W_Global_Haste"]},
+    ("nilah", 1): {"buf": ["Nilah_W_Spirit"]},
+    ("nilah", 2): {"dash": ["Nilah_E_Dash"], "tar": ["Nilah_E_Tar"]},
+    ("pantheon", 1): {"tar": ["Pantheon_W_tar"]},
+    ("pantheon", 2): {"buf": ["Pantheon_E_Shield"]},
+    ("qiyana", 2): {"dash": ["Qiyana_E_Dash"], "tar": ["Qiyana_E_tar"]},
+    ("quinn", 2): {"dash": ["Quinn_E_Dash"], "tar": ["Quinn_E_Tar"]},
+    ("senna", 2): {"drop": ["Senna_E_mistArea"]},
+    ("sett", 0): {"buf": ["Sett_Q_Buf_Haste", "Sett_Q_Buf_Hands"]},
+    ("shyvana", 1): {"buf": ["Shyvana_W_DR"]},
+    ("tahmkench", 1): {"land": ["TahmKench_W_Impact"]},
+    ("thresh", 1): {"buf": ["Thresh_W_Shield"]},
+    ("trundle", 1): {"zone": ["Trundle_W_ground"], "buf": ["Trundle_W_Speed_buff"]},
+    ("vex", 1): {"buf": ["Vex_W_shield"]},
+    ("vex", 3): {"mis": ["Vex_R_mis_max"], "dash": ["Vex_R_Travel_mis"], "tar": ["Vex_R_R2_tar"]},
+    ("vi", 3): {"dash": ["Vi_R_Run"], "tar": ["Vi_R_DunkTarget_tar"]},
+    ("xinzhao", 2): {"tar": ["XinZhao_Rework_E_Primary_Target"]},
+    ("xinzhao", 3): {"buf": ["XinZhao_R_Shield_Self"]},
+    ("zed", 1): {"mis": ["Zed_W_Mis"], "anchor": ["Zed_Clone_Idle"], "land": ["Zed_W_cloneswap_buf"]},
+    ("zed", 3): {"dash": ["Zed_R_Dash"], "tar": ["Zed_R_tar_TargetMarker"]},
+    ("ziggs", 1): {"mis": ["Ziggs_W_mis"], "anchor": ["Ziggs_W_Countdown"], "blast": ["Ziggs_W_hit"]},
 }
 
 
@@ -145,8 +202,10 @@ def mine_parts(d, champ, slot, kind):
     anim = []
     for v in d.values():
         if isinstance(v, dict) and "mClipDataMap" in v:
+            # 롤이 그 스킬에 실제로 트는 클립(champ_models.SPELL_CLIPS, mAnimationName). 없으면 칸 번호 클립
+            want = {c.lower() for c in cm.SPELL_CLIPS.get((champ, slot + 1), ["Spell%d" % (slot + 1)])}
             for clip, cd in (v.get("mClipDataMap") or {}).items():
-                if clip.lower() != "spell%d" % (slot + 1):
+                if clip.lower() not in want:
                     continue
                 for ev in (cd.get("mEventDataMap") or {}).values():
                     if isinstance(ev, dict) and ev.get("__type") == "ParticleEventData" and ev.get("mEffectKey") in rmap:
