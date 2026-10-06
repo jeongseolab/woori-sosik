@@ -42,7 +42,7 @@
 (function () {
   // 게임 버전 "앞.가운데.끝". 앞 = 새 챔피언 추가, 가운데 = 스킬 추가·버그 수정, 끝 = 아주 미묘한 변화.
   // 하나를 올리면 그 뒤 숫자는 0 으로. 서버는 앞 숫자가 같은 기록끼리만 순위를 매긴다(ranking.py 의 DODGE_VERSION 과 같게)
-  const VERSION = "20.3.0";
+  const VERSION = "20.4.0";
 
   const ARENA = { w: 1400, h: 900 };
   const CHAMP = { radius: 65, speed: 335 };
@@ -123,7 +123,7 @@
     lucian: { slot: 2, kind: "dash", range: 425, min: 200, speed: 1350, cd: 14, src: "data" },
     graves: { slot: 2, kind: "dash", range: 375, min: 275, speed: 750, cd: 12, src: "data" },
     vayne: { slot: 0, kind: "dash", range: 300, fixed: true, speed: 900, cd: 2, src: "range: data, speed: 추정" },
-    corki: { slot: 1, kind: "dash", range: 600, min: 300, speed: 650 + CHAMP.speed, cd: 12, src: "data" },
+    corki: { slot: 1, kind: "dash", range: 600, min: 300, speed: 650, msScale: true, cd: 12, src: "data(DashSpeedBase 650 + DashSpeedRatio 1.0 × 이동 속도)" },
     // 트리스타나 W: 0.25초 제자리 시전(Spell2_In) 뒤 1100 으로 날아간다. 롤은 거리에 따라 점프 클립이 셋(Shrt·Mid·LNG)이고
     // 각 클립이 땅에 닿는 시각(0.267·0.433·0.767초, 30fps 로 구워 잼) 이 1100 으로 약 293·476·844 를 나는 시간이라,
     // 나는 시간이 가장 가까운 클립을 고른다(경계는 두 착지 시각의 가운데: 0.35초 = 385, 0.6초 = 660).
@@ -134,13 +134,14 @@
     gragas: { slot: 2, kind: "dash", range: 600, fixed: true, speed: 900, cd: 12, src: "data" },
     gnar: { slot: 2, kind: "dash", range: 475, dur: 0.6, arc: 120, cd: 12, src: "data(TravelTime), arc: 추정" },
     kindred: [
-      { slot: 0, kind: "dash", range: 340, fixed: true, speed: 500, cd: 9, src: "data" },
+      { slot: 0, kind: "dash", range: 340, fixed: true, speed: 500, msScale: true, cd: 9, src: "data(DashSpeed 500), + 이동 속도: 롤 위키" },
       { slot: 3, kind: "guard", lambs: { radius: 530, dur: 4 }, cd: 120, src: "data(AoERadius·BuffDuration)" },
     ],
-    caitlyn: { slot: 2, kind: "dash", range: 390, fixed: true, back: true, speed: 1000, arc: 60, cd: 8, src: "추정" },
+    caitlyn: { slot: 2, kind: "dash", range: 390, fixed: true, back: true, speed: 1000, arc: 60, windup: 0.15, cd: 8,
+               src: "windup: 롤 위키(시전 0.15)·나무위키(\"묘하게 선 딜레이\"), speed·arc: 추정" },
     ahri: [
       { slot: 1, kind: "guard", haste: 0.4, hasteEnd: 0, hasteDur: 2, cd: 5, src: "data(AhriW MovementSpeed·MovementSpeedDuration), 줄어드는 것: 롤 설명" },
-      { slot: 3, kind: "dash", range: 500, speed: 1200, charges: 3, gap: 1, window: 10, cd: 100, src: "data" },
+      { slot: 3, kind: "dash", range: 500, speed: 1200, msScale: true, charges: 3, gap: 1, window: 10, cd: 100, src: "data(RBaseDashSpeed 1200), + 이동 속도: 롤 위키" },
     ],
     fizz: { slot: 2, kind: "dash", range: 400, dur: 0.25, untarget: 0.75, recast: { range: 400, dur: 0.25 }, cd: 8,
             desc: "장난치기: 커서 쪽 400 장대 위로 뛰어 0.75초 동안 스킬이 통과한다(장대 위에서는 못 걷는다). 그사이 다시 누르면 한 번 더 400 뛴다",
@@ -152,22 +153,22 @@
       { slot: 2, kind: "dash", range: 250, fixed: true, speed: 1450, barrier: 1.5, color: "#c3fae8", cd: 6, src: "data(missileSpeed·ShieldDuration)" },
     ],
     sejuani: { slot: 0, kind: "dash", range: 625, fixed: true, speed: 1000, cd: 12, src: "data" },
-    malphite: { slot: 3, kind: "dash", range: 1000, speed: 1835, unstoppable: true, granite: 10, color: "#ced4da", cd: 100,
-                src: "range: data, speed: 추정, 화강암 방패(패시브) 10초: 롤 설명(레벨에 따라 10·8·6초)" },
+    malphite: { slot: 3, kind: "dash", range: 1000, speed: 1500, msScale: true, unstoppable: true, granite: 10, color: "#ced4da", cd: 100,
+                src: "range: data, speed: 1500 + 이동 속도(롤 위키 공식·나무위키, 리플레이 1813~1952 로 확인), 화강암 방패(패시브) 10초: 롤 설명(레벨에 따라 10·8·6초)" },
     sylas: { slot: 2, kind: "dash", range: 400, speed: 1450, cd: 9, src: "추정" },
-    zeri: { slot: 2, kind: "dash", range: 300, fixed: true, speed: 900, cd: 18, src: "range: data, speed: 추정" },
+    zeri: { slot: 2, kind: "dash", range: 300, fixed: true, speed: 600, msScale: true, cd: 18, src: "range: data, speed: 롤 위키(600 + 이동 속도)·나무위키(\"이동 속도에 비례\")" },
     tryndamere: [
       { slot: 2, kind: "dash", range: 650, speed: 1300, cd: 8, src: "range: data, speed: 추정" },
       { slot: 3, kind: "guard", undying: 5, cd: 80, src: "data(TryndRDuration)" },
     ],
-    renekton: { slot: 2, kind: "dash", range: 450, fixed: true, speed: 750, followHit: 4, cd: 10, src: "data(BaseDashSpeed·DiceTimer)" },
-    ornn: { slot: 2, kind: "dash", range: 650, fixed: true, speed: 1600, cd: 12, src: "data" },
+    renekton: { slot: 2, kind: "dash", range: 450, fixed: true, speed: 750, msScale: true, followHit: 4, cd: 10, src: "data(BaseDashSpeed·DiceTimer), + 이동 속도: 롤 위키" },
+    ornn: { slot: 2, kind: "dash", range: 650, fixed: true, speed: 1600, windup: 0.35, cd: 12, src: "data(DashSpeed·DashRange·mCastTime 0.35), 선딜: 나무위키(\"짧은 딜레이 후 돌진\")" },
     rakan: [
       { slot: 1, kind: "dash", range: 650, speed: 1700, cd: 10, src: "data" },
       { slot: 3, kind: "guard", haste: 0.75, hasteDur: 4, runAnim: "skrun", cd: 90, src: "data(RakanR InitialCastSpeed·Duration)" },
     ],
     aatrox: { slot: 2, kind: "dash", range: 300, min: 75, speed: 800, cd: 5, src: "data" },
-    kled: { slot: 2, kind: "dash", range: 550, fixed: true, speed: 600, cd: 9, src: "data" },
+    kled: { slot: 2, kind: "dash", range: 550, fixed: true, speed: 600, msScale: true, cd: 9, src: "data(DashSpeed 600), + 이동 속도: 롤 위키" },
     kayn: [
       { slot: 0, kind: "dash", range: 350, fixed: true, speed: 1000, cd: 5, src: "range: data, speed: 추정" },
       { slot: 2, kind: "guard", haste: 0.4, hasteDur: 9, runAnim: "skrun", cd: 13, src: "data(KaynE MS·WallWalkDuration), 벽 지나가기는 빼고(경기장에 벽이 없다)" },
@@ -185,14 +186,14 @@
       { slot: 2, kind: "dash", range: 450, min: 250, speed: 900, cd: 7, src: "data" },
     ],
     aurora: [
-      { slot: 1, kind: "dash", range: 300, fixed: true, speed: 350 + CHAMP.speed, stealth: 1.6, haste: 0.4, realm: true, cd: 18,
+      { slot: 1, kind: "dash", range: 300, fixed: true, speed: 350, msScale: true, stealth: 1.6, haste: 0.4, realm: true, cd: 18,
         src: "data(JumpDistance·DashBonusSpeed·InvisDuration·MoveSpeedBonus)" },
       { slot: 3, kind: "dash", range: 250, min: 25, dur: 0.3, rift: { range: 700, radius: 350, dur: 4 }, cd: 100,
         desc: "경계 너머: 커서 쪽(700 안) 에 둘레 350 의 영혼 세계를 4초 동안 열고 그쪽으로 최대 250 뛴다. "
           + "영혼 세계 안에서 가장자리로 걸어 나가면 반대편 가장자리로 넘어간다",
         src: "data(AuroraR castRange·JumpMaxDistance·JumpMinDistance·AreaDuration 3레벨, AoESize 700 을 지름으로 봄), 뛰는 시간: 추정" },
     ],
-    belveth: { slot: 0, kind: "dash", range: 400, fixed: true, speed: 850, dirs: 4, cd: 1, src: "data" },
+    belveth: { slot: 0, kind: "dash", range: 400, fixed: true, speed: 850, msScale: true, dirs: 4, cd: 1, src: "data(BaseDashSpeed 850), + 이동 속도: 롤 위키" },
     gwen: { slot: 2, kind: "dash", range: 350, fixed: true, speed: 800, cd: 11, src: "data" },
     fiora: [
       { slot: 0, kind: "dash", range: 400, speed: 1000, cd: 6, src: "추정" },
@@ -200,11 +201,13 @@
     ],
     pyke: [
       { slot: 1, kind: "guard", stealth: 5, haste: 0.45, hasteEnd: 0, runAnim: "skrun", cd: 10, src: "data(PykeW CamoDuration·BaseMoveSpeed), 줄어드는 것: 롤 설명" },
-      { slot: 2, kind: "dash", range: 550, fixed: true, speed: 1000, cd: 11, src: "range: data, speed: 추정" },
+      { slot: 2, kind: "dash", range: 550, fixed: true, speed: 3000, cd: 11,
+        src: "range: data, speed: 롤 위키 3000·나무위키(\"즉발\", \"돌진 속도가 매우 빠름\"). 데이터 mCastTime 0.275 는 나무위키가 즉발이라 안 씀" },
     ],
     // 쉔: 스킬을 쓰면 기의 장벽(패시브) 보호막
-    shen: { slot: 2, kind: "dash", range: 600, min: 300, speed: 800 + CHAMP.speed, barrier: 2.5, color: "#74c0fc", cd: 10, src: "data(DashBonusSpeed·MinimumDistance, ShenPassive ShieldDuration)" },
-    urgot: { slot: 2, kind: "dash", range: 450, fixed: true, speed: 1200, barrier: 4, color: "#ff8787", cd: 14, src: "data(EShieldDuration)" },
+    shen: { slot: 2, kind: "dash", range: 600, min: 300, speed: 800, msScale: true, barrier: 2.5, color: "#74c0fc", cd: 10, src: "data(DashBonusSpeed·MinimumDistance, ShenPassive ShieldDuration)" },
+    urgot: { slot: 2, kind: "dash", range: 450, fixed: true, speed: 1200, msScale: true, windup: 0.45, barrier: 4, color: "#ff8787", cd: 14,
+             src: "data(EShieldDuration·BaseDashSpeed·mCastTime 0.45), 선딜: 나무위키(\"긴 선딜레이\"), + 이동 속도: 롤 위키" },
     galio: { slot: 2, kind: "dash", range: 650, min: 250, speed: 2300, windup: 0.4, backstep: 200, anim: "windup3", dashAnim: "spell3", cd: 7,
              desc: "정의의 주먹: 커서를 본 채 0.4초 동안 커서 반대쪽으로 물러났다가(그동안 CC 를 맞으면 끊긴다) 커서 쪽으로 돌진. 누른 자리에서 최대 650 앞까지",
              src: "range·min·windup: data(GalioE MinRange·spellCastTime), speed: 롤 위키(2300), 물러나는 거리 200: 추정(데이터·위키에 없다), 동작: Spell3_Windup → Spell3" },
@@ -218,7 +221,7 @@
               + "돌아가는 속도 2500·쿨타임이 돌아온 뒤부터: 추정" },
     kassadin: [
       { slot: 0, kind: "guard", barrier: 1.5, color: "#da77f2", cd: 7, src: "data(NullLance ShieldDuration), 롤은 마법 피해만 막는다(여기 스킬은 거의 마법 피해)" },
-      { slot: 3, kind: "blink", range: 500, cd: 2, src: "data" },
+      { slot: 3, kind: "blink", range: 500, windup: 0.25, cd: 2, src: "data(mCastTime 0.25), 나무위키(\"즉발처럼 보이지만 미세한 시전 시간\")" },
     ],
     shaco: { slot: 0, kind: "blink", range: 400, windup: 0.125, stealth: 3.5, cd: 11, src: "data(PseudoCastTime·StealthDuration)" },
     leblanc: [
@@ -237,7 +240,7 @@
       { slot: 1, kind: "guard", shroud: { radius: 300, dur: 7 }, haste: 0.5, hasteEnd: 0, hasteDur: 2, cd: 16,
         src: "data(AkaliW BaseDuration·MovementSpeed·MovementSpeedDuration), 장막 둘레: 추정(CloudRadius 140 에서 퍼진다)" },
       { slot: 2, kind: "dash", range: 400, fixed: true, back: true, speed: 1000, arc: 90, cd: 10, src: "range: data, speed·arc(뒤로 공중제비 높이): 추정" },
-      { slot: 3, kind: "dash", ranges: [675, 715], fixed: true, speed: 1600, charges: 2, gap: 2.5, window: 10, chargeAnims: ["spell4", "spell4b"], cd: 60,
+      { slot: 3, kind: "dash", ranges: [675, 715], fixed: true, speed: 1600, windups: [0.25, 0], charges: 2, gap: 2.5, window: 10, chargeAnims: ["spell4", "spell4b"], cd: 60,
         desc: "무결처형: 커서 쪽으로 675 돌진. 2.5초 뒤부터 10초 안에 한 번 더 715 돌진",
         src: "data(AkaliR castRange·DashDistance·CooldownBetweenCasts), 빠르기·10초: 추정" },
     ],
@@ -1845,7 +1848,7 @@
                  r: sk.rift.radius, until: t + sk.rift.dur };
         flashGround(rift.x, rift.y, rift.r * 0.6, "#9775fa", 0.4);
       }
-      go(sk, dx, dy, len, { wind: sk.windup || 0, anim: sk.chargeAnims && sk.chargeAnims[used] });
+      go(sk, dx, dy, len, { wind: (sk.windups ? sk.windups[used] : sk.windup) || 0, anim: sk.chargeAnims && sk.chargeAnims[used] });
     }
     // 쿨타임을 돌린다. 여러 번 쓰는 것은 마지막 번(또는 window 가 끝날 때, step) 에 돌기 시작한다
     function spend(sk, i, dir) {
@@ -1977,6 +1980,16 @@
       burst(player.x, player.y, 70, "#d0ebff", 14, 260);
       mySfx("cleanse");
     }
+    // 지금 이동 속도. base: 이속·유체화까지, spd: 둔화까지(가장 센 둔화 하나, 줄어드는 둔화(to) 는 시간에 따라 pct → to, 110 아래로 안 내려간다)
+    function moveSpeed() {
+      const base = CHAMP.speed * (ghostLeft > 0 ? 1 + spellById("ghost").bonus : 1) * (1 + (hastePct() < 0 ? hastePct() : Math.max(hastePct(), quickPct())));
+      let slow = 0;
+      for (const e of effects) {
+        if (e.type !== "slow" || e.start > t || e.end <= t || slowFree > t) continue;
+        slow = Math.max(slow, e.to == null ? e.pct : e.pct + (e.to - e.pct) * (t - e.start) / (e.end - e.start));
+      }
+      return { base, spd: slow > 0 ? Math.max(110, base * (1 - slow)) : base };
+    }
     // 3D 모델이 지금 facing 쪽을 곧바로 본다(이동기를 쓸 때. 걸을 때는 TURN 으로 천천히 돈다)
     const faceNow = () => { viewAngle = Math.atan2(facing.y, facing.x); };
     // 움직임을 예약한다. 시전 시간(wind) 동안은 제자리에서 스킬 동작, 그 뒤 돌진하거나 순간이동(step)
@@ -1989,7 +2002,7 @@
       const blink = sk.kind === "blink";
       dash = { sk, fx: from.x, fy: from.y, tx: to.x, ty: to.y, t0: t + (o.wind || 0), blink, again: !!o.again,
                bx: player.x, by: player.y, w0: t,
-               dur: blink ? 0 : Math.max(0.05, o.dur || sk.dur || d / sk.speed) };
+               dur: blink ? 0 : Math.max(0.05, o.dur || sk.dur || d / (sk.speed + (sk.msScale ? moveSpeed().spd : 0))) };
       // 거리에 따라 다른 점프 클립(트리스타나 W)
       if (sk.leaps) { const L = sk.leaps.find(l => d < l[0]); dash.leapAnim = L[1]; dash.leap = L[2]; }
       target = null;
@@ -2769,14 +2782,7 @@
         target = null;
         flashFx(from, player);
       }
-      const base = CHAMP.speed * (ghostLeft > 0 ? 1 + spellById("ghost").bonus : 1) * (1 + (hastePct() < 0 ? hastePct() : Math.max(hastePct(), quickPct())));
-      // 둔화: 가장 센 것 하나만. 줄어드는 둔화(to) 는 시간에 따라 pct → to. 이동 속도는 110 아래로 안 내려간다
-      let slow = 0;
-      for (const e of effects) {
-        if (e.type !== "slow" || e.start > t || e.end <= t || slowFree > t) continue;
-        slow = Math.max(slow, e.to == null ? e.pct : e.pct + (e.to - e.pct) * (t - e.start) / (e.end - e.start));
-      }
-      const spd = slow > 0 ? Math.max(110, base * (1 - slow)) : base;
+      const { base, spd } = moveSpeed();
       const air = cc("air"), stun = cc("stun"), root = cc("root"), charm = cc("charm");
 
       // 이동: CC 가 먼저. 없으면 WASD 가 눌려 있으면 그쪽으로, 아니면 찍은 곳으로
