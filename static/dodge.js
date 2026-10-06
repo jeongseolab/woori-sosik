@@ -42,7 +42,7 @@
 (function () {
   // 게임 버전 "앞.가운데.끝". 앞 = 새 챔피언 추가, 가운데 = 스킬 추가·버그 수정, 끝 = 아주 미묘한 변화.
   // 하나를 올리면 그 뒤 숫자는 0 으로. 서버는 앞 숫자가 같은 기록끼리만 순위를 매긴다(ranking.py 의 DODGE_VERSION 과 같게)
-  const VERSION = "20.0.0";
+  const VERSION = "20.1.0";
 
   const ARENA = { w: 1400, h: 900 };
   const CHAMP = { radius: 65, speed: 335 };
@@ -50,6 +50,10 @@
   const BODY = { bard: 80, blitzcrank: 80, chogath: 80, galio: 80, gragas: 80, hecarim: 80, malphite: 80, ornn: 80, renekton: 80,
                  sejuani: 80, urgot: 80, volibear: 80,
                  fizz: 55, gnar: 55, kennen: 55, lulu: 55, poppy: 55, teemo: 55, tristana: 55, veigar: 55, zoe: 55 };
+  // 적 챔피언의 기본 이동 속도(롤 데이터 <챔피언>.bin 의 baseMoveSpeedModifiable, 16.19 로컬 클라이언트에서 2026-10-06 확인)
+  const MOVE = { ahri: 330, ashe: 325, blitzcrank: 325, brand: 340, chogath: 345, ezreal: 325, jhin: 330, jinx: 325, karthus: 335,
+                 leona: 335, lux: 330, morgana: 335, nidalee: 335, syndra: 330, thresh: 330, veigar: 340, velkoz: 340, xerath: 340, zyra: 340 };
+  const moveOf = champ => MOVE[champ.toLowerCase()] || CHAMP.speed;
   const bodyR = champ => BODY[String(champ || "").toLowerCase()] || CHAMP.radius;
   const STEP = 1 / 240;
   const FAR = 4000;            // 경기장보다 긴 사거리(레이저 등)
@@ -1137,6 +1141,7 @@
     let t = 0, dodged = 0, acc = 0, last = 0, nextCast = 0, raf = 0;
     let player, target, casters, missiles, zones, flashes;
     let lives, hits, safe, lastHit, dead;
+    let lastFire = -9;       // 적이 마지막으로 시전한 시각
     let fx, parts, shake, hurt;          // 그림 효과(판정과 상관없음)
     let waves, ca, deadFx;               // 효과층: 충격파 왜곡, 색수차, 죽은 뒤 회색이 되는 정도
     let cds, ghostLeft, cursor, facing, prevFacing, facingAt, viewAngle, steer, level, pops, lastSpree, lastMark;
@@ -1166,7 +1171,8 @@
       myR = bodyR(myChamp());
       player = { x: ARENA.w / 2, y: ARENA.h / 2, vx: 0, vy: 0 };
       target = null;
-      casters = [];      // 시전 중인 적
+      casters = [];      // 경기장에 있는 적 챔피언(걸어 다니다가 멈춰 시전한다)
+      lastFire = -9;
       missiles = [];     // 날아가는 투사체
       zones = [];        // 바닥 장판·감옥
       flashes = [];      // 레이저가 지나간 자리(그림만)
@@ -1381,10 +1387,10 @@
     }
 
     // ── 스킬 고르기 ──
-    function pickSkill() {
-      let open = SKILLS.filter(s => s.from <= t);
+    function pickSkill(ok = () => true) {
+      let open = SKILLS.filter(s => s.from <= t && ok(s));
       // 감옥은 한 번에 하나만
-      if (zones.some(z => z.skill.kind === "cage") || casters.some(c => c.skill.kind === "cage")) {
+      if (zones.some(z => z.skill.kind === "cage") || casters.some(c => (c.wind > 0 && c.skill.kind === "cage") || (c.pend && c.pend.skill.kind === "cage"))) {
         open = open.filter(s => s.kind !== "cage");
       }
       // 새로 열린 스킬은 한 번은 꼭 나온다(열린 수가 많아지면 확률로는 잘 안 보이니까)
@@ -1422,15 +1428,141 @@
       return tries.reduce((a, b) => (dist(b, aim) < dist(a, aim) ? b : a));
     }
 
+    // ── 적 챔피언 ──
+    // 롤처럼 적은 경기장에 남아 걸어 다닌다. 평소에는 내 둘레에서 자기 사거리쯤 거리를 두고 옆으로 움직이고,
+    // 스킬을 쓸 차례(pend) 가 되면 사거리 안으로 걸어 들어와 멈춰 서서 시전 동작을 하고 쏜다.
+    // 그래서 적의 사거리 밖에 서고, 멈춰 서서 손을 드는 동작을 보고 피하는 연습이 된다
+    const busy = c => c.wind > 0 || c.fade > 0;
+    const live = c => !c.out;
+    const maxEnemies = () => (t < 10 ? 2 : t < 20 ? 3 : t < 40 ? 4 : 5);     // 롤 한 팀은 다섯
+    const ENEMY_IN = 0.35;          // 나타나는 데 걸리는 시간(이만큼 보인 뒤에야 쏜다)
+    const PEND_MAX = 2.5;           // 이만큼 걸어도 쏠 자리를 못 잡으면 그 스킬은 그만둔다
+    const FIRE_GAP = 0.35;          // 걸어오느라 늦어진 차례가 한꺼번에 몰려 나가지 않게 시전 사이를 이만큼 둔다
+    const SPREAD = 0.8;             // 적끼리 나를 기준으로 이만큼(라디안, 약 46°) 은 벌려 선다(한쪽 구석에 몰리지 않게)
+    // 내가 투명하면(오로라 W·샤코 Q) 마지막으로 본 자리를 노린다. 움직임도 모르니 앞질러 노리지 못한다
+    const enemyView = () => (hidden > t && seen ? { x: seen.x, y: seen.y, vx: 0, vy: 0 } : player);
+    function inArenaR(x, y, r) {
+      return { x: Math.min(ARENA.w - r, Math.max(r, x)), y: Math.min(ARENA.h - r, Math.max(r, y)) };
+    }
+    function spawnEnemy(skill) {
+      // 경기장에는 maxEnemies 명까지. 넘치면 가장 오래 안 쓴 한가한 적이 걸어 나간다
+      const on = casters.filter(live);
+      if (on.length >= maxEnemies()) {
+        const idle = on.filter(c => !busy(c) && !c.pend).sort((a, b) => a.used - b.used)[0];
+        if (!idle) return null;
+        idle.out = true;
+      }
+      // 나타날 자리: 쏘기 좋은 가장자리 후보 중 다른 적과 가장 먼 곳
+      const me = enemyView(), r = bodyR(skill.champ), others = casters.filter(live);
+      const far = q => Math.min(1e9, ...others.map(o => dist(o, q)));
+      const p = Array.from({ length: 6 }, () => { const a = castFrom(skill, me, me); return inArenaR(a.x, a.y, r); })
+        .reduce((a, b) => (far(b) > far(a) ? b : a));
+      const d = dist(me, p) || 1;
+      const c = { champ: skill.champ, skill, x: p.x, y: p.y, dx: (me.x - p.x) / d, dy: (me.y - p.y) / d, wind: 0, fade: 0,
+                  alpha: 0, born: t, used: t, pend: null, strafe: 0, strafeAt: 0, moving: false };
+      casters.push(c);
+      model(skill.champ);       // 3D 모델이 있으면 받기 시작(다 받기 전엔 초상화)
+      return c;
+    }
+    // 쏠 차례를 정한다. 그 챔피언이 이미 있으면 그 적이, 없으면 새로 나타난 적이 쏜다
     function cast() {
-      const skill = pickSkill();
+      const owner = s => casters.find(c => live(c) && c.champ === s.champ);
+      const skill = pickSkill(s => { const c = owner(s); return !c || (!busy(c) && !c.pend); });
       if (!skill) return;
-      // 롤처럼 누르는 순간 노리는 곳이 정해진다. 가끔은 내가 갈 곳을 앞질러 노린다
+      const c = owner(skill) || spawnEnemy(skill);
+      if (!c) return;
+      c.pend = { skill, at: t };
+    }
+    // 이 자리에서 이 스킬을 쏠 수 있나(투사체·레이저는 사거리의 60~100%. 너무 가까우면 못 피하니까. 바닥은 사거리 안)
+    function canFire(c, s, me) {
+      const d = dist(c, me);
+      if (s.kind === "line" || s.kind === "beam") {
+        const reach = Math.min(s.range, FAR);
+        return d <= reach * 0.98 && d >= Math.min(600, reach * 0.6);
+      }
+      return d <= s.range;
+    }
+    // 이 스킬을 쏘기 좋은 거리
+    function wantDist(s) {
+      if (s.kind === "line" || s.kind === "beam") {
+        const reach = Math.min(s.range, FAR), lo = Math.min(600, reach * 0.6);
+        return Math.max(lo + 60, reach * 0.8);
+      }
+      return s.range * 0.75;
+    }
+    // 평소 거리: 그 챔피언의 열린 스킬 중 가장 긴 사거리쯤(롤처럼 사거리 끝에서 견제한다)
+    function homeDist(c) {
+      const rs = SKILLS.filter(s => s.champ === c.champ && s.from <= t).map(s => Math.min(s.range, FAR));
+      return Math.min(1000, Math.max(520, (rs.length ? Math.max(...rs) : 800) * 0.85));
+    }
+    // 적 한 걸음: 나와 want 거리를 두는 자리로 걷는다. 가끔 옆으로 돌고(strafe), 다른 적과는 떨어진다
+    function walkEnemy(c, want, dt, me) {
+      if (t >= c.strafeAt) {
+        const r = Math.random();
+        c.strafe = r < 0.25 ? 0 : r < 0.625 ? 1 : -1;
+        c.strafeAt = t + rand(1.2, 2.8);
+      }
+      let a = Math.atan2(c.y - me.y, c.x - me.x) + c.strafe * 0.45;
+      // 나를 기준으로 다른 적과 SPREAD 보다 가까운 각도면 벌린다
+      for (const o of casters) {
+        if (o === c || !live(o)) continue;
+        let da = a - Math.atan2(o.y - me.y, o.x - me.x);
+        da = Math.atan2(Math.sin(da), Math.cos(da));
+        if (Math.abs(da) < SPREAD) a += (da >= 0 ? 1 : -1) * (SPREAD - Math.abs(da)) * 0.8;
+      }
+      const r = bodyR(c.champ), g = inArenaR(me.x + Math.cos(a) * want, me.y + Math.sin(a) * want, r);
+      const vx = g.x - c.x, vy = g.y - c.y, d = Math.hypot(vx, vy);
+      c.moving = d > 12;
+      if (c.moving) {
+        const v = Math.min(d, moveOf(c.champ) * dt);
+        c.x += vx / d * v; c.y += vy / d * v;
+        c.dx = vx / d; c.dy = vy / d;
+      }
+      // 몸끼리는 겹치지 않는다(롤 챔피언도 서로 밀린다)
+      for (const o of casters) {
+        if (o === c) continue;
+        const dd = dist(o, c), need = r + bodyR(o.champ) + 20;
+        if (dd < need) {
+          const k = dd > 0 ? 1 / dd : 0, ux = dd > 0 ? (c.x - o.x) * k : 1, uy = dd > 0 ? (c.y - o.y) * k : 0;
+          const q = inArenaR(c.x + ux * Math.min(need - dd, 200 * dt), c.y + uy * Math.min(need - dd, 200 * dt), r);
+          c.x = q.x; c.y = q.y;
+        }
+      }
+    }
+    function stepEnemies(dt) {
+      const me = enemyView();
+      for (const c of casters) {
+        c.alpha = c.out ? c.alpha - dt / 0.5 : Math.min(1, c.alpha + dt / ENEMY_IN);
+        if (busy(c) || c.dash || c.stunUntil > t || c.supUntil > t) { c.moving = false; continue; }
+        if (c.out) {
+          // 나가는 적은 나한테서 멀어지는 쪽으로 걷다가 사라진다
+          walkEnemy(c, dist(c, me) + 400, dt, me);
+          continue;
+        }
+        if (c.pend) {
+          const s = c.pend.skill;
+          if (t - c.born >= ENEMY_IN && t - lastFire >= FIRE_GAP && canFire(c, s, me)) {
+            c.pend = null; c.used = t; c.moving = false; lastFire = t;
+            fire(c, s);
+            continue;
+          }
+          // 못 쏜 스킬은 아직 안 나온 것으로 되돌린다(새 스킬은 한 번 꼭 나오게)
+          if (t - c.pend.at > PEND_MAX) { debuted.delete(s); c.pend = null; continue; }
+          walkEnemy(c, wantDist(s), dt, me);
+          continue;
+        }
+        walkEnemy(c, homeDist(c), dt, me);
+      }
+      casters = casters.filter(c => !(c.out && c.alpha <= 0));
+    }
+
+    // 멈춰 서서 시전한다. 롤처럼 누르는 순간 노리는 곳이 정해진다. 가끔은 내가 갈 곳을 앞질러 노린다
+    function fire(c, skill) {
       const ground = skill.kind === "circle" || skill.kind === "cage";
       const lead = Math.random() < leadChance(t);
-      // 내가 투명하면(오로라 W·샤코 Q) 마지막으로 본 자리를 노린다. 움직임도 모르니 앞질러 노리지 못한다
-      const me = hidden > t && seen ? { x: seen.x, y: seen.y, vx: 0, vy: 0 } : player;
-      let aim = { x: me.x, y: me.y }, at0;
+      const me = enemyView();
+      let aim = { x: me.x, y: me.y };
+      const at0 = { x: c.x, y: c.y };
       if (ground) {
         // 바닥 스킬은 노릴 곳을 먼저 정하고, 거기가 사거리 안에 드는 자리에서 쏜다
         if (lead) {
@@ -1443,29 +1575,25 @@
           const a = Math.random() * Math.PI * 2;
           aim = { x: aim.x + Math.cos(a) * skill.radius, y: aim.y + Math.sin(a) * skill.radius };
         }
-        at0 = castFrom(skill, aim, me);
       } else {
-        at0 = castFrom(skill, aim, me);
         if (lead) {
           const ahead = skill.cast + (skill.kind === "line" ? dist(at0, me) / skill.speed : 0);
           aim = { x: me.x + me.vx * ahead, y: me.y + me.vy * ahead };
         }
       }
       const d = dist(aim, at0) || 1;
-      const c = { skill, x: at0.x, y: at0.y, dx: (aim.x - at0.x) / d, dy: (aim.y - at0.y) / d, wind: skill.cast, fade: 0.5 };
+      Object.assign(c, { skill, dx: (aim.x - at0.x) / d, dy: (aim.y - at0.y) / d, wind: skill.cast, fade: 0.5, cancelled: false, aim: null });
       if (ground) {
         // 사거리보다 멀리는 못 찍는다(롤도 사거리 끝으로 당겨진다)
         const r = Math.min(d, skill.range);
         c.aim = { x: at0.x + c.dx * r, y: at0.y + c.dy * r };
       }
-      casters.push(c);
       const lf = lolFx(skill);
       // 시전하는 동안 켜지는 것(진 W 모으기, 징크스 W 경고선)
       if (lf && (skill.kind === "beam" || skill.kind === "line") && lf.warn) {
         const end = { x: c.x + c.dx * Math.min(skill.range, 2500), y: c.y + c.dy * Math.min(skill.range, 2500), h: FX_H };
         c.vfx = fxPlay(lf.warn, { x: c.x, y: c.y, h: FX_H, gain: fxGain(skill), dir: { x: c.dx, y: c.dy }, target: end }, skill.cast + 1);
       }
-      model(skill.champ);       // 3D 모델이 있으면 받기 시작(다 받기 전엔 초상화)
       skillSound(skill, "cast");
       if (c.wind <= 0) release(c);
     }
@@ -2798,7 +2926,7 @@
           if (k >= 1) c.dash = null;
         }
       }
-      casters = casters.filter(c => c.wind > 0 || c.fade > 0);
+      stepEnemies(dt);
       // 끝난 CC·사슬은 버린다(정화로 풀린 기절에 걸린 사슬도)
       dropCC(e => e.end > t, false);
       tethers = tethers.filter(x => x.until > t && (!x.on || effects.includes(x.on)) && (x.skill.champ !== "Blitzcrank" || cc("air")));
@@ -3218,11 +3346,12 @@
         if (!model(c.skill.champ)) continue;
         const since = c.skill.cast - c.wind;            // 시전을 시작한 뒤 흐른 시간(풀린 뒤에도 계속 는다)
         const casting = c.wind > 0 || c.fade > 0.25;
-        const froze = c.stunUntil > t, struck = t - (c.ambHit || -9);
+        const froze = c.stunUntil > t, struck = t - (c.ambHit || -9), stop = c.cancelled && casting;
+        const walk = !casting && c.moving, loop = !!c.dash || walk || !casting;     // 걷기·서 있기는 되풀이
         out.push({ key: modelKey(c.skill.champ), x: c.x, y: c.y, z: c.supUntil > t ? 25 : 0, angle: Math.atan2(c.dy, c.dx),
-                   anim: froze || c.cancelled ? "idle" : c.dash ? "run" : casting ? spellAnim(c.skill) : "idle",
-                   time: froze || c.cancelled ? 0 : c.dash ? animClock : Math.max(0, since + (c.wind > 0 ? 0 : 0.5 - c.fade)),
-                   loop: !!c.dash, alpha: c.wind > 0 ? 1 : Math.min(1, Math.max(0, c.fade / 0.5)),
+                   anim: froze || stop ? "idle" : c.dash || walk ? "run" : casting ? spellAnim(c.skill) : "idle",
+                   time: froze || stop ? 0 : loop ? animClock : Math.max(0, since + (c.wind > 0 ? 0 : 0.5 - c.fade)),
+                   loop, alpha: Math.max(0, Math.min(1, c.alpha)),
                    tint: struck < 0.25 ? [1, 1, 1, (0.25 - struck) / 0.25 * 0.7] : froze ? [0.75, 0.1, 0.05, 0.35] : null });
       }
       return out;
@@ -4103,7 +4232,7 @@
       ctx.lineWidth = 2.5;
       ctx.stroke();
       for (const c of casters) {
-        ctx.globalAlpha = c.wind > 0 ? 1 : Math.max(0, c.fade / 0.5);
+        ctx.globalAlpha = Math.max(0, Math.min(1, c.alpha));
         groundCircle(c.x, c.y, bodyR(c.skill.champ), 0, 32);
         ctx.strokeStyle = "#ff4d4f";
         ctx.lineWidth = 2.5;
@@ -4218,7 +4347,7 @@
     }
 
     function drawCaster(c) {
-      const alpha = c.wind > 0 ? 1 : Math.max(0, c.fade / 0.5);
+      const alpha = Math.max(0, Math.min(1, c.alpha));
       const md = model(c.skill.champ);
       if (md) {
         // 3D 모델은 효과층이 그린다. 머리 위 체력바와 시전 중 차오르는 테두리 대신 막대만
