@@ -86,7 +86,7 @@ SPELL_CLIPS = {("corki", 2): ["Spell3"], ("gragas", 3): ["Spell1"], ("gnar", 3):
                ("zoe", 4): ["Spell2"], ("sivir", 3): ["Spell2"], ("sivir", 4): ["Spell2"], ("orianna", 2): ["Spell1"],
                ("vladimir", 2): ["Spell2Down"], ("blitzcrank", 2): ["Spell3"], ("zilean", 3): ["Spell1"],
                ("sona", 2): ["Spell1"], ("sona", 3): ["Spell1"], ("udyr", 3): ["Spell2"], ("bard", 3): ["Spell2"],
-               ("thresh", 1): ["Spell1_In"], ("sylas", 3): ["Spell3_Dash"], ("tristana", 2): ["Spell2_LNG"],
+               ("thresh", 1): ["Spell1_In"], ("kindred", 1): ["Spell1Back"], ("sylas", 3): ["Spell3_Dash"], ("tristana", 2): ["Spell2_LNG"],
                ("riven", 1): ["Spell1A"], ("rakan", 4): ["Spell4_Into"], ("naafiri", 2): ["Spell4_Idle"],
                ("yone", 3): ["Spell3_Spirit"]}
 # 스킬 말고 따로 굽는 동작: 이름 → 클립 이름 후보(칼리스타 Q 뒤의 패시브 돌진).
@@ -97,13 +97,15 @@ SPELL_CLIPS = {("corki", 2): ["Spell3"], ("gragas", 3): ["Spell1"], ("gnar", 3):
 # 방향별 클립(롤 그래프 ConditionFloat + LookAtSpellTargetAngle): 이즈리얼 E Spell3_±90·±180, 칼리스타 패시브 Spell1_Dash_±90·±180
 EXTRA_CLIPS = {"kalista": {"dash": ["Spell1_Dash_0", "Attack1_Dash_0"], "dash90": ["Spell1_Dash_90"], "dashm90": ["Spell1_Dash_-90"],
                            "dash180": ["Spell1_Dash_180"], "dashm180": ["Spell1_Dash_-180"]},
+               # 킨드레드 Q: 보는 쪽 기준 앞·오른쪽·왼쪽(뒤는 spell1). 케인 Q: 돌진(kdash) 뒤 회전베기(spell1 = Spell1_Circle)
+               "kindred": {"kqf": ["Spell1Forward"], "kqr": ["Spell1Right"], "kql": ["Spell1Left"]}, "kayn": {"skrun": ["Spell3_Run"], "kdash": ["Spell1_Dash"]},
                "ezreal": {"e90": ["Spell3_90"], "em90": ["Spell3_-90"], "e180": ["Spell3_180"], "em180": ["Spell3_-180"],
                           "eexit": ["Spell3_Exit_NoTarget_Idle"]},
                # 트리스타나 W: 시전(Spell2_In) 뒤 거리에 따라 짧은·중간 점프(공중에서 시작). 긴 점프는 spell2(Spell2_LNG)
                "tristana": {"spell2in": ["Spell2_In"], "spell2s": ["Spell2_Shrt"], "spell2m": ["Spell2_Mid"]},
                "vladimir": {"spell2up": ["Spell2Up"]},
                "riven": {"spell1b": ["Spell1B"], "spell1c": ["Spell1C"]}, "akali": {"spell4b": ["Spell4_Dash2"]},
-               "warwick": {"dash4": ["Spell4Dash"]}, "pyke": {"skrun": ["Spell2_Move"]}, "kayn": {"skrun": ["Spell3_Run"]},
+               "warwick": {"dash4": ["Spell4Dash"]}, "pyke": {"skrun": ["Spell2_Move"]},
                "rakan": {"skrun": ["Spell4_Run"]}, "galio": {"windup3": ["Spell3_Windup"]}, "hecarim": {"skrun": ["Spell3run"]}, "twitch": {"skrun": ["Run_Stealth"]},
                "volibear": {"skrun": ["Spell1_Run"]}, "udyr": {"skrun": ["Spell3_Run"]}, "masteryi": {"skrun": ["Run_Haste"]},
                "poppy": {"skrun": ["Spell2_Run"]},

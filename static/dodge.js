@@ -139,7 +139,10 @@
     gragas: { slot: 2, kind: "dash", range: 600, fixed: true, speed: 900, cd: 12, src: "data" },
     gnar: { slot: 2, kind: "dash", range: 475, dur: 0.6, arc: 120, cd: 12, src: "data(TravelTime), arc: 추정" },
     kindred: [
-      { slot: 0, kind: "dash", range: 340, fixed: true, speed: 500, msScale: true, cd: 9, src: "data(DashSpeed 500), + 이동 속도: 롤 위키" },
+      // 킨드레드 Q: 돌아서지 않고 뛰는 쪽 각도로 Spell1Forward·Right·Left·Back(뒤로 뛰면 끝에 그쪽을 본다. 클립 끝 몸 방향 -154°)
+      { slot: 0, kind: "dash", range: 340, fixed: true, speed: 500, msScale: true, cd: 9,
+        dirAnims: { cut: [45, 135], spin: "keep", anims: ["kqf", "kqr", "kql", "spell1", "spell1"] },
+        src: "data(DashSpeed 500), + 이동 속도: 롤 위키, dirAnims: 롤 클립 이름(Spell1Forward/Back/Left/Right) 과 클립의 몸 방향" },
       { slot: 3, kind: "guard", lambs: { radius: 530, dur: 4 }, cd: 120, src: "data(AoERadius·BuffDuration)" },
     ],
     caitlyn: { slot: 2, kind: "dash", range: 390, fixed: true, back: true, speed: 1000, arc: 60, windup: 0.15, cd: 8,
@@ -175,7 +178,8 @@
     aatrox: { slot: 2, kind: "dash", range: 300, min: 75, speed: 800, cd: 5, src: "data" },
     kled: { slot: 2, kind: "dash", range: 550, fixed: true, speed: 600, msScale: true, cd: 9, src: "data(DashSpeed 600), + 이동 속도: 롤 위키" },
     kayn: [
-      { slot: 0, kind: "dash", range: 350, fixed: true, speed: 1000, cd: 5, src: "range: data, speed: 추정" },
+      // 케인 Q: 돌진(Spell1_Dash) 뒤 회전베기(Spell1_Circle)
+      { slot: 0, kind: "dash", range: 350, fixed: true, speed: 1000, dashAnim: "kdash", landAnim: "spell1", cd: 5, src: "range: data, speed: 추정, 동작: 롤 클립 Spell1_Dash → Spell1_Circle" },
       { slot: 2, kind: "guard", haste: 0.4, hasteDur: 9, runAnim: "skrun", cd: 13, src: "data(KaynE MS·WallWalkDuration), 벽 지나가기는 빼고(경기장에 벽이 없다)" },
     ],
     khazix: [
@@ -2023,10 +2027,11 @@
       target = null;
       skillAt = t; skillUsed = sk;
       const look = sk.back ? { x: -dx, y: -dy } : { x: dx, y: dy };     // 뒤로 뛸 때는 커서 쪽을 본 채로
-      if (sk.dirAnims && sk.dirAnims.spin === "turn") {
-        // 이즈리얼 E: 보던 쪽 그대로 방향별 동작을 하고, 동작이 끝나면 순간이동한 쪽을 본다
-        const anim = dirClip(sk.dirAnims, sideDeg({ x: Math.cos(viewAngle), y: Math.sin(viewAngle) }, look));
-        act = { anim, t0: t, hold: dash.t0, until: t + clipLen(anim), faceAfter: look };
+      if (sk.dirAnims && sk.dirAnims.spin) {
+        // 이즈리얼 E·킨드레드 Q: 보던 쪽 그대로 방향별 동작. 이즈리얼(turn) 은 끝나면 순간이동한 쪽, 킨드레드(keep) 는 뒤로 뛰었을 때만 그쪽을 본다
+        const A = sk.dirAnims.anims, anim = dirClip(sk.dirAnims, sideDeg({ x: Math.cos(viewAngle), y: Math.sin(viewAngle) }, look));
+        const turn = sk.dirAnims.spin === "turn" || anim === A[3] || anim === A[4];
+        act = { anim, t0: t, hold: dash.t0 + dash.dur, until: t + clipLen(anim), faceAfter: turn ? look : null };
       } else {
         facing = look;
         // 롤처럼 누르자마자 그쪽으로 돌아선다(천천히 돌면 짧은 돌진은 도는 중에 끝나 하던 이동 방향을 보는 것 같다).
@@ -2132,6 +2137,8 @@
     // 내려앉은 뒤에도 스킬 동작 클립이 남았으면 끝까지(착지·마무리). 움직이면 롤처럼 끊는다(landAct 의 hold 가 지금)
     function landAct(m) {
       const sk = m.sk, now = act && t < act.until;
+      // 도착하면 다른 동작(케인 Q 회전베기)
+      if (sk.landAnim) { act = { anim: sk.landAnim, t0: t, hold: t, until: t + clipLen(sk.landAnim), land: true }; return; }
       const anim = now ? act.anim : m.leapAnim || sk.dashAnim || sk.anim || "spell" + (sk.slot + 1);
       const at = now ? t - act.t0 : m.leap || sk.leap || (sk.dashAnim ? t - m.t0 : t - skillAt);
       const rest = clipLen(anim) - at;
@@ -3383,8 +3390,8 @@
         if (act && act.land && moving && t >= act.hold) act = null;      // 착지 동작은 움직이면 끝(꼭 할 부분 hold 까지는 한다)
         const acting = act && t < act.until && (t < act.hold || !moving);
         // 웅덩이(블라디미르 W) 는 웅덩이인 동안 가라앉은 동작 그대로(Spell2Down 은 땅속에 머문다)
-        // 방향별 동작으로 순간이동한 것(이즈리얼 E) 은 그 동작(act) 이 끝나면 시전 동작으로 돌아가지 않는다
-        const casting = !acting && sk && !sk.noAnim && (dash || (!(sk.dirAnims && sk.dirAnims.spin === "turn")
+        // 방향별 동작을 한 것(이즈리얼 E·킨드레드 Q) 은 그 동작(act) 이 끝나면 시전 동작으로 돌아가지 않는다
+        const casting = !acting && sk && !sk.noAnim && (dash || (!(sk.dirAnims && sk.dirAnims.spin)
           && since < (sk.parry || (sk.sink && untarget > t ? sk.untarget : 0) || sk.cast || 0.5)));
         // 나피리 W 는 시전하는 동안 움직일 수 있어서, 움직이면 시전 달리기(Spell4_Run)
         const castRun = casting && !dash && moving && sk.castRun;
