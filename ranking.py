@@ -33,16 +33,15 @@ RUN_SLACK_SEC = 2.0
 RUN_MIN_MS = 1000
 # 스킬샷 피하기 게임 버전 "앞.가운데.끝". static/dodge.js 의 VERSION 과 같아야 한다.
 # 앞 = 새 챔피언 추가, 가운데 = 스킬 추가·버그 수정, 끝 = 아주 미묘한 변화.
-# 앞 두 숫자가 바뀌면 예전 기록과 견줄 수 없으니 앞 두 숫자가 같은 기록끼리만 순위를 매긴다(끝 숫자만 바뀌면 이어진다)
+# 앞 숫자가 바뀌면 기록을 새로 시작한다: 앞 숫자가 같은 기록끼리만 순위를 매긴다(가운데·끝 숫자만 바뀌면 이어진다)
 DODGE_VERSION = "20.0.0"
 # 판수는 이 버전(앞 숫자)부터의 판을 합쳐 센다(버전이 바뀌어도 이어진다)
 DODGE_RUNS_FROM = 15
 
 
 def _ver_key(ver) -> str:
-    """순위를 같이 매기는 단위: "20.0.0" → "20.0". 예전 정수 버전 20 → "20.0"."""
-    parts = str(ver).split(".")
-    return parts[0] + "." + (parts[1] if len(parts) > 1 else "0")
+    """순위를 같이 매기는 단위(앞 숫자): "20.3.1" → "20". 예전 정수 버전 20 → "20"."""
+    return str(ver).split(".")[0]
 
 
 DODGE_RANK = _ver_key(DODGE_VERSION)
@@ -112,7 +111,7 @@ def finish_run(account_id: int, token: str, ms: int, dodged: int, ver=1, mode: s
 
 def _dodge_stats(account_ids, since=None, mode="normal"):
     """{account_id: (최고 ms, 판수)}. 그 모드의 판만. since 를 주면 그 뒤의 판만.
-    최고 기록은 앞 두 숫자가 지금과 같은 판만(규칙이 달라 견줄 수 없다), 판수는 DODGE_RUNS_FROM 버전부터 합친다."""
+    최고 기록은 앞 숫자가 지금과 같은 판만(규칙이 달라 견줄 수 없다), 판수는 DODGE_RUNS_FROM 버전부터 합친다."""
     if not account_ids:
         return {}
     marks = ",".join("?" * len(account_ids))
