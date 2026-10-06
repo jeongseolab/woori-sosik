@@ -234,7 +234,7 @@
     ],
     shaco: { slot: 0, kind: "blink", range: 400, windup: 0.125, stealth: 3.5, cd: 11, src: "data(PseudoCastTime·StealthDuration)" },
     leblanc: [
-      { slot: 1, kind: "dash", range: 600, speed: 1450, recall: 4, arc: 110, cd: 10, src: "range·recall: data(SnapbackTimeAllowed), speed: 추정" },
+      { slot: 1, kind: "dash", range: 600, speed: 1450, recall: 4, arc: 110, cd: 10, src: "range·recall: data(SnapbackTimeAllowed), speed: 나무위키(돌진 속도 1450), arc: 추정" },
       { slot: 3, kind: "dash", range: 600, speed: 1450, recall: 4, arc: 110, anim: "spell2", cd: 25,
         desc: "흉내: 왜곡(W) 을 한 번 더. 커서 쪽으로 최대 600 돌진, 4초 안에 다시 누르면 처음 자리로",
         src: "cd: data(LeblancR 3레벨), 나머지는 W 와 같다" },
