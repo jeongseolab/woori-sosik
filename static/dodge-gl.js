@@ -431,15 +431,16 @@
   const FS_VFX = `
     precision mediump float;
     uniform sampler2D uTex; uniform sampler2D uColTex; uniform sampler2D uMult; uniform sampler2D uErode; uniform sampler2D uPal;
-    uniform vec2 uDiv; uniform float uWrap; uniform vec4 uOn; uniform float uAdd; uniform float uRef; uniform vec2 uMultK;
+    uniform vec2 uDiv; uniform vec2 uWrap; uniform vec4 uOn; uniform float uAdd; uniform float uRef; uniform vec2 uMultK;
     uniform vec4 uPalSel; uniform vec4 uPalMix; uniform float uErodeA;
     varying vec2 vUv; varying vec4 vCol; varying vec4 vX; varying vec2 vMu;
     vec4 un(vec4 c) { return vec4(c.rgb / max(c.a, 0.0001), c.a); }
     void main() {
-      vec2 uv = uWrap > 0.5 ? fract(vUv) : clamp(vUv, 0.0, 1.0);
+      // 반복 텍스처(2 의 거듭제곱, 밉맵 있음) 는 GL 의 REPEAT 에 맡긴다. fract 로 접으면 판 가장자리에서 UV 가 1 → 0 으로 뛰어
+      // 그 픽셀 묶음이 가장 작은 밉맵(텍스처 평균색) 을 읽어, 이펙트 둘레에 점선 사각형이 생긴다
       float f = floor(vX.x + 0.5);
       vec2 cell = vec2(mod(f, uDiv.x), floor(f / uDiv.x));
-      vec2 tuv = (cell + clamp(uv, 0.002, 0.998)) / uDiv;
+      vec2 tuv = uWrap.x > 0.5 ? vUv : (cell + clamp(vUv, 0.002, 0.998)) / uDiv;
       vec4 s = un(texture2D(uTex, tuv));
       vec4 col = vCol;
       if (uOn.x > 0.5) { vec4 c = un(texture2D(uColTex, vec2(clamp(vX.y, 0.0, 1.0), 0.5))); col *= c; }
@@ -448,7 +449,7 @@
         vec4 pc = un(texture2D(uPal, vec2(clamp(l, 0.0, 1.0), uPalSel.x)));
         s = vec4(pc.rgb, s.a * pc.a);
       }
-      if (uOn.y > 0.5) { vec4 m = un(texture2D(uMult, fract(vUv * uMultK + vMu))); s *= m; }
+      if (uOn.y > 0.5) { vec4 m = un(texture2D(uMult, uWrap.y > 0.5 ? vUv * uMultK + vMu : fract(vUv * uMultK + vMu))); s *= m; }
       float a = s.a * col.a;
       if (uOn.z > 0.5 && vX.z > 0.0001) {
         vec4 em = texture2D(uErode, tuv);
@@ -869,8 +870,8 @@
         bindTex(0, base.t, u.uTex);
         const div = e.texDiv || [1, 1];
         gl.uniform2f(u.uDiv, Math.max(1, div[0]), Math.max(1, div[1]));
-        gl.uniform1f(u.uWrap, base.wrap && !(div[0] > 1 || div[1] > 1) ? 1 : 0);
         const on = [ct && ct.t ? 1 : 0, mt && mt.t ? 1 : 0, er && er.t ? 1 : 0, pt && pt.t ? 1 : 0];
+        gl.uniform2f(u.uWrap, base.wrap && !(div[0] > 1 || div[1] > 1) ? 1 : 0, on[1] && mt.wrap ? 1 : 0);
         gl.uniform4f(u.uOn, on[0], on[1], on[2], on[3]);
         bindTex(1, on[0] ? ct.t : white, u.uColTex);
         bindTex(2, on[1] ? mt.t : white, u.uMult);
