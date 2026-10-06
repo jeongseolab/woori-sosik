@@ -31,11 +31,21 @@ RUN_MAX_SEC = 60 * 60
 RUN_SLACK_SEC = 2.0
 # 1초도 못 버틴 판은 저장하지 않는다
 RUN_MIN_MS = 1000
-# 스킬샷 피하기 규칙 버전. static/dodge.js 의 VERSION 과 같아야 한다.
-# 스킬이 바뀌면 예전 기록과 견줄 수 없으니 이 버전의 기록끼리만 순위를 매긴다
-DODGE_VERSION = 20
-# 판수는 이 버전부터의 판을 합쳐 센다(버전이 바뀌어도 이어진다)
+# 스킬샷 피하기 게임 버전 "앞.가운데.끝". static/dodge.js 의 VERSION 과 같아야 한다.
+# 앞 = 새 챔피언 추가, 가운데 = 스킬 추가·버그 수정, 끝 = 아주 미묘한 변화.
+# 앞 두 숫자가 바뀌면 예전 기록과 견줄 수 없으니 앞 두 숫자가 같은 기록끼리만 순위를 매긴다(끝 숫자만 바뀌면 이어진다)
+DODGE_VERSION = "20.0.0"
+# 판수는 이 버전(앞 숫자)부터의 판을 합쳐 센다(버전이 바뀌어도 이어진다)
 DODGE_RUNS_FROM = 15
+
+
+def _ver_key(ver) -> str:
+    """순위를 같이 매기는 단위: "20.0.0" → "20.0". 예전 정수 버전 20 → "20.0"."""
+    parts = str(ver).split(".")
+    return parts[0] + "." + (parts[1] if len(parts) > 1 else "0")
+
+
+DODGE_RANK = _ver_key(DODGE_VERSION)
 # 모드: 노멀과 하드(CC 를 당한다) 는 순위를 따로 매긴다
 DODGE_MODES = ("normal", "hard")
 # 주간 순위에 들려면 이번 주에 이만큼은 해야 한다(1판 운으로 1등이 되지 않게)
@@ -70,11 +80,11 @@ def start_run(account_id: int) -> str:
     return token
 
 
-def finish_run(account_id: int, token: str, ms: int, dodged: int, ver: int = 1, mode: str = "normal"):
+def finish_run(account_id: int, token: str, ms: int, dodged: int, ver=1, mode: str = "normal"):
     """기록을 확인하고 저장한다. 믿을 수 없는 기록이면 ValueError."""
     if mode not in DODGE_MODES:
         raise ValueError("모르는 모드예요")
-    if ver != DODGE_VERSION:
+    if _ver_key(ver) != DODGE_RANK:
         # 예전 dodge.js 를 들고 있는 브라우저. 규칙이 달라서 같은 순위에 넣을 수 없다
         raise ValueError("게임이 새 버전으로 바뀌었어요. 새로고침한 뒤 다시 해 주세요")
     with _runs_lock:
@@ -88,8 +98,10 @@ def finish_run(account_id: int, token: str, ms: int, dodged: int, ver: int = 1, 
     before = _my_mode(account_id, mode)
     if ms >= RUN_MIN_MS:
         conn = get_conn()
-        conn.execute("INSERT INTO dodge_runs (account_id, ms, dodged, played_at, ver, mode) VALUES (?, ?, ?, ?, ?, ?)",
-                     (account_id, ms, max(0, int(dodged or 0)), time.time(), DODGE_VERSION, mode))
+        # ver 에는 앞 숫자(판수 세기용), version 에는 전체 버전
+        conn.execute("INSERT INTO dodge_runs (account_id, ms, dodged, played_at, ver, version, mode) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                     (account_id, ms, max(0, int(dodged or 0)), time.time(), int(DODGE_VERSION.split(".")[0]),
+                      DODGE_VERSION, mode))
         conn.commit()
         conn.close()
     after = my_dodge(account_id)
@@ -100,13 +112,13 @@ def finish_run(account_id: int, token: str, ms: int, dodged: int, ver: int = 1, 
 
 def _dodge_stats(account_ids, since=None, mode="normal"):
     """{account_id: (최고 ms, 판수)}. 그 모드의 판만. since 를 주면 그 뒤의 판만.
-    최고 기록은 지금 버전의 판만(규칙이 달라 견줄 수 없다), 판수는 DODGE_RUNS_FROM 버전부터 합친다."""
+    최고 기록은 앞 두 숫자가 지금과 같은 판만(규칙이 달라 견줄 수 없다), 판수는 DODGE_RUNS_FROM 버전부터 합친다."""
     if not account_ids:
         return {}
     marks = ",".join("?" * len(account_ids))
-    sql = ("SELECT account_id, MAX(CASE WHEN ver = ? THEN ms END) AS best, COUNT(*) AS n FROM dodge_runs"
+    sql = ("SELECT account_id, MAX(CASE WHEN version LIKE ? THEN ms END) AS best, COUNT(*) AS n FROM dodge_runs"
            " WHERE ver >= ? AND COALESCE(mode, 'normal') = ? AND account_id IN (%s)" % marks)
-    params = [DODGE_VERSION, DODGE_RUNS_FROM, mode] + list(account_ids)
+    params = [DODGE_RANK + ".%", DODGE_RUNS_FROM, mode] + list(account_ids)
     if since is not None:
         sql += " AND played_at >= ?"
         params.append(since)
