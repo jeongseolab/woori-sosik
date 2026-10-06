@@ -448,7 +448,7 @@ class DodgeEnd(BaseModel):
     run: str
     ms: int
     dodged: int = 0
-    ver: int = 1      # 게임 규칙 버전. 예전 화면은 보내지 않는다(= 1)
+    ver: int | str = 1      # 게임 버전 "20.0.0"(예전 화면은 정수, 아주 예전 화면은 보내지 않는다 = 1)
     mode: str = "normal"   # normal | hard
 
 

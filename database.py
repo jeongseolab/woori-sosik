@@ -308,6 +308,10 @@ def init_db():
     # ver: 게임 규칙 버전(static/dodge.js 의 VERSION). 예전 판은 비어 있다
     if "ver" not in _columns(conn, "dodge_runs"):
         conn.execute("ALTER TABLE dodge_runs ADD COLUMN ver INTEGER")
+    # version: 전체 게임 버전("20.0.0"). ver 는 그 앞 숫자. 정수 버전 시절의 판은 "N.0.0" 으로 채운다
+    if "version" not in _columns(conn, "dodge_runs"):
+        conn.execute("ALTER TABLE dodge_runs ADD COLUMN version TEXT")
+        conn.execute("UPDATE dodge_runs SET version = CAST(ver AS TEXT) || '.0.0' WHERE ver IS NOT NULL")
     # mode: normal | hard(CC 를 당하는 모드). 예전 판은 비어 있고 노멀로 본다
     if "mode" not in _columns(conn, "dodge_runs"):
         conn.execute("ALTER TABLE dodge_runs ADD COLUMN mode TEXT")
