@@ -42,7 +42,7 @@
 (function () {
   // 게임 버전 "앞.가운데.끝". 앞 = 새 챔피언 추가, 가운데 = 스킬 추가·버그 수정, 끝 = 아주 미묘한 변화.
   // 하나를 올리면 그 뒤 숫자는 0 으로. 서버는 앞 숫자가 같은 기록끼리만 순위를 매긴다(ranking.py 의 DODGE_VERSION 과 같게)
-  const VERSION = "21.0.1";
+  const VERSION = "21.1.0";
 
   const ARENA = { w: 1400, h: 900 };
   const CHAMP = { radius: 65, speed: 335 };
@@ -1450,14 +1450,20 @@
         loading = false; loadingEl.hidden = true; root.classList.remove("dodge-loading");
       });
     }
-    // 아직 안 받은 모델이 있으면 로딩 화면을 띄우고 받는다(시작 창에서 내 챔피언을 바꿨을 때도)
-    function ensureModels(champs) {
-      return gate(loadModelIndex().then(() => {
+    // 아직 안 받은 모델이 있으면 로딩 화면을 띄우고 받는다.
+    // quiet 면(시작 창에서 내 챔피언을 바꿨을 때) 로딩 화면 없이 뒤에서 받고, 다 받기 전에 시작하면 그때 로딩 화면을 띄운다(start)
+    let quietLoad = null;
+    function ensureModels(champs, quiet) {
+      const p = loadModelIndex().then(() => {
         if (!fxgl) return;          // WebGL 이 없으면 초상화로 그리니 받을 것이 없다
         const keys = [...new Set(champs.map(modelKey))].filter(k => modelIndex[k] && !fxgl.model(k));
-        want(keys.length);
-        return Promise.all(keys.map(k => fxgl.loadModel(k, MODELS, modelIndex[k].v).catch(() => null).then(one)));
-      }));
+        if (!quiet) want(keys.length);
+        return Promise.all(keys.map(k => fxgl.loadModel(k, MODELS, modelIndex[k].v).catch(() => null).then(quiet ? null : one)));
+      });
+      if (!quiet) return gate(p);
+      const all = quietLoad = Promise.all([quietLoad, p.catch(() => {})]);
+      all.then(() => { if (quietLoad === all) quietLoad = null; });
+      return all;
     }
     // 적 스킬 이펙트(fx.json) 와 그 텍스처를 다 받을 때까지 기다린다. 처음 날아온 스킬이 텍스처를 덜 받은 채
     // 나오면 안 보이거나(dodge-gl.js 가 다 받을 때까지 안 그린다) 늦게 나타나니, 판을 시작하기 전에 다 받아 둔다
@@ -5708,6 +5714,11 @@
 
     function start() {
       if (loading) return;      // 모델을 다 받을 때까지(로딩 화면) 기다린다
+      if (quietLoad) {          // 시작 창에서 고른 챔피언을 아직 받는 중이면 로딩 화면을 띄우고, 다 받으면 시작한다
+        want(1);
+        gate(quietLoad.then(one)).then(start);
+        return;
+      }
       reset();
       paintSpells();
       paintSkills();
@@ -6154,7 +6165,7 @@
       faceKey = champAlias(myChamp());
       root.querySelector('[data-hud="face"]').src = hudFace(faceKey);
       paintSkills();
-      ensureModels([faceKey]);
+      ensureModels([faceKey], true);
     }
 
     function setBest(text) { hud("best").innerHTML = text || ""; }
