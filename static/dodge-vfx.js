@@ -209,7 +209,7 @@
       const y = (Array.isArray(eo) && eo.length === 3 ? eo[1] : 0) + (Array.isArray(ep) ? ep[1] : 0);
       if (e.isGroundLayer && y < -20) ground = Math.max(ground, -y);
       if (y >= 60) high = true;
-      const T = e.primitive && e.primitive.T, sc = ev(e.birthScale0, 0, [1, 1, 1]);
+      const T = e.primitive && e.primitive.T, sv = ev(e.birthScale0, 0, [1, 1, 1]), sc = Array.isArray(sv) ? sv : [sv, sv, sv];
       if (T === "VfxPrimitiveMesh" && FX.meshes[e.primitive.mesh] && FX.meshes[e.primitive.mesh].pos) {
         const m = FX.meshes[e.primitive.mesh];
         if (m.yMin == null) { let a = Infinity, b = -Infinity; for (let i = 1; i < m.pos.length; i += 3) { a = Math.min(a, m.pos[i]); b = Math.max(b, m.pos[i]); } m.yMin = a; m.yMax = b; }
@@ -415,7 +415,7 @@
     if (ev(c.chance, 0, 1) < Math.random()) return;
     for (const k of c.kids) {
       const ci = play(k, { scale: inst.scale });
-      if (ci) { ci.pos = p.pos.slice(); ci.prev = ci.pos.slice(); ci.sin = inst.sin; ci.cos = inst.cos; ci.target = inst.target; ci.gain = inst.gain; ci.mis = inst.mis; }
+      if (ci) { ci.pos = p.pos.slice(); ci.prev = ci.pos.slice(); ci.sin = inst.sin; ci.cos = inst.cos; ci.target = inst.target; ci.gain = inst.gain; ci.mis = inst.mis; ci.hold = inst.hold; }
     }
   }
 

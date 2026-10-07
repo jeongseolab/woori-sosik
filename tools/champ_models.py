@@ -757,6 +757,10 @@ def write_anims(buf, anims):
 # (텍스처를 다시 받으면 CommunityDragon 상태에 따라 칸 나눔이 바뀔 수 있어서)
 def rebake_anims(key, wad_dir, spells):
     wads = [f for f in os.listdir(wad_dir) if f.lower() == SUB_WAD.get(key, key) + ".wad.client"]
+    if not wads:
+        raise FileNotFoundError("WAD 없음")
+    if not os.path.exists(os.path.join(OUT, key + ".bin")):
+        raise FileNotFoundError("모델이 아직 없다 — --anims 없이 통째로 구울 것")
     w = Wad(os.path.join(wad_dir, wads[0]))
     skin = bin_json(w, "data/characters/%s/skins/skin0.bin" % key)
     sk = next(v for v in skin.values() if isinstance(v, dict) and "skinMeshProperties" in v)
@@ -921,7 +925,7 @@ def main():
             old_h = index.get(k, {}).get("h")
             spells = sorted(set(CASTERS.get(k, [])) | ({MOBILITY[k]} if k in MOBILITY else set()) | set(PASSIVE.get(k, [])) | set(GUARD.get(k, [])) | set(SHIELD.get(k, [])) | set(MORE.get(k, [])) | set(NEW21.get(k, [])))
             if a.anims:
-                index[k]["anims"] = rebake_anims(k, wad_dir, spells)
+                index.setdefault(k, {})["anims"] = rebake_anims(k, wad_dir, spells)
                 index[k]["v"] = file_version(k)
                 print(k, index[k], flush=True)
                 continue

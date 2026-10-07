@@ -393,11 +393,21 @@
   // 프레임 사이와 동작 전환을 행렬 그대로 섞으면 빨리 도는 뼈(한 프레임에 90° 넘게) 가 쪼그라들어 몸이 일그러진다
   function splitPose(md, an) {
     const N = an.F * md.B, q = new Float32Array(N * 4), s = new Float32Array(N * 9), p = new Float32Array(N * 3), M = an.m;
+    const R = new Float32Array(9), C = new Float32Array(9), flat = new Uint8Array(N);
     for (let i = 0; i < N; i++) {
       const o = i * 12, b = i % md.B, cx = md.pivot[b * 3], cy = md.pivot[b * 3 + 1], cz = md.pivot[b * 3 + 2];
-      // 열마다 길이로 나눈 것으로 회전을 어림한다(크기가 0 인 숨긴 부품은 회전 없음)
-      const col = [0, 1, 2].map(c => { const x = M[o + c], y = M[o + 4 + c], z = M[o + 8 + c], l = Math.hypot(x, y, z) || 1; return [x / l, y / l, z / l]; });
-      const m00 = col[0][0], m10 = col[0][1], m20 = col[0][2], m01 = col[1][0], m11 = col[1][1], m21 = col[1][2], m02 = col[2][0], m12 = col[2][1], m22 = col[2][2];
+      // 열마다 길이로 나눈 것으로 회전을 어림한다. C[행 * 3 + 열]
+      let big = 0;
+      for (let c = 0; c < 3; c++) {
+        const x = M[o + c], y = M[o + 4 + c], z = M[o + 8 + c], l = Math.hypot(x, y, z);
+        big = Math.max(big, l);
+        const k = l > 1e-9 ? 1 / l : 0;
+        C[c] = x * k; C[3 + c] = y * k; C[6 + c] = z * k;
+      }
+      // 뒤집힌 뼈(행렬식 < 0, 뽀삐·칼리스타·워윅 일부) 는 첫 열을 뒤집어 진짜 회전을 뽑는다(뒤집힘은 S 에 남는다)
+      const det = C[0] * (C[4] * C[8] - C[5] * C[7]) - C[1] * (C[3] * C[8] - C[5] * C[6]) + C[2] * (C[3] * C[7] - C[4] * C[6]);
+      if (det < 0) { C[0] = -C[0]; C[3] = -C[3]; C[6] = -C[6]; }
+      const m00 = C[0], m01 = C[1], m02 = C[2], m10 = C[3], m11 = C[4], m12 = C[5], m20 = C[6], m21 = C[7], m22 = C[8];
       const tr = m00 + m11 + m22;
       let x, y, z, w;
       if (tr > 0) { const r = Math.sqrt(tr + 1) * 2; w = r / 4; x = (m21 - m12) / r; y = (m02 - m20) / r; z = (m10 - m01) / r; }
@@ -407,22 +417,32 @@
       const l = Math.hypot(x, y, z, w) || 1;
       x /= l; y /= l; z /= l; w /= l;
       if (!isFinite(x + y + z + w)) { x = y = z = 0; w = 1; }
-      q.set([x, y, z, w], i * 4);
-      const R = quatMat(x, y, z, w);
-      // S = Rᵀ · M(3×3): 회전을 빼고 남은 것(대개 크기). R·S 는 M 과 정확히 같다
+      // 크기 0 인 숨긴 부품은 회전이 없다 → 아래에서 가까운 프레임의 회전을 빌린다(나타날 때 빙글 돌지 않게)
+      if (big < 1e-6) flat[i] = 1;
+      q[i * 4] = x; q[i * 4 + 1] = y; q[i * 4 + 2] = z; q[i * 4 + 3] = w;
+      quatMat(x, y, z, w, R);
+      // S = Rᵀ · M(3×3): 회전을 빼고 남은 것(크기·뒤집힘). R·S 는 M 과 정확히 같다
       for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) {
         s[i * 9 + r * 3 + c] = R[r] * M[o + c] + R[3 + r] * M[o + 4 + c] + R[6 + r] * M[o + 8 + c];
       }
       for (let r = 0; r < 3; r++) p[i * 3 + r] = M[o + r * 4] * cx + M[o + r * 4 + 1] * cy + M[o + r * 4 + 2] * cz + M[o + r * 4 + 3];
     }
+    // 숨긴 프레임의 회전: 앞쪽 보이는 프레임 것, 없으면 뒤쪽 것(S 는 0 이라 모양은 그대로)
+    for (let b = 0; b < md.B; b++) {
+      let last = -1;
+      for (let f = 0; f < an.F; f++) { const i = f * md.B + b; if (!flat[i]) last = i; else if (last >= 0) q.copyWithin(i * 4, last * 4, last * 4 + 4); }
+      let next = -1;
+      for (let f = an.F - 1; f >= 0; f--) { const i = f * md.B + b; if (!flat[i]) next = i; else if (next >= 0 && !(last >= 0 && i > last)) q.copyWithin(i * 4, next * 4, next * 4 + 4); }
+    }
     an.q = q; an.s = s; an.p = p;
     delete an.m;
   }
-  // 쿼터니언 → 3×3 회전(행 우선)
-  function quatMat(x, y, z, w) {
-    return [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w),
-            2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w),
-            2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)];
+  // 쿼터니언 → 3×3 회전(행 우선) 을 out 에
+  function quatMat(x, y, z, w, out) {
+    out[0] = 1 - 2 * (y * y + z * z); out[1] = 2 * (x * y - z * w); out[2] = 2 * (x * z + y * w);
+    out[3] = 2 * (x * y + z * w); out[4] = 1 - 2 * (x * x + z * z); out[5] = 2 * (y * z - x * w);
+    out[6] = 2 * (x * z - y * w); out[7] = 2 * (y * z + x * w); out[8] = 1 - 2 * (x * x + y * y);
+    return out;
   }
 
   // 모델 좌표 → 바닥 좌표 → 화면. dodge.js 의 proj 와 같은 식(uC: S, OX, OY, FOCAL · uC2: CAM_D, COS, SIN · uC3: 경기장 가운데)
@@ -775,13 +795,14 @@
       }
       return true;
     }
+    const ROT = new Float32Array(9);
     // 뼈 자세(q·s·p) → 정점에 곱할 3×4 행렬: M = R·S, 기준점 c 가 p 로 가게 T = p − R·S·c
     function composeMats(m, ps, mats) {
       for (let b = 0; b < m.B; b++) {
         let x = ps.q[b * 4], y = ps.q[b * 4 + 1], z = ps.q[b * 4 + 2], w = ps.q[b * 4 + 3];
         const l = Math.hypot(x, y, z, w) || 1;
         x /= l; y /= l; z /= l; w /= l;
-        const R = quatMat(x, y, z, w), S = ps.s, so = b * 9, o = b * 12;
+        const R = quatMat(x, y, z, w, ROT), S = ps.s, so = b * 9, o = b * 12;
         const cx = m.pivot[b * 3], cy = m.pivot[b * 3 + 1], cz = m.pivot[b * 3 + 2];
         for (let r = 0; r < 3; r++) {
           const m0 = R[r * 3] * S[so] + R[r * 3 + 1] * S[so + 3] + R[r * 3 + 2] * S[so + 6];
