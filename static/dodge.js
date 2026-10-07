@@ -42,7 +42,7 @@
 (function () {
   // 게임 버전 "앞.가운데.끝". 앞 = 새 챔피언 추가, 가운데 = 스킬 추가·버그 수정, 끝 = 아주 미묘한 변화.
   // 하나를 올리면 그 뒤 숫자는 0 으로. 서버는 앞 숫자가 같은 기록끼리만 순위를 매긴다(ranking.py 의 DODGE_VERSION 과 같게)
-  const VERSION = "21.6.0";
+  const VERSION = "21.7.0";
 
   const ARENA = { w: 1400, h: 900 };
   const CHAMP = { radius: 65, speed: 335 };
@@ -2156,7 +2156,9 @@
         skillUsed = sk;
         mySkillStart(sk);
         guard(sk);
-        if (!buffIsBarrier(sk)) myBuff(sk, Math.max(buffLen(sk), sk.barrier || 0));
+        const bl = !buffIsBarrier(sk) ? myBuff(sk, Math.max(buffLen(sk), sk.barrier || 0)) : null;
+        // 주문 보호막(시비르 E·녹턴 W) 은 막으면 그 이펙트도 끝난다(blocked)
+        if (sk.spellShield && shieldUp) Object.assign(shieldUp, { sk, vfx: bl });
         return;
       }
       // 르블랑 W: 정해진 시간 안에 다시 누르면 처음 자리로(쿨타임과 상관없이)
@@ -2526,8 +2528,8 @@
     const buffIsBarrier = sk => sk.barrier > 0 && buffLen(sk) <= sk.barrier;
     function giveBarrier(sk) {
       // 보호막 이펙트는 보호막을 받는 순간(돌진 시작) 켜고 보호막이 있는 동안만(깨지면 barrierTake 에서 끈다)
-      barrier = { until: t + sk.barrier, color: sk.color || "#ffd8a8", cc: !!sk.ccShield,
-                  vfx: buffIsBarrier(sk) ? myPlay(myPart(sk, "buf"), sk.barrier) : null };
+      barrier = { until: t + sk.barrier, color: sk.color || "#ffd8a8", cc: !!sk.ccShield, sk,
+                  vfx: buffIsBarrier(sk) ? myPlay(myPart(sk, "buf"), sk.barrier, false, true) : null };
       // 보호막 이펙트에는 멈춘 뒤 1초 남는 것(particleLinger, 아지르 E) 이 있어 보호막이 끝나도 떠 있었다 → 끝나면 0.25초 안에 지운다
       if (barrier.vfx) barrier.vfx.forEach(i => { i.until = sk.barrier + 0.25; });
       if (!myArt(sk)) emit({ x: player.x, y: player.y, z: 90, size: 230, size1: 170, color: "#ffffff", color1: barrier.color, shape: "glow", life: 0.3 });
@@ -2541,8 +2543,11 @@
       // 깨진 보호막은 바로 지운다(남아 있으면 아직 보호막이 있는 것처럼 보인다)
       if (b.vfx) b.vfx.forEach(i => DodgeVfx.kill(i));
       pops.push({ x: player.x, y: player.y, text: "보호막", life: 1, max: 1 });
-      emit({ x: player.x, y: player.y, z: 90, size: 220, size1: 280, color: "#ffffff", color1: b.color, shape: "ring", life: 0.3 });
-      burst(player.x, player.y, 80, b.color, 14, 300);
+      // 롤의 보호막이 깨지는 이펙트(셴 block·스카너 Dissipate) 가 있으면 그것을, 없으면 손으로 그린 고리
+      if (!(b.sk && myPlay(myPart(b.sk, "pop"), 0, false, true))) {
+        emit({ x: player.x, y: player.y, z: 90, size: 220, size1: 280, color: "#ffffff", color1: b.color, shape: "ring", life: 0.3 });
+        burst(player.x, player.y, 80, b.color, 14, 300);
+      }
       mySfx("cleanse");
       return b.cc ? "cc" : true;
     }
@@ -2561,11 +2566,19 @@
     // 스킬을 막았다(응수·주문 보호막). 피한 것으로 센다
     function blocked() {
       const word = parry > t ? "응수" : "막음";
-      if (!(parry > t)) shieldUp = null;        // 보호막은 한 번 막으면 사라진다
+      let pop = null;
+      if (!(parry > t) && shieldUp) {
+        // 보호막은 한 번 막으면 사라진다: 보호막 이펙트를 끄고 롤의 막는 이펙트(시비르 E proc·녹턴 W spellblock) 를 켠다
+        fxStop(shieldUp.vfx);
+        if (shieldUp.sk) pop = myPlay(myPart(shieldUp.sk, "pop"), 0, false, true);
+        shieldUp = null;
+      }
       dodged += 1;
       pops.push({ x: player.x, y: player.y, text: word, life: 1, max: 1 });
-      emit({ x: player.x, y: player.y, z: 80, size: 190, size1: 70, color: "#ffffff", color1: "#74c0fc", shape: "star", life: 0.3, spin: 4 });
-      burst(player.x, player.y, 70, "#d0ebff", 14, 260);
+      if (!pop) {
+        emit({ x: player.x, y: player.y, z: 80, size: 190, size1: 70, color: "#ffffff", color1: "#74c0fc", shape: "star", life: 0.3, spin: 4 });
+        burst(player.x, player.y, 70, "#d0ebff", 14, 260);
+      }
       mySfx("cleanse");
     }
     // 지금 이동 속도. base: 이속·유체화까지, spd: 둔화까지(가장 센 둔화 하나, 줄어드는 둔화(to) 는 시간에 따라 pct → to, 110 아래로 안 내려간다)
@@ -2707,7 +2720,7 @@
       if (d > 1) facing = { x: (soul.x - player.x) / d, y: (soul.y - player.y) / d };
       target = null;
       skillAt = t; skillUsed = back;
-      myPlay(myPart(sk, "buf"), sk.soul.wind + dash.dur);
+      myPlay(myPart(sk, "buf"), sk.soul.wind + dash.dur, false, true);
       lolSound("Play_sfx_Yone_YoneE_return_cast", 0.5);
       soul.until = Infinity;          // 돌아가는 중에는 저절로 또 돌아가지 않는다
     }
@@ -3241,10 +3254,12 @@
     const myArt = sk => !!(sk && mineFx && mineFx[String(sk.slot)] && fxgl && fxgl.gl);
     // flip: 롤이 몸과 반대쪽을 보는 뼈(C_Buffbone_Glb_Layout_Loc 등) 에 붙이는 이펙트라 방향을 뒤집는다
     const meNow = flip => ({ x: player.x, y: player.y, h: 0, dir: flip ? { x: -facing.x, y: -facing.y } : { x: facing.x, y: facing.y } });
-    // 내 몸에 이펙트를 붙인다(dur 초 뒤에 끈다. 없으면 이펙트가 끝날 때까지)
-    function myPlay(names, dur, flip) {
+    // 몸 가운데 높이(롤 Buffbone Center 쯤): 체력바 높이의 반
+    const bodyMid = () => { const m = modelIndex && modelIndex[modelKey(faceKey)]; return (m && m.h ? m.h : 190) * 0.5; };
+    // 내 몸에 이펙트를 붙인다(dur 초 뒤에 끈다. 없으면 이펙트가 끝날 때까지). center 면 몸 가운데에 붙게 만든 것을 그 높이로(버프·보호막)
+    function myPlay(names, dur, flip, center) {
       if (!names || !names.length || !(fxgl && fxgl.gl)) return null;
-      const list = fxPlay(names, meNow(flip), dur || 6);
+      const list = fxPlay(names, { ...meNow(flip), hold: !!dur, center: center ? bodyMid() : 0 }, dur || 6);
       if (list) myFx.push({ list, until: dur ? t + dur : Infinity, flip });
       return list;
     }
@@ -3270,7 +3285,7 @@
     // 내 스킬의 합성음: 롤 소리가 있는 스킬이면 내지 않는다
     function mySfx(kind) { if (!hasMySound(skillUsed)) sfx(kind); }
     // 버프 이펙트를 걸린 동안 붙인다
-    function myBuff(sk, dur) { if (dur > 0) myPlay(myPart(sk, "buf"), dur); }
+    function myBuff(sk, dur) { return dur > 0 ? myPlay(myPart(sk, "buf"), dur, false, true) : null; }
     // 내 몸이 아닌 자리에 켠다(tar·anchor·zone·drop·blast). ttl 초 뒤에 끈다
     function myAt(sk, part, x, y, ttl = 3, h = 0) {
       if (!(fxgl && fxgl.gl)) return null;

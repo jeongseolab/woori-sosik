@@ -368,7 +368,61 @@
       for (let i = 0; i < n; i++) m[i] = half(h[i]);
       anims[name] = { fps, F, m };
     }
-    return { V, I, B, height, scale, pos, uv, bones, weights, idx, anims };
+    const md = { V, I, B, height, scale, pos, uv, bones, weights, idx, anims };
+    md.pivot = bonePivots(md);
+    for (const an of Object.values(anims)) splitPose(md, an);
+    return md;
+  }
+
+  // 뼈마다 섞을 때 기준점: 그 뼈에 붙은 정점(바인드 자세) 의 가중 평균. 정점이 없는 뼈는 0
+  function bonePivots(md) {
+    const c = new Float32Array(md.B * 3), w = new Float32Array(md.B);
+    for (let v = 0; v < md.V; v++) {
+      for (let j = 0; j < 4; j++) {
+        const k = md.weights[v * 4 + j];
+        if (!k) continue;
+        const b = md.bones[v * 4 + j];
+        w[b] += k;
+        for (let a = 0; a < 3; a++) c[b * 3 + a] += k * md.pos[v * 3 + a];
+      }
+    }
+    for (let b = 0; b < md.B; b++) if (w[b]) for (let a = 0; a < 3; a++) c[b * 3 + a] /= w[b];
+    return c;
+  }
+  // 구운 뼈 행렬(3×4) 을 회전(쿼터니언 q) · 나머지(S = Rᵀ·M, 크기) · 기준점이 옮겨 간 자리(p) 로 나눠 둔다.
+  // 프레임 사이와 동작 전환을 행렬 그대로 섞으면 빨리 도는 뼈(한 프레임에 90° 넘게) 가 쪼그라들어 몸이 일그러진다
+  function splitPose(md, an) {
+    const N = an.F * md.B, q = new Float32Array(N * 4), s = new Float32Array(N * 9), p = new Float32Array(N * 3), M = an.m;
+    for (let i = 0; i < N; i++) {
+      const o = i * 12, b = i % md.B, cx = md.pivot[b * 3], cy = md.pivot[b * 3 + 1], cz = md.pivot[b * 3 + 2];
+      // 열마다 길이로 나눈 것으로 회전을 어림한다(크기가 0 인 숨긴 부품은 회전 없음)
+      const col = [0, 1, 2].map(c => { const x = M[o + c], y = M[o + 4 + c], z = M[o + 8 + c], l = Math.hypot(x, y, z) || 1; return [x / l, y / l, z / l]; });
+      const m00 = col[0][0], m10 = col[0][1], m20 = col[0][2], m01 = col[1][0], m11 = col[1][1], m21 = col[1][2], m02 = col[2][0], m12 = col[2][1], m22 = col[2][2];
+      const tr = m00 + m11 + m22;
+      let x, y, z, w;
+      if (tr > 0) { const r = Math.sqrt(tr + 1) * 2; w = r / 4; x = (m21 - m12) / r; y = (m02 - m20) / r; z = (m10 - m01) / r; }
+      else if (m00 > m11 && m00 > m22) { const r = Math.sqrt(Math.max(1e-9, 1 + m00 - m11 - m22)) * 2; w = (m21 - m12) / r; x = r / 4; y = (m01 + m10) / r; z = (m02 + m20) / r; }
+      else if (m11 > m22) { const r = Math.sqrt(Math.max(1e-9, 1 + m11 - m00 - m22)) * 2; w = (m02 - m20) / r; x = (m01 + m10) / r; y = r / 4; z = (m12 + m21) / r; }
+      else { const r = Math.sqrt(Math.max(1e-9, 1 + m22 - m00 - m11)) * 2; w = (m10 - m01) / r; x = (m02 + m20) / r; y = (m12 + m21) / r; z = r / 4; }
+      const l = Math.hypot(x, y, z, w) || 1;
+      x /= l; y /= l; z /= l; w /= l;
+      if (!isFinite(x + y + z + w)) { x = y = z = 0; w = 1; }
+      q.set([x, y, z, w], i * 4);
+      const R = quatMat(x, y, z, w);
+      // S = Rᵀ · M(3×3): 회전을 빼고 남은 것(대개 크기). R·S 는 M 과 정확히 같다
+      for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) {
+        s[i * 9 + r * 3 + c] = R[r] * M[o + c] + R[3 + r] * M[o + 4 + c] + R[6 + r] * M[o + 8 + c];
+      }
+      for (let r = 0; r < 3; r++) p[i * 3 + r] = M[o + r * 4] * cx + M[o + r * 4 + 1] * cy + M[o + r * 4 + 2] * cz + M[o + r * 4 + 3];
+    }
+    an.q = q; an.s = s; an.p = p;
+    delete an.m;
+  }
+  // 쿼터니언 → 3×3 회전(행 우선)
+  function quatMat(x, y, z, w) {
+    return [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w),
+            2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w),
+            2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)];
   }
 
   // 모델 좌표 → 바닥 좌표 → 화면. dodge.js 의 proj 와 같은 식(uC: S, OX, OY, FOCAL · uC2: CAM_D, COS, SIN · uC3: 경기장 가운데)
@@ -431,7 +485,7 @@
   const FS_VFX = `
     precision mediump float;
     uniform sampler2D uTex; uniform sampler2D uColTex; uniform sampler2D uMult; uniform sampler2D uErode; uniform sampler2D uPal;
-    uniform vec2 uDiv; uniform vec2 uWrap; uniform vec4 uOn; uniform float uAdd; uniform float uRef; uniform vec2 uMultK;
+    uniform vec2 uDiv; uniform vec2 uWrap; uniform vec4 uOn; uniform float uAdd; uniform float uRef;
     uniform vec4 uPalSel; uniform vec4 uPalMix; uniform float uErodeA;
     varying vec2 vUv; varying vec4 vCol; varying vec4 vX; varying vec2 vMu;
     vec4 un(vec4 c) { return vec4(c.rgb / max(c.a, 0.0001), c.a); }
@@ -449,7 +503,8 @@
         vec4 pc = un(texture2D(uPal, vec2(clamp(l, 0.0, 1.0), uPalSel.x)));
         s = vec4(pc.rgb, s.a * pc.a);
       }
-      if (uOn.y > 0.5) { vec4 m = un(texture2D(uMult, uWrap.y > 0.5 ? vUv * uMultK + vMu : fract(vUv * uMultK + vMu))); s *= m; }
+      // vMu: 곱하기 텍스처 UV(정점마다 dodge-vfx.js 가 계산. 기본 텍스처의 흐름·오프셋과 따로)
+      if (uOn.y > 0.5) { vec4 m = un(texture2D(uMult, uWrap.y > 0.5 ? vMu : fract(vMu))); s *= m; }
       float a = s.a * col.a;
       if (uOn.z > 0.5 && vX.z > 0.0001) {
         vec4 em = texture2D(uErode, tuv);
@@ -689,27 +744,66 @@
       asked.set(key, p);
       return p;
     }
-    // 애니메이션 name 의 time 초 자세의 뼈 행렬을 dst 에(앞뒤 프레임 사이는 행렬을 그대로 섞는다). 동작이 없으면 false
+    // 나눠 둔 뼈 자세(q·s·p) 두 개를 k 만큼 섞어 a 에. 회전은 쿼터니언(가까운 쪽으로), 나머지는 직선
+    function mixPose(a, b, k, B) {
+      for (let i = 0; i < B; i++) {
+        const o = i * 4;
+        const d = a.q[o] * b.q[o] + a.q[o + 1] * b.q[o + 1] + a.q[o + 2] * b.q[o + 2] + a.q[o + 3] * b.q[o + 3];
+        const sg = d < 0 ? -1 : 1;
+        for (let j = 0; j < 4; j++) a.q[o + j] += (sg * b.q[o + j] - a.q[o + j]) * k;
+      }
+      for (let i = 0; i < B * 9; i++) a.s[i] += (b.s[i] - a.s[i]) * k;
+      for (let i = 0; i < B * 3; i++) a.p[i] += (b.p[i] - a.p[i]) * k;
+    }
+    const newPose = B => ({ q: new Float32Array(B * 4), s: new Float32Array(B * 9), p: new Float32Array(B * 3) });
+    // 애니메이션 name 의 time 초 뼈 자세를 dst(q·s·p) 에. 동작이 없으면 false
     function boneMats(m, name, time, loop, dst) {
       const an = m.anims[name] || m.anims.idle || Object.values(m.anims)[0];
       if (!an) return false;
       let f = time * an.fps;
       f = loop ? ((f % an.F) + an.F) % an.F : Math.min(an.F - 1, Math.max(0, f));
-      const f0 = Math.floor(f), f1 = loop ? (f0 + 1) % an.F : Math.min(an.F - 1, f0 + 1), k = f - f0;
-      const a0 = f0 * m.B * 12, a1 = f1 * m.B * 12, src = an.m;
-      for (let i = 0; i < m.B * 12; i++) dst[i] = src[a0 + i] + (src[a1 + i] - src[a0 + i]) * k;
+      const f0 = Math.floor(f), f1 = loop ? (f0 + 1) % an.F : Math.min(an.F - 1, f0 + 1), k = f - f0, B = m.B;
+      dst.q.set(an.q.subarray(f0 * B * 4, (f0 + 1) * B * 4));
+      dst.s.set(an.s.subarray(f0 * B * 9, (f0 + 1) * B * 9));
+      dst.p.set(an.p.subarray(f0 * B * 3, (f0 + 1) * B * 3));
+      if (k > 0 && f1 !== f0) {
+        const nx = m.tmp || (m.tmp = newPose(B));
+        nx.q.set(an.q.subarray(f1 * B * 4, (f1 + 1) * B * 4));
+        nx.s.set(an.s.subarray(f1 * B * 9, (f1 + 1) * B * 9));
+        nx.p.set(an.p.subarray(f1 * B * 3, (f1 + 1) * B * 3));
+        mixPose(dst, nx, k, B);
+      }
       return true;
+    }
+    // 뼈 자세(q·s·p) → 정점에 곱할 3×4 행렬: M = R·S, 기준점 c 가 p 로 가게 T = p − R·S·c
+    function composeMats(m, ps, mats) {
+      for (let b = 0; b < m.B; b++) {
+        let x = ps.q[b * 4], y = ps.q[b * 4 + 1], z = ps.q[b * 4 + 2], w = ps.q[b * 4 + 3];
+        const l = Math.hypot(x, y, z, w) || 1;
+        x /= l; y /= l; z /= l; w /= l;
+        const R = quatMat(x, y, z, w), S = ps.s, so = b * 9, o = b * 12;
+        const cx = m.pivot[b * 3], cy = m.pivot[b * 3 + 1], cz = m.pivot[b * 3 + 2];
+        for (let r = 0; r < 3; r++) {
+          const m0 = R[r * 3] * S[so] + R[r * 3 + 1] * S[so + 3] + R[r * 3 + 2] * S[so + 6];
+          const m1 = R[r * 3] * S[so + 1] + R[r * 3 + 1] * S[so + 4] + R[r * 3 + 2] * S[so + 7];
+          const m2 = R[r * 3] * S[so + 2] + R[r * 3 + 1] * S[so + 5] + R[r * 3 + 2] * S[so + 8];
+          mats[o + r * 4] = m0; mats[o + r * 4 + 1] = m1; mats[o + r * 4 + 2] = m2;
+          mats[o + r * 4 + 3] = ps.p[b * 3 + r] - (m0 * cx + m1 * cy + m2 * cz);
+        }
+      }
     }
     // 애니메이션 name 의 time 초 자세로 뼈를 섞어 정점을 옮긴다. from 이 있으면 그 자세에서 mix(0~1) 만큼 넘어간 자세
     function pose(md, name, time, loop, from, mix) {
       const m = md.m, mats = md.mats, out = md.out;
-      if (!boneMats(m, name, time, loop, mats)) { out.set(m.pos); return; }
+      const cur = md.cur || (md.cur = newPose(m.B));
+      if (!boneMats(m, name, time, loop, cur)) { out.set(m.pos); return; }
       if (from && mix < 1) {
-        const prev = md.prev || (md.prev = new Float32Array(mats.length));
+        const prev = md.prev || (md.prev = newPose(m.B));
         if (boneMats(m, from.anim, from.time, from.loop !== false, prev)) {
-          for (let i = 0; i < mats.length; i++) mats[i] = prev[i] + (mats[i] - prev[i]) * mix;
-        }
-      }
+          mixPose(prev, cur, mix, m.B);
+          composeMats(m, prev, mats);
+        } else composeMats(m, cur, mats);
+      } else composeMats(m, cur, mats);
       const P = m.pos, Bn = m.bones, Wt = m.weights;
       for (let v = 0, n = m.V; v < n; v++) {
         const x = P[v * 3], y = P[v * 3 + 1], z = P[v * 3 + 2];
@@ -877,8 +971,6 @@
         bindTex(2, on[1] ? mt.t : white, u.uMult);
         bindTex(3, on[2] ? er.t : white, u.uErode);
         bindTex(4, on[3] ? pt.t : white, u.uPal);
-        const mk = on[1] && e.textureMult.uvScaleMult && e.textureMult.uvScaleMult.c ? e.textureMult.uvScaleMult.c : [1, 1];
-        gl.uniform2f(u.uMultK, mk[0], mk[1]);
         gl.uniform1f(u.uErodeA, on[2] && !er.opaque ? 1 : 0);
         if (on[3]) {
           const cnt = pd.paletteCount || 1, sel = pd.paletteSelector && pd.paletteSelector.c ? pd.paletteSelector.c[0] : 0;

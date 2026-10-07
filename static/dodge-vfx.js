@@ -176,17 +176,22 @@
   function play(name, o = {}) {
     if (!FX || !FX.systems[name]) return null;
     const s = FX.systems[name];
-    const inst = { s, name, age: 0, stopped: false, done: false, scale: o.scale || 1, ems: [], odom: 0, gain: o.gain || 0, mis: !!o.missile };
+    const inst = { s, name, age: 0, stopped: false, done: false, scale: o.scale || 1, ems: [], odom: 0, gain: o.gain || 0, mis: !!o.missile,
+                   hold: !!(o.hold || o.missile) };
+    // 몸에 붙이는 이펙트(o.center = 몸 가운데 높이): 롤이 몸 가운데 뼈(Buffbone Center) 에 붙이게 만든 것은 그 높이로 올린다
+    if (o.center) { const L = attachLift(s); inst.hOff = L > 0 ? L : L < 0 ? o.center : 0; }
     place(inst, o);
     if (!inst.pos) inst.pos = [0, 0, 0];      // 자식 시스템은 자리 없이 켜고 바로 부모 파티클 자리로 옮긴다
     inst.prev = inst.pos.slice();
-    for (const e of s.emitters) inst.ems.push({ e, age: 0, acc: 0, ps: [], single: false, emitted: 0, path: 0 });
+    // acc 1: 켜지자마자(timeBeforeFirstEmission 뒤 첫 걸음) 첫 파티클을 낸다. 0 이면 1초에 1개·발생기 1초 같은
+    // '하나만 내는' 발생기(시비르 E 구 빛·아무무 Q 적중 고리 …) 가 발생기가 끝날 때까지 하나도 못 냈다
+    for (const e of s.emitters) inst.ems.push({ e, age: 0, acc: 1, ps: [], single: false, emitted: 0, path: 0 });
     live.push(inst);
     return inst;
   }
   // 롤 좌표로 옮겨 둔다
   function place(inst, o) {
-    if (o.x != null) inst.pos = [o.x, o.h || 0, -(o.y || 0)];
+    if (o.x != null) inst.pos = [o.x, (o.h || 0) + (inst.hOff || 0), -(o.y || 0)];
     if (o.dir) {
       const dx = o.dir.x, dz = -o.dir.y, l = Math.hypot(dx, dz) || 1;
       inst.sin = dx / l; inst.cos = dz / l;
@@ -194,6 +199,27 @@
     if (o.target) inst.target = [o.target.x, o.target.h || 0, -o.target.y];
   }
   function move(inst, o) { if (inst) place(inst, o); }
+  // 이 시스템이 어디에 붙게 만들어졌나. 양수: 그만큼 위(바닥층 발생기를 그만큼 내려 둠 — 럭스 W 보호막의 바닥 빛 -95),
+  // -1: 몸 가운데(구·큰 빛이 원점 가운데 — 카사딘 Q·오리아나 E·리 신 W 보호막 구), 0: 발밑(다이애나 W·리븐 E 처럼 바닥부터 그린 것)
+  function attachLift(s) {
+    if (s.lift != null) return s.lift;
+    let ground = 0, high = false, round = false;
+    for (const e of s.emitters) {
+      const eo = e.SpawnShape && ev(e.SpawnShape.emitOffset, 0, null), ep = ev(e.EmitterPosition, 0, null);
+      const y = (Array.isArray(eo) && eo.length === 3 ? eo[1] : 0) + (Array.isArray(ep) ? ep[1] : 0);
+      if (e.isGroundLayer && y < -20) ground = Math.max(ground, -y);
+      if (y >= 60) high = true;
+      const T = e.primitive && e.primitive.T, sc = ev(e.birthScale0, 0, [1, 1, 1]);
+      if (T === "VfxPrimitiveMesh" && FX.meshes[e.primitive.mesh] && FX.meshes[e.primitive.mesh].pos) {
+        const m = FX.meshes[e.primitive.mesh];
+        if (m.yMin == null) { let a = Infinity, b = -Infinity; for (let i = 1; i < m.pos.length; i += 3) { a = Math.min(a, m.pos[i]); b = Math.max(b, m.pos[i]); } m.yMin = a; m.yMax = b; }
+        const lo = y + m.yMin * sc[1], hi = y + m.yMax * sc[1];
+        if (lo < -40 && hi > 40 && Math.abs(lo + hi) < 0.3 * (hi - lo)) round = true;
+      } else if (!T && Math.abs(y) < 30 && sc[0] >= 80) round = true;
+    }
+    s.lift = ground > 0 ? ground : round && !high ? -1 : 0;
+    return s.lift;
+  }
   // 그만 뿜는다. 남은 파티클은 particleLinger 만큼 더 산다
   function stop(inst) {
     if (!inst || inst.stopped) return;
@@ -205,6 +231,7 @@
   }
   function kill(inst) { if (inst) { inst.stopped = true; inst.done = true; } }
 
+  const HOLD_MAX = 4;
   // ── 한 걸음 ──
   function update(dt) {
     for (let i = live.length - 1; i >= 0; i--) {
@@ -239,13 +266,18 @@
           const rate = Math.max(0, ev(e.rate, frac, 0));
           em.acc += rate * (rate > DENSE_RATE ? density : 1) * dt;
           let guard = 0;
-          while (em.acc >= 1 && guard++ < 200) { em.acc -= 1; spawn(inst, em, frac); }
+          while (rate > 0 && em.acc >= 1 && guard++ < 200) { em.acc -= 1; spawn(inst, em, frac); }
         }
       } else if (e.isSingleParticle && em.single && !em.ended && (inst.stopped || (L != null && em.age >= t0 + L))) {
-        // 하나뿐인 파티클은 발생기가 끝나면 linger 만큼 남는다
+        // 하나뿐인 파티클은 발생기가 끝나면 linger 만큼 남는다. 단 수명(particleLifetime) 이 적힌 것은 발생기보다 오래 산다:
+        // 롤 데이터는 발생기 1초·파티클 2.7~3.85초(럭스 W·오리아나 E 보호막 구), 0.1초·50초(애쉬 R 화살 빛) 처럼 파티클 수명이 보이는 시간이다.
+        // 켜 둘 시간이 정해진 것(버프·투사체, hold) 은 꺼질 때까지, 그냥 켠 것은 수명이 짧을 때(HOLD_MAX 초 안) 만 다 산다
         em.ended = true;
         const lg = e.particleLinger || 0;
-        for (const p of em.ps) p.die = Math.min(p.die, p.age + lg);
+        for (const p of em.ps) {
+          if (!inst.stopped && e.particleLifetime != null && (inst.hold || p.life <= HOLD_MAX)) continue;
+          p.die = Math.min(p.die, p.age + lg);
+        }
       }
       // 파티클
       for (let j = em.ps.length - 1; j >= 0; j--) {
@@ -371,7 +403,7 @@
     if (e.textureMult) {
       const m = e.textureMult;
       p.multOff = ev(m.birthUVOffsetMult, frac, [0, 0]).slice();
-      p.multScroll = ev(m.birthUVScrollRateMult, frac, [0, 0]);
+      p.multScroll = ev(m.birthUvScrollRateMult || m.birthUVScrollRateMult, frac, [0, 0]);
     }
     em.ps.push(p);
     em.emitted++;
@@ -405,7 +437,10 @@
       const f = room(out, 1), i = out.n * VF;
       f[i] = P[0]; f[i + 1] = P[1]; f[i + 2] = P[2]; f[i + 3] = uv[0]; f[i + 4] = uv[1];
       f[i + 5] = col[0]; f[i + 6] = col[1]; f[i + 7] = col[2]; f[i + 8] = col[3];
-      f[i + 9] = x[0]; f[i + 10] = x[1]; f[i + 11] = x[2]; f[i + 12] = 0; f[i + 13] = mu ? mu[0] : 0; f[i + 14] = mu ? mu[1] : 0;
+      // 곱하기 텍스처 UV: 기본 텍스처의 UV 변환(무작위 오프셋·흐름·회전) 을 따르지 않고 변환 전 UV 에 자기 배율·오프셋만
+      const r = uv.raw || uv;
+      f[i + 9] = x[0]; f[i + 10] = x[1]; f[i + 11] = x[2]; f[i + 12] = 0;
+      f[i + 13] = mu ? r[0] * mu[2] + mu[0] : 0; f[i + 14] = mu ? r[1] * mu[3] + mu[1] : 0;
       out.n++; n++;
     };
     const tri = (a, b, c) => { put(...a); put(...b); put(...c); };
@@ -482,7 +517,7 @@
               f[i + 3] = o0[0] + (o1[0] - o0[0]) * u + (o2[0] - o0[0]) * v;
               f[i + 4] = o0[1] + (o1[1] - o0[1]) * u + (o2[1] - o0[1]) * v;
               f[i + 5] = col[0]; f[i + 6] = col[1]; f[i + 7] = col[2]; f[i + 8] = col[3];
-              f[i + 9] = x[0]; f[i + 10] = x[1]; f[i + 11] = x[2]; f[i + 12] = 0; f[i + 13] = mu ? mu[0] : 0; f[i + 14] = mu ? mu[1] : 0;
+              f[i + 9] = x[0]; f[i + 10] = x[1]; f[i + 11] = x[2]; f[i + 12] = 0; f[i + 13] = mu ? u * mu[2] + mu[0] : 0; f[i + 14] = mu ? v * mu[3] + mu[1] : 0;
             }
             out.n += nv; n += nv;
           }
@@ -497,7 +532,7 @@
         const tl = p.tile || [0, 0, 0];
         const rw = tl[0] > 0 ? s[0] / tl[0] : 1, rl = tl[1] > 0 ? L / tl[1] : 1;
         // 텍스처는 v 가 빔을 따라(uv 변환은 빔 방향이 첫 축)
-        const uvb = (a, b) => { const q = uvT(e, p, [a * rl, b * rw]); return [q[1], q[0]]; };
+        const uvb = (a, b) => { const q = uvT(e, p, [a * rl, b * rw]), r = [q[1], q[0]]; r.raw = [b, a]; return r; };
         quad([add(A2, mul(side, hw)), uvb(y, 0), col, x, mu], [add(B2, mul(side, hw)), uvb(1 - z, 0), col, x, mu],
              [add(B2, mul(side, -hw)), uvb(1 - z, 1), col, x, mu], [add(A2, mul(side, -hw)), uvb(y, 1), col, x, mu]);
         continue;
@@ -511,7 +546,7 @@
         const [a, b, c] = ori, px = p.pos[0], py = p.pos[1], pz = p.pos[2];
         // UV 는 한 번에 같은 변환이라 (0,0)·(1,0)·(0,1) 세 점으로 아핀 변환을 구해 쓴다
         const o0 = uvT(e, p, [0, 0]), o1 = uvT(e, p, [1, 0]), o2 = uvT(e, p, [0, 1]);
-        const mu0 = mu ? mu[0] : 0, mu1 = mu ? mu[1] : 0;
+        const mu0 = mu ? mu[0] : 0, mu1 = mu ? mu[1] : 0, mk0 = mu ? mu[2] : 0, mk1 = mu ? mu[3] : 0;
         let i = out.n * VF;
         for (let k = 0; k < nv; k++, i += VF) {
           const lx = P[k * 3] * s[0], ly = P[k * 3 + 1] * s[1], lz = P[k * 3 + 2] * s[2], u = U[k * 2], v = U[k * 2 + 1];
@@ -521,7 +556,7 @@
           f[i + 3] = o0[0] + (o1[0] - o0[0]) * u + (o2[0] - o0[0]) * v;
           f[i + 4] = o0[1] + (o1[1] - o0[1]) * u + (o2[1] - o0[1]) * v;
           f[i + 5] = col[0]; f[i + 6] = col[1]; f[i + 7] = col[2]; f[i + 8] = col[3];
-          f[i + 9] = x[0]; f[i + 10] = x[1]; f[i + 11] = x[2]; f[i + 12] = 0; f[i + 13] = mu0; f[i + 14] = mu1;
+          f[i + 9] = x[0]; f[i + 10] = x[1]; f[i + 11] = x[2]; f[i + 12] = 0; f[i + 13] = u * mk0 + mu0; f[i + 14] = v * mk1 + mu1;
         }
         out.n += nv; n += nv;
         continue;
@@ -618,7 +653,9 @@
     const em = e.emitterUvScrollRate ? life(e.emitterUvScrollRate, 0, [0, 0]) : [0, 0];
     u += p.uvOff[0] + p.uvScroll[0] * p.age + p.scroll[0] + em[0] * p.age;
     v += p.uvOff[1] + p.uvScroll[1] * p.age + p.scroll[1] + em[1] * p.age;
-    return [u, v];
+    const out = [u, v];
+    out.raw = uv;
+    return out;
   }
   function multUv(e, p) {
     const m = e.textureMult, k = life(m.uvScaleMult, p.f, [1, 1]);

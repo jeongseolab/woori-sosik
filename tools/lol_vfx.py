@@ -90,7 +90,7 @@ MINE_EXTRA = {
     ("galio", 2): {"cast": ["Galio_E_Cas_Dust"], "dash": ["Galio_E_Wings"], "land": ["Galio_E_Cas_DropFlash"]},
     ("kalista", 0): {"cast": ["Kalista_Q_mis_Precast"], "mis": ["Kalista_Q_mis"]},
     ("lulu", 1): {"cast": ["Lulu_W_cas_buf_hand"], "buf": ["Lulu_W_tar_01"]},
-    ("lulu", 2): {"cast": ["Lulu_Pix_E_Teleport"]},
+    ("lulu", 2): {"cast": ["Lulu_Pix_E_Teleport"], "buf": ["Lulu_E_tar_ally"]},
     ("lux", 1): {"buf": ["Lux_W_tar_shield"]},
     ("riven", 2): {"buf": ["Riven_E_Shield"]},
     ("zoe", 3): {"cast": ["Zoe_R_portal_entrance"], "land": ["Zoe_R_portal_exit"]},
@@ -101,11 +101,16 @@ MINE_EXTRA = {
     ("samira", 1): {"buf": ["Samira_W_Zone"]},
     ("tryndamere", 2): {"dash": ["Tryndamere_E_Slash"]},
     ("tryndamere", 3): {"buf": ["Tryndamere_R_buf_01", "Tryndamere_R_glow_01"]},
-    ("sivir", 2): {"buf": ["Sivir_E_shield"]},
+    ("sivir", 2): {"buf": ["Sivir_E_shield"], "pop": ["Sivir_E_proc"]},
     ("sivir", 3): {"buf": ["Sivir_R_buf"]},
     ("ornn", 2): {"dash": ["Ornn_E_feet_spin"], "land": ["Ornn_E_Explosion"]},
     ("rammus", 0): {"buf": ["Rammus_Q_AOE"]},
-    ("shen", 2): {"dash": ["Shen_E_mis"]},
+    # 셴 E 보호막은 패시브(기의 보호막) 이펙트
+    ("shen", 2): {"dash": ["Shen_E_mis"], "buf": ["Shen_P_Shield"], "pop": ["Shen_P_Shield_block"]},
+    # 보호막 구(buf) 와 보호막이 막고 터질 때(pop, dodge.js blocked·barrierTake)
+    ("nocturne", 1): {"pop": ["Nocturne_W_spellblock_01"]},
+    ("yuumi", 2): {"buf": ["Yuumi_P_Shield"]},
+    ("skarner", 1): {"buf": ["Skarner_W_Shield_Bubble_Child"], "pop": ["Skarner_W_Shield_Dissipate"]},
     ("twitch", 0): {"cast": ["Twitch_Q_Bamf"], "buf": ["Twitch_Q_Haste"]},
     ("udyr", 2): {"buf": ["Udyr_PhoenixStance"]},
     # 나피리 W 는 롤 스킬 이름이 NaafiriR(무리의 부름) 이라 이펙트도 Naafiri_R_* (Naafiri_W_* 는 옛 W, 챔피언에게 돌진)

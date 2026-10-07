@@ -88,7 +88,10 @@ SPELL_CLIPS = {("corki", 2): ["Spell3"], ("gragas", 3): ["Spell1"], ("gnar", 3):
                ("sona", 2): ["Spell1"], ("sona", 3): ["Spell1"], ("udyr", 3): ["Spell2"], ("bard", 3): ["Spell2"],
                ("thresh", 1): ["Spell1_In"], ("kindred", 1): ["Spell1Back"], ("sylas", 3): ["Spell3_Dash"], ("tristana", 2): ["Spell2_LNG"],
                ("riven", 1): ["Spell1A"], ("rakan", 4): ["Spell4_Into"], ("naafiri", 2): ["Spell4_Idle"],
-               ("yone", 3): ["Spell3_Spirit"]}
+               ("yone", 3): ["Spell3_Spirit"],
+               # 아지르 E: Spell3_Dash 는 돌진 동작(해시로만 적힌 클립, azir_spell3_dash.anm 2초) → 한 프레임짜리 LOOP 순서.
+               # 이어 붙이기는 마지막(반복) 부분을 고르는 규칙이라 한 프레임에 굳어 있었다
+               ("azir", 3): ["{8f2d4d45}"]}
 # 스킬 말고 따로 굽는 동작: 이름 → 클립 이름 후보(칼리스타 Q 뒤의 패시브 돌진).
 # 암베사는 스킬마다 패시브 돌진 동작이 따로 있다(해시로만 적힌 클립: passivedash_spell1a·1b·2·3·4·4_fail.anm),
 # Q2(Spell1B), R 내려찍기(spell4_hit). spell4 는 R 시전(Spell4_Windup)
@@ -222,6 +225,10 @@ SPELL_CLIPS_NEW21 = {("jarvaniv", 4): ["Spell3"], ("jax", 1): ["Spell2"], ("kata
                      ("neeko", 2): ["Spell2_Run"], ("kaisa", 3): ["Idle_to_E"]}
 SPELL_CLIPS.update(SPELL_CLIPS_NEW21)
 FPS = 15
+# 스킬·돌진 동작은 빨라서 15 프레임으로는 프레임 사이에 뼈가 크게 돈다(한 프레임에 90° 넘게) → 두 배로 굽는다.
+# 서 있기·달리기는 느려서 15 그대로(파일 크기)
+FAST_FPS = 30
+SLOW_ANIMS = ("idle", "run")
 TEX_SIZE = 512
 
 
@@ -510,7 +517,7 @@ def binds(skl):
     return g
 
 
-def bake(skl, anim, duration):
+def bake(skl, anim, duration, fps=FPS):
     js = skl["joints"]
     bind = binds(skl)
     inv = [np.linalg.inv(b) for b in bind]
@@ -520,10 +527,10 @@ def bake(skl, anim, duration):
             rest.append(np.linalg.inv(bind[j["parent"]]) @ bind[i] if j["parent"] >= 0 else bind[i])
         else:
             rest.append(trs(j["t"], j["r"], j["s"]))
-    n = max(1, int(round(duration * FPS)))
+    n = max(1, int(round(duration * fps)))
     frames = []
     for f in range(n):
-        tm = f / FPS
+        tm = f / fps
         g = []
         for i, j in enumerate(js):
             tr = anim.get(elf_hash(j["name"]))
@@ -710,23 +717,14 @@ def bin_json(w, path):
         return dict(d)
 
 
-def build(key, wad_dir, spells):
-    wads = [f for f in os.listdir(wad_dir) if f.lower() == SUB_WAD.get(key, key) + ".wad.client"]
-    if not wads:
-        raise FileNotFoundError("WAD 없음")
-    w = Wad(os.path.join(wad_dir, wads[0]))
-    skin = bin_json(w, "data/characters/%s/skins/skin0.bin" % key)
-    sk = next(v for v in skin.values() if isinstance(v, dict) and "skinMeshProperties" in v)
-    mesh = sk["skinMeshProperties"]
-    graph = sk.get("skinAnimationProperties", {}).get("animationGraphData")
-    skn = read_skn(w.read(mesh["simpleSkin"]))
-    skl = read_skl(w.read(mesh["skeleton"]))
-    scale = float(mesh.get("skinScale", 1.0))
-    hidden = set(str(mesh.get("initialSubmeshToHide", "")).lower().replace(",", " ").split())
-    idx = np.concatenate([skn["idx"][s["istart"]:s["istart"] + s["icount"]] for s in skn["subs"]
-                          if s["name"].lower() not in hidden])
+def anim_fps(name):
+    return FPS if name in SLOW_ANIMS else FAST_FPS
 
+
+# 롤 애니메이션 그래프에서 굽는 동작들을 골라 굽는다: {이름: 프레임별 뼈 행렬}
+def bake_anims(w, key, sk, skl, spells):
     anims = {}
+    graph = sk.get("skinAnimationProperties", {}).get("animationGraphData")
     agraph = bin_json(w, graph.lower().replace("characters/", "data/characters/", 1) + ".bin") if graph else {}
     clips = next((v["mClipDataMap"] for v in agraph.values() if isinstance(v, dict) and "mClipDataMap" in v), {})
     want = {"idle": pick_clip(clips, ["Idle_Base", "Idle1", "Idle", "Idle_In", "Idle01", "Idle1_Base", "RAW_Idle1"], "idle"),
@@ -741,7 +739,61 @@ def build(key, wad_dir, spells):
         h = int(path[1:-1], 16) if path and path.startswith("{") else w.key(path) if path else None
         if h in w.entries:
             a, dur = read_anm(w.read_hash(h))
-            anims[name] = bake(skl, a, max(dur, 1 / FPS))
+            fps = anim_fps(name)
+            anims[name] = bake(skl, a, max(dur, 1 / fps), fps)
+    return anims
+
+
+def write_anims(buf, anims):
+    for name, fr in anims.items():
+        buf.write(name.encode().ljust(12, b"\0"))
+        buf.write(struct.pack("<fI", anim_fps(name), len(fr)))
+        buf.write(fr.astype("<f2").tobytes())
+        if buf.tell() % 4:
+            buf.write(b"\0" * (4 - buf.tell() % 4))
+
+
+# 동작만 다시 굽는다: 이미 있는 .bin 의 정점·UV 와 텍스처(.webp) 는 그대로 두고 뒤의 동작 부분만 바꾼다
+# (텍스처를 다시 받으면 CommunityDragon 상태에 따라 칸 나눔이 바뀔 수 있어서)
+def rebake_anims(key, wad_dir, spells):
+    wads = [f for f in os.listdir(wad_dir) if f.lower() == SUB_WAD.get(key, key) + ".wad.client"]
+    w = Wad(os.path.join(wad_dir, wads[0]))
+    skin = bin_json(w, "data/characters/%s/skins/skin0.bin" % key)
+    sk = next(v for v in skin.values() if isinstance(v, dict) and "skinMeshProperties" in v)
+    skl = read_skl(w.read(sk["skinMeshProperties"]["skeleton"]))
+    path = os.path.join(OUT, key + ".bin")
+    old = open(path, "rb").read()
+    V, I, B = struct.unpack_from("<3I", old, 8)
+    if B != len(skl["influences"]):
+        raise ValueError("뼈 수가 다르다(%d != %d) — 모델을 통째로 다시 구울 것" % (B, len(skl["influences"])))
+    head = 32 + V * 12 + V * 4 + V * 4 + V * 4 + I * 2
+    head += (4 - head % 4) % 4
+    anims = bake_anims(w, key, sk, skl, spells)
+    buf = io.BytesIO()
+    buf.write(old[:head])
+    buf.getbuffer()[20:24] = struct.pack("<I", len(anims))
+    write_anims(buf, anims)
+    with open(path, "wb") as f:
+        f.write(buf.getvalue())
+    return list(anims)
+
+
+def build(key, wad_dir, spells):
+    wads = [f for f in os.listdir(wad_dir) if f.lower() == SUB_WAD.get(key, key) + ".wad.client"]
+    if not wads:
+        raise FileNotFoundError("WAD 없음")
+    w = Wad(os.path.join(wad_dir, wads[0]))
+    skin = bin_json(w, "data/characters/%s/skins/skin0.bin" % key)
+    sk = next(v for v in skin.values() if isinstance(v, dict) and "skinMeshProperties" in v)
+    mesh = sk["skinMeshProperties"]
+    skn = read_skn(w.read(mesh["simpleSkin"]))
+    skl = read_skl(w.read(mesh["skeleton"]))
+    scale = float(mesh.get("skinScale", 1.0))
+    hidden = set(str(mesh.get("initialSubmeshToHide", "")).lower().replace(",", " ").split())
+    idx = np.concatenate([skn["idx"][s["istart"]:s["istart"] + s["icount"]] for s in skn["subs"]
+                          if s["name"].lower() not in hidden])
+
+    anims = bake_anims(w, key, sk, skl, spells)
 
     tex_path = mesh.get("texture")
     local_png = None
@@ -828,12 +880,7 @@ def build(key, wad_dir, spells):
     buf.write(idx.astype("<u2").tobytes())
     if buf.tell() % 4:
         buf.write(b"\0" * (4 - buf.tell() % 4))
-    for name, fr in anims.items():
-        buf.write(name.encode().ljust(12, b"\0"))
-        buf.write(struct.pack("<fI", FPS, len(fr)))
-        buf.write(fr.astype("<f2").tobytes())
-        if buf.tell() % 4:
-            buf.write(b"\0" * (4 - buf.tell() % 4))
+    write_anims(buf, anims)
     with open(os.path.join(OUT, key + ".bin"), "wb") as f:
         f.write(buf.getvalue())
     return {"h": round(height, 1), "anims": list(anims)}
@@ -854,6 +901,7 @@ def main():
     ap.add_argument("--all", action="store_true", help="모든 챔피언")
     ap.add_argument("--mobility", action="store_true", help="내 챔피언으로 고르는 챔피언(MOBILITY, PASSIVE, GUARD, SHIELD, MORE)")
     ap.add_argument("--game", default=r"C:\Riot Games\League of Legends", help="롤 설치 폴더")
+    ap.add_argument("--anims", action="store_true", help="동작만 다시 굽는다(정점·텍스처·체력바 높이는 그대로)")
     a = ap.parse_args()
     wad_dir = os.path.join(a.game, "Game", "DATA", "FINAL", "Champions")
     os.makedirs(OUT, exist_ok=True)
@@ -871,7 +919,13 @@ def main():
         try:
             # 체력바 높이(h) 는 손으로 고친 챔피언이 있다(커밋 bf8d43a). 다시 만들어도 있던 값은 지킨다(새로 재려면 그 h 를 지운다)
             old_h = index.get(k, {}).get("h")
-            index[k] = build(k, wad_dir, sorted(set(CASTERS.get(k, [])) | ({MOBILITY[k]} if k in MOBILITY else set()) | set(PASSIVE.get(k, [])) | set(GUARD.get(k, [])) | set(SHIELD.get(k, [])) | set(MORE.get(k, [])) | set(NEW21.get(k, []))))
+            spells = sorted(set(CASTERS.get(k, [])) | ({MOBILITY[k]} if k in MOBILITY else set()) | set(PASSIVE.get(k, [])) | set(GUARD.get(k, [])) | set(SHIELD.get(k, [])) | set(MORE.get(k, [])) | set(NEW21.get(k, [])))
+            if a.anims:
+                index[k]["anims"] = rebake_anims(k, wad_dir, spells)
+                index[k]["v"] = file_version(k)
+                print(k, index[k], flush=True)
+                continue
+            index[k] = build(k, wad_dir, spells)
             if old_h is not None:
                 index[k]["h"] = old_h
             index[k]["v"] = file_version(k)
