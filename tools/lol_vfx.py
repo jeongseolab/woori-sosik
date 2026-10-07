@@ -82,6 +82,8 @@ MINE_SKIP = r"(red|green|_ally|_enemy|indicator|warning|avatar|_tar|_sfx|audio|_
 
 
 # 이름 규칙에 안 걸리는 것: (챔피언, 칸) → 부분별 키(규칙으로 찾은 것에 더한다)
+# 몸이 아닌 자리에 켜는 부분(dodge.js myAt)
+PLACE_PARTS = ("mis", "tar", "anchor", "zone", "drop", "blast", "mark")
 MINE_EXTRA = {
     ("ekko", 2): {"cast": ["Ekko_E_Vanish"], "dash": ["Ekko_E_Roll_Blur"], "land": ["Ekko_E_Appear"]},
     ("ekko", 3): {"cast": ["Ekko_R_Disappear"], "land": ["Ekko_R_Tar_Impact"]},
@@ -240,14 +242,16 @@ def mine_parts(d, champ, slot, kind):
                             anim.append(e + [1] if bone.lower() in flips else e)
     if anim:
         out["anim"] = anim[:4]
-        # 동작 이벤트로 제때 켜는 이펙트는 시전(cast) 에서 또 켜지 않는다(두 번 겹쳐 보이던 것)
-        timed = {a[0] for a in out["anim"]}
-        if out.get("cast"):
-            out["cast"] = [k for k in out["cast"] if k not in timed]
-            if not out["cast"]:
-                del out["cast"]
+
     for part, keys in MINE_EXTRA.get((champ, slot), {}).items():
         out[part] = list(dict.fromkeys(out.get(part, []) + [k for k in keys if k in rmap]))
+    # 시전(cast) 은 내 몸에 켠다. 동작 이벤트로 제때 켜는 것(anim) 이나 다른 자리에 켜는 것(병사·표식·맞은 적 …) 은
+    # 몸에서 또 켜지 않는다(크산테 W 벽이 두 번 겹치던 것, 아지르 W 병사 생성 이펙트가 아지르 몸에도 켜지던 것)
+    elsewhere = {a[0] for a in out.get("anim", [])} | {k for p in PLACE_PARTS for k in out.get(p, [])}
+    if out.get("cast"):
+        out["cast"] = [k for k in out["cast"] if k not in elsewhere]
+        if not out["cast"]:
+            del out["cast"]
     return out
 
 

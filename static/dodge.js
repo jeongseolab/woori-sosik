@@ -42,7 +42,7 @@
 (function () {
   // 게임 버전 "앞.가운데.끝". 앞 = 새 챔피언 추가, 가운데 = 스킬 추가·버그 수정, 끝 = 아주 미묘한 변화.
   // 하나를 올리면 그 뒤 숫자는 0 으로. 서버는 앞 숫자가 같은 기록끼리만 순위를 매긴다(ranking.py 의 DODGE_VERSION 과 같게)
-  const VERSION = "21.5.0";
+  const VERSION = "21.6.0";
 
   const ARENA = { w: 1400, h: 900 };
   const CHAMP = { radius: 65, speed: 335 };
@@ -2528,6 +2528,8 @@
       // 보호막 이펙트는 보호막을 받는 순간(돌진 시작) 켜고 보호막이 있는 동안만(깨지면 barrierTake 에서 끈다)
       barrier = { until: t + sk.barrier, color: sk.color || "#ffd8a8", cc: !!sk.ccShield,
                   vfx: buffIsBarrier(sk) ? myPlay(myPart(sk, "buf"), sk.barrier) : null };
+      // 보호막 이펙트에는 멈춘 뒤 1초 남는 것(particleLinger, 아지르 E) 이 있어 보호막이 끝나도 떠 있었다 → 끝나면 0.25초 안에 지운다
+      if (barrier.vfx) barrier.vfx.forEach(i => { i.until = sk.barrier + 0.25; });
       if (!myArt(sk)) emit({ x: player.x, y: player.y, z: 90, size: 230, size1: 170, color: "#ffffff", color1: barrier.color, shape: "glow", life: 0.3 });
       mySfx("cleanse");
     }
@@ -2536,7 +2538,8 @@
       if (!barrier || t >= barrier.until) return false;
       const b = barrier;
       barrier = null;
-      fxStop(b.vfx);
+      // 깨진 보호막은 바로 지운다(남아 있으면 아직 보호막이 있는 것처럼 보인다)
+      if (b.vfx) b.vfx.forEach(i => DodgeVfx.kill(i));
       pops.push({ x: player.x, y: player.y, text: "보호막", life: 1, max: 1 });
       emit({ x: player.x, y: player.y, z: 90, size: 220, size1: 280, color: "#ffffff", color1: b.color, shape: "ring", life: 0.3 });
       burst(player.x, player.y, 80, b.color, 14, 300);
@@ -3438,8 +3441,8 @@
                    size: 70, size1: 20, color: "#fff3bf", color1: "#e03131", shape: "spark", life: 0.2 });
           }
         }
-        // 보호막: 몸을 감싼 옅은 빛(주문 보호막은 테두리)
-        if (barrier && t < barrier.until) emit({ x: player.x, y: player.y, z: 90, size: 200, size1: 205, color: "#ffffff", color1: barrier.color, shape: "glow", life: 0.1, a: 0.3 });
+        // 보호막: 몸을 감싼 옅은 빛(주문 보호막은 테두리). 롤 보호막 이펙트를 켰으면(barrier.vfx) 그것만 보인다(두 겹으로 보이던 것)
+        if (barrier && t < barrier.until && !barrier.vfx) emit({ x: player.x, y: player.y, z: 90, size: 200, size1: 205, color: "#ffffff", color1: barrier.color, shape: "glow", life: 0.1, a: 0.3 });
         if (shieldUp && t < shieldUp.until) emit({ x: player.x, y: player.y, z: 80, size: 150, size1: 160, color: "#ffffff", color1: shieldUp.color, shape: "ring", life: 0.12, a: 0.6 });
         if (parry > t) emit({ x: player.x, y: player.y, z: 80, size: 130, size1: 140, color: "#ffffff", color1: "#a5d8ff", shape: "ring", life: 0.1, a: 0.8 });
         if (lambs && t < lambs.until && !(t - (lambs.fxAt || -1) < 0.3)) {
