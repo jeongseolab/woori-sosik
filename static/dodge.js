@@ -42,7 +42,7 @@
 (function () {
   // 게임 버전 "앞.가운데.끝". 앞 = 새 챔피언 추가, 가운데 = 스킬 추가·버그 수정, 끝 = 아주 미묘한 변화.
   // 하나를 올리면 그 뒤 숫자는 0 으로. 서버는 앞 숫자가 같은 기록끼리만 순위를 매긴다(ranking.py 의 DODGE_VERSION 과 같게)
-  const VERSION = "21.3.0";
+  const VERSION = "21.4.0";
 
   const ARENA = { w: 1400, h: 900 };
   const CHAMP = { radius: 65, speed: 335 };
@@ -59,7 +59,8 @@
   const FAR = 4000;            // 경기장보다 긴 사거리(레이저 등)
   // 소환사 주문. 아이콘·실제 쿨타임(점멸 300초, 유체화 240초) 은 롤 데이터(summoner-spells.json),
   // 점멸 거리 400·유체화 이속(+24~48%) 은 롤 위키. 쿨타임과 유체화 지속 시간은 이 게임에 맞게 줄였다
-  const ICONS = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/data/spells/icons2d/";
+  // 소환사 주문 아이콘(tools/champ_icons.py 가 CommunityDragon 에서 받아 둔 것)
+  const ICONS = "dodge/icons/";
   // 정화: 쿨타임 240초(롤 데이터), 공중에 뜸·제압을 뺀 CC 를 풀고 3초 동안 강인함 75%(14.10 패치, 나무위키).
   // 쿨타임은 유체화(실제 240초) 와 같게 20초로 줄였다
   const SPELLS = [
@@ -974,24 +975,30 @@
   const CHAMP_IDS = {}, CHAMP_NAMES = {};      // 소문자 이름(alias) → 숫자 ID, 한국어 이름
   let idsAsked = null;
   // 받은 뒤(또는 못 받은 뒤) 풀리는 약속을 돌려준다. 못 받으면 다음에 다시 받는다
+  // 챔피언 목록·스킬 이름은 우리 서버의 dodge/champs.json(tools/champ_icons.py) 에서 먼저 받는다.
+  // CommunityDragon 은 느릴 때(요청마다 20초) 가 있어, 그 파일이 없을 때만 쓴다
+  const LOCAL_CHAMPS = {};
   function loadChampIds() {
     if (!idsAsked) {
-      idsAsked = fetch(CD_ROOT.replace("/default/", "/ko_kr/") + "v1/champion-summary.json")
-        .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
-        .then(list => {
-          list.forEach(c => { if (c.id > 0) { const k = String(c.alias).toLowerCase(); CHAMP_IDS[k] = c.id; CHAMP_NAMES[k] = c.name; } });
-          preload();
-        })
+      const json = r => { if (!r.ok) throw new Error(r.status); return r.json(); };
+      idsAsked = fetch("dodge/champs.json").then(json)
+        .then(map => Object.entries(map).forEach(([k, c]) => { LOCAL_CHAMPS[k] = c; CHAMP_IDS[k] = c.id; CHAMP_NAMES[k] = c.name; }))
+        .catch(() => fetch(CD_ROOT.replace("/default/", "/ko_kr/") + "v1/champion-summary.json").then(json)
+          .then(list => list.forEach(c => { if (c.id > 0) { const k = String(c.alias).toLowerCase(); CHAMP_IDS[k] = c.id; CHAMP_NAMES[k] = c.name; } })))
+        .then(preload)
         .catch(() => { idsAsked = null; });
     }
     return idsAsked;
   }
-  // HUD 스킬 칸(Q W E R) 아이콘과 한국어 이름. 챔피언 JSON(ko_kr) 의 abilityIconPath("/lol-game-data/assets/ASSETS/...")를
+  // HUD 스킬 칸(Q W E R) 아이콘과 한국어 이름. 우리 서버에 있으면 dodge/icons/<챔피언>.webp(Q W E R 을 가로로 붙인 한 장, sprite = 칸 번호).
+  // 없으면 챔피언 JSON(ko_kr) 의 abilityIconPath("/lol-game-data/assets/ASSETS/...")를
   // CD_ROOT + "assets/..."(소문자) 로 바꾼다. 챔피언마다 한 번만 받고, 못 받으면 null(칸에 글자만)
   const SKILL_ICONS = new Map();
   function skillIcons(key) {
     return loadChampIds().then(() => {
-      const id = CHAMP_IDS[String(key).toLowerCase()];
+      const k = String(key).toLowerCase(), local = LOCAL_CHAMPS[k];
+      if (local) return local.spells.map((name, i) => ({ icon: "dodge/icons/" + k + ".webp", sprite: i, name }));
+      const id = CHAMP_IDS[k];
       if (!id) return null;
       if (!SKILL_ICONS.has(id)) {
         SKILL_ICONS.set(id, fetch(CD_ROOT.replace("/default/", "/ko_kr/") + "v1/champions/" + id + ".json")
@@ -5727,6 +5734,10 @@
           const name = (list && list[i].name) || "QWER"[i] + " 스킬";
           if (list && list[i].icon) { img.src = list[i].icon; b.classList.remove("noimg"); }
           else { img.removeAttribute("src"); b.classList.add("noimg"); }
+          // 한 장에 붙인 아이콘이면 그 칸만 보이게(가로 4칸)
+          const sp = list && list[i].sprite;
+          img.style.objectFit = sp != null ? "cover" : "";
+          img.style.objectPosition = sp != null ? (sp * 100 / 3) + "% 0" : "";
           b.classList.toggle("off", !on);
           b.querySelector("kbd").textContent = labels[i];
           b.title = name + " (" + labels[i] + ") · " + (on ? skillText(sk) + ". 쿨타임 " + skillCd(sk) + "초" : "연습장에서는 못 써요");
