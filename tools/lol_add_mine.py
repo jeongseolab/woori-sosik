@@ -49,7 +49,7 @@ def add_vfx(champs):
             got = {}
             for part, keys in plan[slot].items():
                 if part == "anim":
-                    names = [n for n in ([sub.add_system(d, w, rmap[k]), tt] for k, tt in keys) if n[0]]
+                    names = [n for n in ([sub.add_system(d, w, rmap[k]), *rest] for k, *rest in keys) if n[0]]
                 else:
                     names = [n for n in (sub.add_system(d, w, rmap[k]) for k in keys) if n]
                 if names:

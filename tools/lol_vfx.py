@@ -187,6 +187,28 @@ def mine_skills():
     return out
 
 
+_FLIPS = {}
+
+
+def flipped_bones(d):
+    """이펙트를 붙이는 자리 뼈(이름에 layout·ground) 중 바인드 자세에서 몸 뒤(-z) 를 보는 것 → 이름(소문자) 집합"""
+    sk = next((v for v in d.values() if isinstance(v, dict) and "skinMeshProperties" in v), None)
+    path = sk and sk["skinMeshProperties"].get("skeleton")
+    if not path:
+        return set()
+    if path not in _FLIPS:
+        out = set()
+        b = cm.local_file(path.lower())
+        if b:
+            skl = cm.read_skl(b)
+            for M, j in zip(cm.binds(skl), skl["joints"]):
+                n = j["name"].lower()
+                if ("layout" in n or "ground" in n) and M[2, 2] < -0.5:
+                    out.add(n)
+        _FLIPS[path] = out
+    return _FLIPS[path]
+
+
 def mine_parts(d, champ, slot, kind):
     """한 칸에 켤 이펙트 키들 {cast, dash, land, buf, anim: [[키, 초]]}"""
     rmap = resource_map(d)
@@ -199,7 +221,9 @@ def mine_parts(d, champ, slot, kind):
             got = []
         if got:
             out[part] = got[:4]
-    # 애니메이션 SpellN 에 박힌 이펙트(프레임 → 초, 30fps)
+    # 애니메이션 SpellN 에 박힌 이펙트(프레임 → 초, 30fps). 붙이는 뼈가 몸과 반대쪽을 보면(Layout_Loc 등) 세 번째 값 1:
+    # 화면에서 방향을 뒤집어 켠다(크산테 W 벽이 등 뒤에 생기던 것)
+    flips = flipped_bones(d)
     anim = []
     for v in d.values():
         if isinstance(v, dict) and "mClipDataMap" in v:
@@ -211,9 +235,17 @@ def mine_parts(d, champ, slot, kind):
                 for ev in (cd.get("mEventDataMap") or {}).values():
                     if isinstance(ev, dict) and ev.get("__type") == "ParticleEventData" and ev.get("mEffectKey") in rmap:
                         if not re.search(MINE_SKIP, ev["mEffectKey"], re.I):
-                            anim.append([ev["mEffectKey"], round((ev.get("mStartFrame") or 0) / 30, 3)])
+                            bone = ((ev.get("mParticleEventDataPairList") or [{}])[0] or {}).get("mBoneName") or ""
+                            e = [ev["mEffectKey"], round((ev.get("mStartFrame") or 0) / 30, 3)]
+                            anim.append(e + [1] if bone.lower() in flips else e)
     if anim:
         out["anim"] = anim[:4]
+        # 동작 이벤트로 제때 켜는 이펙트는 시전(cast) 에서 또 켜지 않는다(두 번 겹쳐 보이던 것)
+        timed = {a[0] for a in out["anim"]}
+        if out.get("cast"):
+            out["cast"] = [k for k in out["cast"] if k not in timed]
+            if not out["cast"]:
+                del out["cast"]
     for part, keys in MINE_EXTRA.get((champ, slot), {}).items():
         out[part] = list(dict.fromkeys(out.get(part, []) + [k for k in keys if k in rmap]))
     return out
@@ -599,7 +631,7 @@ def main():
             got = {}
             for part, keys in pp.items():
                 if part == "anim":
-                    names = [[sub.add_system(d, w, rmap[k]), t] for k, t in keys]
+                    names = [[sub.add_system(d, w, rmap[k]), *rest] for k, *rest in keys]
                     names = [n for n in names if n[0]]
                 else:
                     names = [n for n in (sub.add_system(d, w, rmap[k]) for k in keys) if n]

@@ -42,7 +42,7 @@
 (function () {
   // 게임 버전 "앞.가운데.끝". 앞 = 새 챔피언 추가, 가운데 = 스킬 추가·버그 수정, 끝 = 아주 미묘한 변화.
   // 하나를 올리면 그 뒤 숫자는 0 으로. 서버는 앞 숫자가 같은 기록끼리만 순위를 매긴다(ranking.py 의 DODGE_VERSION 과 같게)
-  const VERSION = "21.4.0";
+  const VERSION = "21.5.0";
 
   const ARENA = { w: 1400, h: 900 };
   const CHAMP = { radius: 65, speed: 335 };
@@ -2156,8 +2156,7 @@
         skillUsed = sk;
         mySkillStart(sk);
         guard(sk);
-        myBuff(sk, Math.max(sk.hasteDur || 0, sk.barrier || 0, sk.spellShield || 0, sk.parry || 0, sk.untarget || 0, sk.ccImmune || 0,
-                            sk.undying || 0, (sk.stealthDelay || 0) + (sk.stealth || 0), sk.shroud ? sk.shroud.dur : 0, sk.lambs ? sk.lambs.dur : 0));
+        if (!buffIsBarrier(sk)) myBuff(sk, Math.max(buffLen(sk), sk.barrier || 0));
         return;
       }
       // 르블랑 W: 정해진 시간 안에 다시 누르면 처음 자리로(쿨타임과 상관없이)
@@ -2521,8 +2520,14 @@
       if (!sk.stealth) mySfx("ghost");
     }
     // 보호막을 건다(막기 스킬, 또는 돌진과 함께: 리븐 E·우르곳 E)
+    // 보호막 말고 버프 이펙트(buf) 를 켜 둘 시간(이속·주문 보호막·투명 …). 보호막보다 길지 않으면 buf 는 보호막을 따른다(giveBarrier)
+    const buffLen = sk => Math.max(sk.hasteDur || 0, sk.spellShield || 0, sk.parry || 0, sk.untarget || 0, sk.ccImmune || 0, sk.undying || 0,
+                                   (sk.stealthDelay || 0) + (sk.stealth || 0), sk.shroud ? sk.shroud.dur : 0, sk.lambs ? sk.lambs.dur : 0);
+    const buffIsBarrier = sk => sk.barrier > 0 && buffLen(sk) <= sk.barrier;
     function giveBarrier(sk) {
-      barrier = { until: t + sk.barrier, color: sk.color || "#ffd8a8", cc: !!sk.ccShield };
+      // 보호막 이펙트는 보호막을 받는 순간(돌진 시작) 켜고 보호막이 있는 동안만(깨지면 barrierTake 에서 끈다)
+      barrier = { until: t + sk.barrier, color: sk.color || "#ffd8a8", cc: !!sk.ccShield,
+                  vfx: buffIsBarrier(sk) ? myPlay(myPart(sk, "buf"), sk.barrier) : null };
       if (!myArt(sk)) emit({ x: player.x, y: player.y, z: 90, size: 230, size1: 170, color: "#ffffff", color1: barrier.color, shape: "glow", life: 0.3 });
       mySfx("cleanse");
     }
@@ -2531,6 +2536,7 @@
       if (!barrier || t >= barrier.until) return false;
       const b = barrier;
       barrier = null;
+      fxStop(b.vfx);
       pops.push({ x: player.x, y: player.y, text: "보호막", life: 1, max: 1 });
       emit({ x: player.x, y: player.y, z: 90, size: 220, size1: 280, color: "#ffffff", color1: b.color, shape: "ring", life: 0.3 });
       burst(player.x, player.y, 80, b.color, 14, 300);
@@ -2655,7 +2661,8 @@
         } else if (!sk.step) landAct(m);
         myPlay(myPart(sk, "land"));
         // 요네 E 의 buf(Yone_E_Invulnerable_Buf) 는 밀려나기 면역이라 몸으로 돌아갈 때만 붙인다(soulBack)
-        if (!sk.soul) myBuff(sk, Math.max(sk.hasteDur || 0, sk.barrier || 0, sk.stealth || 0, sk.untarget || 0));
+        // 보호막 이펙트는 돌진을 시작할 때 이미 켰다(giveBarrier)
+        if (!sk.soul && !buffIsBarrier(sk)) myBuff(sk, Math.max(sk.hasteDur || 0, sk.barrier || 0, sk.stealth || 0, sk.untarget || 0));
       }
       if (sk.amb || sk.step) {
         if (m.ambCast) ambOpen(m);
@@ -3229,21 +3236,22 @@
     const myPart = (sk, part) => (mineFx && mineFx[String(sk.slot)] && mineFx[String(sk.slot)][part]) || null;
     // 그 칸에 롤 이펙트가 있으면 손으로 그린 장식(섬광·고리·번쩍임) 은 그리지 않는다
     const myArt = sk => !!(sk && mineFx && mineFx[String(sk.slot)] && fxgl && fxgl.gl);
-    const meNow = () => ({ x: player.x, y: player.y, h: 0, dir: { x: facing.x, y: facing.y } });
+    // flip: 롤이 몸과 반대쪽을 보는 뼈(C_Buffbone_Glb_Layout_Loc 등) 에 붙이는 이펙트라 방향을 뒤집는다
+    const meNow = flip => ({ x: player.x, y: player.y, h: 0, dir: flip ? { x: -facing.x, y: -facing.y } : { x: facing.x, y: facing.y } });
     // 내 몸에 이펙트를 붙인다(dur 초 뒤에 끈다. 없으면 이펙트가 끝날 때까지)
-    function myPlay(names, dur) {
+    function myPlay(names, dur, flip) {
       if (!names || !names.length || !(fxgl && fxgl.gl)) return null;
-      const list = fxPlay(names, meNow(), dur || 6);
-      if (list) myFx.push({ list, until: dur ? t + dur : Infinity });
+      const list = fxPlay(names, meNow(flip), dur || 6);
+      if (list) myFx.push({ list, until: dur ? t + dur : Infinity, flip });
       return list;
     }
     // 스킬을 쓰는 순간: cast + 애니메이션 이펙트(제때) + 롤 소리
     function mySkillStart(sk) {
       myPlay(myPart(sk, "cast"));
       myAt(sk, "drop", player.x, player.y, 4);
-      for (const [name, at] of myPart(sk, "anim") || []) {
-        if (at > 0) myFx.push({ later: name, at: t + at, until: Infinity });
-        else myPlay([name]);
+      for (const [name, at, flip] of myPart(sk, "anim") || []) {
+        if (at > 0) myFx.push({ later: name, at: t + at, until: Infinity, flip: !!flip });
+        else myPlay([name], 0, !!flip);
       }
       mySound(sk);
     }
@@ -4464,12 +4472,12 @@
         for (let i = myFx.length - 1; i >= 0; i--) {
           const f = myFx[i];
           if (f.later) {
-            if (t >= f.at) { myFx.splice(i, 1); myPlay([f.later]); }
+            if (t >= f.at) { myFx.splice(i, 1); myPlay([f.later], 0, f.flip); }
             continue;
           }
           if (!player || t >= f.until || f.list.every(x => x.done)) { fxStop(f.list); myFx.splice(i, 1); continue; }
           if (f.fly) fxMove(f.list, { x: f.fly.x + f.fly.vx * (t - f.fly.t0), y: f.fly.y + f.fly.vy * (t - f.fly.t0), h: FX_H });
-          else fxMove(f.list, meNow());
+          else fxMove(f.list, meNow(f.flip));
         }
         DodgeVfx.update(dt);
       }
