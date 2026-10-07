@@ -42,7 +42,7 @@
 (function () {
   // 게임 버전 "앞.가운데.끝". 앞 = 새 챔피언 추가, 가운데 = 스킬 추가·버그 수정, 끝 = 아주 미묘한 변화.
   // 하나를 올리면 그 뒤 숫자는 0 으로. 서버는 앞 숫자가 같은 기록끼리만 순위를 매긴다(ranking.py 의 DODGE_VERSION 과 같게)
-  const VERSION = "21.7.0";
+  const VERSION = "21.8.0";
 
   const ARENA = { w: 1400, h: 900 };
   const CHAMP = { radius: 65, speed: 335 };
@@ -2448,9 +2448,12 @@
       if (sk.wall) {
         const { dx, dy } = aim(1);
         wall = { ...sk.wall, x: player.x, y: player.y, nx: dx, ny: dy, born: t, until: t + sk.wall.life };
-        // 롤 바람 장막(Yasuo_W_windwall) 을 장막 자리에 세우고 따라 움직인다
+        // 롤 바람 장막(Yasuo_W_windwall) 을 장막 자리에 세우고 따라 움직인다.
+        // 롤 장막은 앞으로 나아가는 투사체에 붙은 이펙트라 축이 투사체 것(X 옆 · Y 앞 · Z 위)이다.
+        // 보통 이펙트(Y 위) 로 읽으면 벽 메시가 앞으로 눕고 땅 밑까지 뻗어 화면에서 세로로 길게 보인다.
+        // 롤 높이(300~450) 그대로면 위에서 내려다보는 연습장에선 판정 폭보다 길어 보여 WALL_SQUASH 배로 낮춘다
         const wf = myPart(sk, "wall");
-        if (wf && fxgl && fxgl.gl) { const c = wallAt(wall); wall.fx = fxPlay(wf, { x: c.x, y: c.y, h: 0, dir: { x: dx, y: dy } }, sk.wall.life); }
+        if (wf && fxgl && fxgl.gl) { const c = wallAt(wall); wall.fx = fxPlay(wf, { x: c.x, y: c.y, h: 0, dir: { x: dx, y: dy }, missile: true, squash: WALL_SQUASH }, sk.wall.life); }
         mySfx("ghost");
       }
       if (sk.blades) { blades = { until: t + sk.blades.dur, radius: sk.blades.radius }; mySfx("ghost"); }
@@ -3223,6 +3226,7 @@
     }
     const fxMove = (list, o) => { if (list) list.forEach(i => DodgeVfx.move(i, o)); };
     const fxStop = list => { if (list) list.forEach(i => DodgeVfx.stop(i)); };
+    const WALL_SQUASH = 0.55;      // 야스오 장막 이펙트 높이(롤 = 1)
     const FX_H = 100;              // 롤 투사체가 나는 높이(mOffsetInitialTargetHeight)
     const TRAIL_STEP = 51;         // 자이라 E 의 luaOnMissileUpdateDistanceInterval
     // 롤 서버는 초당 30 번 돌아서 스크립트도 그때만 불린다. 51 을 넘긴 첫 틱에 덩굴을 뿌리므로

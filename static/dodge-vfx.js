@@ -177,7 +177,7 @@
     if (!FX || !FX.systems[name]) return null;
     const s = FX.systems[name];
     const inst = { s, name, age: 0, stopped: false, done: false, scale: o.scale || 1, ems: [], odom: 0, gain: o.gain || 0, mis: !!o.missile,
-                   hold: !!(o.hold || o.missile) };
+                   hold: !!(o.hold || o.missile), squash: o.squash || 0 };
     // 몸에 붙이는 이펙트(o.center = 몸 가운데 높이): 롤이 몸 가운데 뼈(Buffbone Center) 에 붙이게 만든 것은 그 높이로 올린다
     if (o.center) { const L = attachLift(s); inst.hOff = L > 0 ? L : L < 0 ? o.center : 0; }
     place(inst, o);
@@ -683,6 +683,11 @@
         const start = W.n;
         const n = build(inst, em, cam, W);
         if (!n) return;
+        // squash: 붙은 자리 높이를 기준으로 위아래를 줄인다(야스오 장막처럼 롤에선 높아도 연습장 화면에선 너무 길어 보이는 것)
+        if (inst.squash) {
+          const f = W.f, y0 = inst.pos[1], k = inst.squash;
+          for (let i = start * VF + 1, end = W.n * VF; i < end; i += VF) f[i] = y0 + (f[i] - y0) * k;
+        }
         const e = em.e;
         out.push({ e, start, n, ground: !!e.isGroundLayer, add: ADDITIVE.has(e.blendMode),
                    pass: e.pass || 0, k, mesh: !!(e.primitive && (e.primitive.T || "").includes("Mesh")) });
