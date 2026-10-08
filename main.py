@@ -43,8 +43,20 @@ async def _always_fresh(request, call_next):
     새로 배포해도 폰에서는 옛 화면이 나왔다. 바뀌지 않았으면 304 로 짧게 끝난다.
     """
     response = await call_next(request)
+    path = request.url.path
+    if path.startswith("/dodge/") and response.status_code in (200, 304):
+        if "v" in request.query_params:
+            # 연습장 모델(?v=파일 내용 해시): 내용이 바뀌면 주소가 바뀌니 다시 물어볼 필요가 없다
+            response.headers.setdefault("Cache-Control", "public, max-age=31536000, immutable")
+        elif path.startswith(_DODGE_KEEP) and not path.endswith(".json"):
+            # 이펙트 텍스처·뼈대 메시·효과음(목록 json 은 빼고): 한 번 만든 파일은 고치지 않고 새 번호·새 이름으로 더한다(tools/lol_vfx.py·lol_sfx.py).
+            # 연습장을 열 때마다 수백 개를 하나씩 다시 물어보느라 로딩이 몇 초 걸려서, 하루는 묻지 않고 그 뒤에는 쓰면서 뒤에서 확인한다
+            response.headers.setdefault("Cache-Control", "public, max-age=86400, stale-while-revalidate=2592000")
     response.headers.setdefault("Cache-Control", "no-cache")
     return response
+
+
+_DODGE_KEEP = ("/dodge/vfx/t/", "/dodge/vfx/skin/", "/dodge/sfx/")
 
 
 @app.exception_handler(opgg.NotFound)
