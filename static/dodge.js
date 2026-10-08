@@ -42,7 +42,7 @@
 (function () {
   // 게임 버전 "앞.가운데.끝". 앞 = 새 챔피언 추가, 가운데 = 스킬 추가·버그 수정, 끝 = 아주 미묘한 변화.
   // 하나를 올리면 그 뒤 숫자는 0 으로. 서버는 앞 숫자가 같은 기록끼리만 순위를 매긴다(ranking.py 의 DODGE_VERSION 과 같게)
-  const VERSION = "21.8.0";
+  const VERSION = "21.9.0";
 
   const ARENA = { w: 1400, h: 900 };
   const CHAMP = { radius: 65, speed: 335 };
@@ -1212,6 +1212,8 @@
                    "veigar_e", "veigar_e_form", "cho_q"];
   const buffers = {};
   let samplesAsked = false;
+  // 롤 효과음은 lolSfxAfter 가 풀린 뒤에(연습장 로딩 화면이 닫힌 뒤) 받는다. 순서는 loadLolSfx, 값은 mount 가 정한다
+  let lolSfxAfter = Promise.resolve(), lolSfxRest = Promise.resolve(), lolSfxFirst = [];
   // 롤 클라이언트 효과음(tools/lol_sfx.py 가 Wwise 뱅크에서 뽑은 것). events: 이벤트 이름 → 겹마다 후보 파일들
   // (겹은 함께 울리고 후보는 무작위로 하나), cast·launch·hit·boom: 스킬 이름 → 그때 롤이 내는 이벤트들
   let LOL_SFX = null;
@@ -1220,7 +1222,12 @@
       LOL_SFX = j;
       // 적 스킬 소리는 모두 받고, 내 챔피언 소리는 고른 챔피언 것만(loadMineSfx)
       const mineEv = new Set(Object.values(j.mine || {}).flatMap(sl => Object.values(sl).flat()));
-      for (const [ev, layers] of Object.entries(j.events)) if (!mineEv.has(ev)) layers.flat().forEach(loadLolFile);
+      // 로딩 화면이 기다린 스킬(lolSfxFirst) 소리를 먼저 받고, 나머지는 뒤에서 받는 스킬 모델·텍스처가 다 끝난 뒤에(lolSfxRest).
+      // 느린 회선에서 소리가 그림과 회선을 나눠 쓰면 뒤에 나오는 스킬이 늦게 열린다(소리는 못 받았으면 합성음으로 대신한다)
+      const first = new Set(lolSfxFirst.flatMap(n => [j.cast, j.launch, j.hit, j.boom].flatMap(tb => (tb && tb[n]) || [])));
+      const take = keep => { for (const [ev, layers] of Object.entries(j.events)) if (!mineEv.has(ev) && keep(ev)) layers.flat().forEach(loadLolFile); };
+      take(ev => first.has(ev));
+      lolSfxRest.then(() => take(() => true));
       if (mineSfxWant) loadMineSfx(mineSfxWant);
     }).catch(() => {});
   }
@@ -1249,7 +1256,7 @@
   function loadSamples() {
     if (samplesAsked || !ensureAudio()) return;
     samplesAsked = true;
-    loadLolSfx();
+    lolSfxAfter.then(loadLolSfx);
     for (const name of SAMPLES) {
       fetch(ART + "sfx/" + name + ".ogg")
         .then(r => { if (!r.ok) throw new Error(r.status); return r.arrayBuffer(); })
@@ -1440,7 +1447,7 @@
     loadArt();
     // 3D 모델을 판 시작 전에 미리 받아 둔다. 처음 나올 때 받기 시작하면 일찍 나오는 챔피언(모르가나·초가스 등) 은
     // 다 받기 전까지 초상화로 보인다
-    // 연습장을 열면 규칙 화면보다 먼저 롤 로딩 화면을 띄우고, 모델과 적 스킬 이펙트를 다 받을 때까지 시작을 막는다.
+    // 연습장을 열면 규칙 화면보다 먼저 롤 로딩 화면을 띄우고, 첫 판 처음에 나올 모델과 적 스킬 이펙트를 다 받을 때까지 시작을 막는다(나머지는 뒤에서. later).
     // 받은 모델·텍스처는 dodge-gl.js 가 페이지에 남겨 둬서 티어표·그룹방에 갔다 와도 다시 받지 않는다(그때는 곧바로 끝난다)
     let loading = true;
     const loadingEl = root.querySelector("[data-loading]"), loadingFill = root.querySelector("[data-loading-fill]");
@@ -1484,6 +1491,9 @@
       const skillsOf = c => SKILLS.filter(s => s.champ === c).map(s => s.name.slice(-1));
       const foes = [...new Set(SKILLS.map(s => s.champ))].filter(c => modelKey(c) !== modelKey(faceKey));
       for (let i = foes.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [foes[i], foes[j]] = [foes[j], foes[i]]; }
+      // 처음(0초) 부터 나오는 스킬의 챔피언이 지금 받는 챔피언이라 먼저 세운다(나머지는 로딩 화면이 닫힌 뒤 받는다)
+      const early = c => SKILLS.some(s => s.champ === c && !(s.from > 0));
+      foes.sort((a, b) => early(b) - early(a));
       loadingEl.querySelector('[data-loading-team="ally"]').innerHTML = loadCard(faceKey, spellsOf(controls), opts.name || "나");
       loadingEl.querySelector('[data-loading-team="enemy"]').innerHTML = foes.slice(0, 5)
         .map((c, i) => loadCard(c, [i % 2 ? "cleanse" : "ghost", "flash"], skillsOf(c).join(" · ") + " 스킬")).join("");
@@ -1533,20 +1543,18 @@
       all.then(() => { if (quietLoad === all) quietLoad = null; });
       return all;
     }
-    // 적 스킬 이펙트(fx.json) 와 그 텍스처를 다 받을 때까지 기다린다. 처음 날아온 스킬이 텍스처를 덜 받은 채
-    // 나오면 안 보이거나(dodge-gl.js 가 다 받을 때까지 안 그린다) 늦게 나타나니, 판을 시작하기 전에 다 받아 둔다
-    function ensureEnemyFx() {
+    // 적 스킬 이펙트(fx.json) 와 list 스킬들의 텍스처를 다 받을 때까지 기다린다. 처음 날아온 스킬이 텍스처를 덜 받은 채
+    // 나오면 안 보이거나(dodge-gl.js 가 다 받을 때까지 안 그린다) 늦게 나타나니, 판을 시작하기 전에 받아 둔다
+    function ensureEnemyFx(list) {
       if (!window.DodgeVfx || !fxgl || !fxgl.gl) return gate(Promise.resolve());
       want(1);
       return gate(DodgeVfx.load(ART + "vfx/").then(() => {
         one();
-        const ids = DodgeVfx.skillTextures();
+        const ids = DodgeVfx.skillTextures(list.map(s => s.name));
         want(ids.length + 1);
         return Promise.all([fxgl.preloadVfx(ids, one), DodgeVfx.loadSkins().then(one)]);     // 뼈대 메시(자이라 E 덩굴 등) 도
       }));
     }
-    // 연습장에 들어온 것 자체가 클릭이라 소리를 미리 받아 풀어 둔다(첫 판 "환영합니다" 부터 나오게)
-    if (soundOn()) loadSamples();
 
     let state = "ready";       // ready | play | over
     let t = 0, dodged = 0, acc = 0, last = 0, nextCast = 0, raf = 0;
@@ -1575,8 +1583,28 @@
     faceKey = champAlias(myChamp());
     // 내 챔피언과 적 챔피언의 모델을 처음 열 때 받는다(다음부터는 브라우저 저장소에서 읽는다).
     // 고를 수 있는 챔피언이 173명(약 82MB) 이라 나머지는 시작 창에서 고를 때 그 하나만 받는다(applyFace)
-    ensureModels([...withSummons([faceKey]), ...SKILLS.map(s => s.champ)]);
-    ensureEnemyFx();
+    // 로딩 화면에서는 처음(0초) 부터 나오는 스킬만 기다리고, 나머지 스킬의 모델·텍스처는 로딩 화면이 닫힌 뒤
+    // 처음 나오는 시각(from) 이 이른 것부터 뒤에서 받는다. 다 받기 전에는 그 스킬을 아직 안 열린 것으로 친다(pickSkill)
+    const later = new Set(SKILLS.filter(s => s.from > 0));
+    const firstLoad = Promise.all([
+      ensureModels([...withSummons([faceKey]), ...SKILLS.filter(s => !later.has(s)).map(s => s.champ)]),
+      ensureEnemyFx(SKILLS.filter(s => !later.has(s))),
+    ]);
+    const laterDone = firstLoad.then(function next() {
+      if (!later.size) return;
+      const from = Math.min(...[...later].map(s => s.from)), group = [...later].filter(s => s.from === from);
+      const done = () => group.forEach(s => later.delete(s));
+      if (!fxgl || !fxgl.gl) { done(); return next(); }      // WebGL 이 없으면(끊기면) 초상화·손으로 그린 효과라 받을 것이 없다
+      const keys = [...new Set(group.map(s => modelKey(s.champ)))].filter(k => modelIndex[k]);
+      return Promise.all([
+        ...keys.map(k => fxgl.loadModel(k, MODELS, modelIndex[k].v).catch(() => null)),
+        window.DodgeVfx ? fxgl.preloadVfx(DodgeVfx.skillTextures(group.map(s => s.name))) : null,
+      ]).then(done, done).then(next);
+    });
+    // 연습장에 들어온 것 자체가 클릭이라 소리를 미리 받아 풀어 둔다(첫 판 "환영합니다" 부터 나오게).
+    // 적 스킬 소리(롤 효과음 수백 개) 는 로딩 화면이 닫힌 뒤에 받는다(로딩 화면이 기다리는 것과 회선을 나눠 쓰지 않게)
+    lolSfxAfter = firstLoad; lolSfxRest = laterDone; lolSfxFirst = SKILLS.filter(s => !later.has(s)).map(s => s.name);
+    if (soundOn()) loadSamples();
     paintLoading();
     const keys = new Set();
     let holding = false;
@@ -1814,7 +1842,8 @@
 
     // ── 스킬 고르기 ──
     function pickSkill(ok = () => true) {
-      let open = SKILLS.filter(s => s.from <= t && ok(s));
+      // 모델·텍스처를 뒤에서 아직 받는 스킬(later) 은 다 받을 때까지 안 연다(덜 받은 채 나오면 안 보이니까)
+      let open = SKILLS.filter(s => s.from <= t && ok(s) && !(fxgl && later.has(s)));
       // 감옥은 한 번에 하나만
       if (zones.some(z => z.skill.kind === "cage") || casters.some(c => (c.wind > 0 && c.skill.kind === "cage") || (c.pend && c.pend.skill.kind === "cage"))) {
         open = open.filter(s => s.kind !== "cage");

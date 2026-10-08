@@ -554,17 +554,26 @@
       return r;
     }))).catch(() => fetch(url).then(r => { if (!r.ok) throw new Error(r.status); return r; }));
   }
+  // 받은 그림 파일(blob) 을 푼다. createImageBitmap 은 메인 스레드 밖에서 푼다(Image 는 texImage2D 에 넘길 때 메인 스레드에서
+  // 풀어서, 이펙트 텍스처 수백 장을 올리는 동안 로딩이 몇 초 길었다). ImageBitmap 은 WebGL 의 UNPACK_PREMULTIPLY 를 따르지 않으니
+  // 여기서 미리 알파를 곱해 둔다(Image 를 올릴 때와 같은 값). 못 쓰는 브라우저는 Image 로
+  function picture(b) {
+    const img = () => new Promise((ok, no) => {
+      const im = new Image(), src = URL.createObjectURL(b);
+      im.onload = () => { URL.revokeObjectURL(src); ok(im); };
+      im.onerror = () => { URL.revokeObjectURL(src); no(new Error("texture")); };
+      im.src = src;
+    });
+    if (!window.createImageBitmap) return img();
+    return createImageBitmap(b, { premultiplyAlpha: "premultiply" }).catch(img);
+  }
+  let probe = null;      // 이펙트 텍스처의 알파를 재 보는 16×16 캔버스(vfxTex)
   function rawModel(key, base, ver) {
     if (RAW.has(key)) return RAW.get(key);
     const q = ver ? "?v=" + ver : "";
     const p = Promise.all([
       stored(base + key + ".bin" + q).then(r => r.arrayBuffer()),
-      stored(base + key + ".webp" + q).then(r => r.blob()).then(b => new Promise((ok, no) => {
-        const img = new Image(), src = URL.createObjectURL(b);
-        img.onload = () => { URL.revokeObjectURL(src); ok(img); };
-        img.onerror = () => { URL.revokeObjectURL(src); no(new Error("texture")); };
-        img.src = src;
-      })),
+      stored(base + key + ".webp" + q).then(r => r.blob()).then(picture),
     ]);
     p.catch(() => RAW.delete(key));
     RAW.set(key, p);
@@ -920,18 +929,18 @@
       let settle;
       rec.p = new Promise(ok => { settle = ok; });
       vtex.set(i, rec);
-      const img = new Image();
-      img.onerror = () => { rec.failed = true; settle(); };
-      img.onload = () => {
+      const put = img => {
         // 못 올리면 실패로 둔다(drawVfx 가 이 텍스처를 기다리느라 묶음을 영영 안 그리지 않게)
         if (lost) { rec.failed = true; settle(); return; }
         const pot = v => (v & (v - 1)) === 0;
         rec.wrap = pot(img.width) && pot(img.height);
-        // 알파가 꽉 찬 텍스처인지(침식 지도는 그때 빨강 채널을 쓴다)
+        // 알파가 꽉 찬 텍스처인지(침식 지도는 그때 빨강 채널을 쓴다).
+        // 캔버스 하나를 CPU 에 두고(willReadFrequently) 돌려 쓴다. 장마다 새 캔버스에서 읽으면 GPU 에서 되읽느라 오래 걸렸다
         try {
-          const c = document.createElement("canvas"); c.width = 16; c.height = 16;
-          const g = c.getContext("2d"); g.drawImage(img, 0, 0, 16, 16);
-          const d = g.getImageData(0, 0, 16, 16).data;
+          if (!probe) { probe = document.createElement("canvas").getContext("2d", { willReadFrequently: true }); probe.canvas.width = probe.canvas.height = 16; }
+          probe.clearRect(0, 0, 16, 16);
+          probe.drawImage(img, 0, 0, 16, 16);
+          const d = probe.getImageData(0, 0, 16, 16).data;
           rec.opaque = true;
           for (let k = 3; k < d.length; k += 4) if (d[k] < 250) { rec.opaque = false; break; }
         } catch {}
@@ -943,9 +952,11 @@
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
           }
         } catch { rec.t = null; rec.failed = true; }
+        if (img.close) img.close();
         settle();
       };
-      img.src = DodgeVfx.base() + "t/" + i + ".webp";
+      fetch(DodgeVfx.base() + "t/" + i + ".webp").then(r => { if (!r.ok) throw new Error(r.status); return r.blob(); }).then(picture)
+        .then(put, () => { rec.failed = true; settle(); });
       return rec;
     }
     // list: DodgeVfx.batches() 의 묶음. ground 면 바닥층만, 아니면 나머지만

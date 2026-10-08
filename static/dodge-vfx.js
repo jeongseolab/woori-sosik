@@ -100,8 +100,8 @@
   }
   const skillFx = name => (FX && FX.skills[name]) || null;
   // 적 스킬(FX.skills) 이 쓰는 텍스처 번호 전부: 시전·투사체·적중 시스템과 그 자식 시스템까지 따라가며
-  // dodge-gl.js drawVfx 가 묶는 것(기본·색·곱하기·침식·팔레트) 을 모은다
-  function skillTextures() {
+  // dodge-gl.js drawVfx 가 묶는 것(기본·색·곱하기·침식·팔레트) 을 모은다. names 를 주면 그 스킬들 것만
+  function skillTextures(names) {
     if (!FX) return [];
     const seen = new Set(), tex = new Set();
     const walk = name => {
@@ -114,7 +114,8 @@
         if (e.childParticleSetDefinition) (e.childParticleSetDefinition.kids || []).forEach(walk);
       }
     };
-    for (const sk of Object.values(FX.skills)) for (const names of Object.values(sk)) [].concat(names).forEach(walk);
+    const sks = names ? names.map(n => FX.skills[n]).filter(Boolean) : Object.values(FX.skills);
+    for (const sk of sks) for (const parts of Object.values(sk)) [].concat(parts).forEach(walk);
     return [...tex];
   }
   // 뼈대 메시(자이라 E 덩굴, 초가스 Q 가시): tools/lol_vfx.py 가 애니메이션을 프레임마다 정점 위치로 구워 둔 것(skin/<이름>.bin).
