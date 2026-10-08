@@ -1402,7 +1402,15 @@
         <button type="button" class="dodge-full" data-full aria-pressed="false" title="롤 화면 크기 그대로 전체 화면으로">전체 화면</button>
         <div class="dodge-over" data-over></div>
         <div class="lol-loading" data-loading>
-          <div class="lol-loading-ring"><b>L</b><span>로딩 중</span><div class="lol-loading-bar"><i data-loading-fill></i></div></div>
+          <div class="lol-loading-in">
+            <div class="lol-loading-team" data-loading-team="ally"></div>
+            <div class="lol-loading-team" data-loading-team="enemy"></div>
+            <div class="lol-loading-foot">
+              <p data-loading-tip></p>
+              <div class="lol-loading-bar"><i data-loading-fill></i></div>
+            </div>
+          </div>
+          <i class="lol-loading-spin" aria-hidden="true"></i>
         </div>
       </div>`;
     const canvas = root.querySelector(".lol-view > canvas");
@@ -1439,11 +1447,61 @@
     root.classList.add("dodge-loading");
     // 받을 것(need) 과 받은 것(got) 을 함께 세어 막대를 채우고, 기다리는 일(waits) 이 다 끝나면 로딩 화면을 닫는다
     let waits = 0, need = 0, got = 0;
-    const tick = () => { loadingFill.style.width = (need ? got / need * 100 : 0) + "%"; };
+    // 카드마다 진행률: 그 챔피언 모델을 다 받았으면 100%, 아니면 전체 진행률
+    const tick = () => {
+      const pct = need ? got / need * 100 : 0;
+      loadingFill.style.width = pct + "%";
+      for (const c of loadingEl.querySelectorAll("[data-card]")) {
+        const done = !!(fxgl && fxgl.model(c.dataset.card));
+        c.classList.toggle("done", done);
+        // 받을 것이 늘면 전체 진행률이 줄 수 있어 카드 숫자는 줄지 않게 둔다
+        c.dataset.p = Math.max(+c.dataset.p || 0, Math.floor(done ? 100 : pct));
+        c.querySelector("em").textContent = c.dataset.p + "%";
+      }
+    };
+    // 롤 로딩 화면처럼 위 줄(아군) 에 내 챔피언, 아래 줄(적군) 에 이번에 받는 적 스킬 챔피언(많으면 아무나 다섯 명) 카드를 세운다.
+    // 카드 그림은 롤 로딩 일러스트(dodge/loading/<챔피언>.webp, tools/champ_loadscreens.py). 그림이 늦어도 로딩은 기다리지 않고,
+    // 못 받으면 초상화로 대신한다
+    const TIPS = [
+      "스킬은 날아오는 쪽과 직각으로 피해야 가장 짧게 움직입니다.",
+      "적이 멈춰 서서 손을 드는 순간이 시전입니다. 그때 미리 옆으로 비켜 두세요.",
+      "점멸은 마지막 수단입니다. 걸어서 피할 수 있으면 아껴 두세요.",
+      "장판 스킬은 바닥에 표시가 뜬 뒤 조금 있다 터집니다. 가장자리 쪽으로 빠지세요.",
+      "레이저는 가는 선이 먼저 보입니다. 선이 사라지기 전에 벗어나세요.",
+      "오래 버틸수록 적이 더 자주, 더 영리하게(내가 갈 곳을 노려) 쏩니다.",
+      "하드 모드에서는 기절·속박에 걸리면 정화로 풀 수 있습니다.",
+    ];
+    const spellImgs = ids => ids.map(id => spellById(id)).map(sp => `<img src="${sp.icon}" alt="${sp.name}">`).join("");
+    const loadCard = (key, spellIds, sub) => {
+      const k = modelKey(key);
+      return `<figure class="lol-loading-card" data-card="${k}">
+          <img class="art" src="${ART}loading/${k}.webp" alt="" decoding="async">
+          <figcaption><b>${esc(champName(k))}</b><small>${esc(sub)}</small><span>${spellImgs(spellIds)}</span></figcaption>
+          <em>0%</em>
+        </figure>`;
+    };
+    function paintLoading() {
+      const skillsOf = c => SKILLS.filter(s => s.champ === c).map(s => s.name.slice(-1));
+      const foes = [...new Set(SKILLS.map(s => s.champ))].filter(c => modelKey(c) !== modelKey(faceKey));
+      for (let i = foes.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [foes[i], foes[j]] = [foes[j], foes[i]]; }
+      loadingEl.querySelector('[data-loading-team="ally"]').innerHTML = loadCard(faceKey, spellsOf(controls), opts.name || "나");
+      loadingEl.querySelector('[data-loading-team="enemy"]').innerHTML = foes.slice(0, 5)
+        .map((c, i) => loadCard(c, [i % 2 ? "cleanse" : "ghost", "flash"], skillsOf(c).join(" · ") + " 스킬")).join("");
+      for (const img of loadingEl.querySelectorAll("img.art")) {
+        img.addEventListener("error", () => { img.src = hudFace(champAlias(img.parentNode.dataset.card)); img.classList.add("face"); }, { once: true });
+      }
+      loadingEl.querySelector("[data-loading-tip]").textContent = TIPS[Math.floor(Math.random() * TIPS.length)];
+      tick();
+    }
+    // 한국어 챔피언 이름이 늦게 오면 카드 이름만 바꾼다
+    loadChampIds().then(() => {
+      for (const c of loadingEl.querySelectorAll("[data-card]")) c.querySelector("b").textContent = champName(c.dataset.card);
+    });
     function want(n) {
       if (!n) return;
       need += n;
       loading = true;
+      if (loadingEl.hidden) paintLoading();      // 닫혀 있다가 다시 뜰 때(시작 창에서 챔피언을 바꾼 뒤) 카드를 새로 세운다
       loadingEl.hidden = false;
       root.classList.add("dodge-loading");
       tick();
@@ -1519,6 +1577,7 @@
     // 고를 수 있는 챔피언이 173명(약 82MB) 이라 나머지는 시작 창에서 고를 때 그 하나만 받는다(applyFace)
     ensureModels([...withSummons([faceKey]), ...SKILLS.map(s => s.champ)]);
     ensureEnemyFx();
+    paintLoading();
     const keys = new Set();
     let holding = false;
 
