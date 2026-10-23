@@ -90,7 +90,7 @@ MINE_SKIP = r"(red|green|_ally|_enemy|indicator|warning|avatar|_tar|_sfx|audio|_
 
 # 이름 규칙에 안 걸리는 것: (챔피언, 칸) → 부분별 키(규칙으로 찾은 것에 더한다)
 # 몸이 아닌 자리에 켜는 부분(dodge.js myAt)
-PLACE_PARTS = ("mis", "tar", "anchor", "zone", "drop", "blast", "mark")
+PLACE_PARTS = ("mis", "tar", "anchor", "zone", "drop", "blast", "mark", "strike", "strike2", "hit", "hit2", "blink", "slam")
 MINE_EXTRA = {
     ("ekko", 2): {"cast": ["Ekko_E_Vanish"], "dash": ["Ekko_E_Roll_Blur"], "land": ["Ekko_E_Appear"]},
     ("ekko", 3): {"cast": ["Ekko_R_Disappear"], "land": ["Ekko_R_Tar_Impact"]},
@@ -197,6 +197,17 @@ MINE_EXTRA = {
     ("orianna", 1): {"cast": ["Orianna_W_Dissonance_cas_green"], "buf": ["Orianna_W_Dissonance_ally_green"]},
     ("akali", 1): {"drop": ["Akali_W_Smoke"], "buf": ["Akali_W_InvisibilityEnter"]},
     ("khazix", 3): {"buf": ["Khazix_R_Invisible"]},
+    # 암베사(22.1.0): 손으로 그린 휘두르기(ambArc) 대신 롤 이펙트. strike = 스킬이 나가는 순간 내 자리에서 휘두른 쪽으로,
+    # strike2 = 파열의 강타(Q 두 번째), ready = 파열의 강타를 쓸 수 있는 동안, hit·hit2 = 맞은 적, step = 용견의 걸음 돌진,
+    # land2 = 거부를 버티는 동안 막았을 때(더 센 내리치기), blink·slam = 공개 처형 순간이동·내려찍기
+    ("ambessa", 0): {"strike": ["Ambessa_Q_Broad_Swipe"], "strike2": ["Ambessa_Q_Precise_Swipe", "Ambessa_Q_Precise_WhipSmash"],
+                     "ready": ["Ambessa_Q_Precise_Ready"], "hit": ["Ambessa_Q_Broad_Tar"], "hit2": ["Ambessa_Q_Precise_Tar"],
+                     "step": ["Ambessa_P_Dash"]},
+    ("ambessa", 1): {"cast": ["Ambessa_W_Parry_Windup"], "land": ["Ambessa_W_Release"], "land2": ["Ambessa_W_Release_Greater"],
+                     "step": ["Ambessa_P_Dash"]},
+    ("ambessa", 2): {"strike": ["Ambessa_E_SwipeRing"], "hit": ["Ambessa_E_SwipeRing_Tar"], "step": ["Ambessa_P_Dash"]},
+    ("ambessa", 3): {"cast": ["Ambessa_R_Energy_Windup"], "blink": ["Ambessa_R_Cas_BlinkDir", "Ambessa_R_Cas_Dust"],
+                     "land": ["Ambessa_R_Uppercut_Swipe"], "slam": ["Ambessa_R_Hurl_Swipe", "Ambessa_R_Cas_Residual"]},
 }
 
 

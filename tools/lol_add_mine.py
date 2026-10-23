@@ -6,7 +6,7 @@ lol_vfx.py·lol_sfx.py 를 다시 돌리면 모든 것을 새로 만들지만, �
   python lol_add_mine.py --vgmstream <vgmstream-cli.exe> --global           (공용 이펙트·소리: 기절·둔화, 소환사 주문·레벨 업·사망 …)
 
 - 이펙트: static/dodge/vfx/mine/<챔피언>.json. 텍스처는 lol_vfx.Pack 이 t/index.json 의 원본 경로로 같은 번호를 쓰고,
-  새 텍스처만 다음 번호부터 받아 fx.json 의 textures 목록·t/index.json 을 늘린다(번호는 빈틈없이 이어진다)
+  새 텍스처만 다음 번호부터 받아 fx.json 의 textures 목록·t/index.json 을 늘린다(화면은 t/<번호>.webp 만 쓴다)
 - 소리: static/dodge/sfx/lol/sfx.json 의 mine·events 에 더한다(기존 이벤트는 다시 풀지 않는다)
 """
 import argparse, json, os, subprocess, sys
@@ -19,10 +19,8 @@ def add_vfx(champs):
     fxp, ixp = os.path.join(lv.OUT, "fx.json"), os.path.join(lv.OUT, "t", "index.json")
     fx = json.load(open(fxp, encoding="utf-8"))
     ix = json.load(open(ixp, encoding="utf-8"))
-    n0 = len(fx["textures"])
-    assert n0 == len(ix) and all(str(i) in ix for i in range(n0)), "텍스처 번호가 이어져 있지 않다"
     pack = lv.Pack()
-    assert pack.next == n0, (pack.next, n0)
+    n0 = pack.next          # 새 텍스처는 이 번호부터(다시 굽기로 지운 옛 그림 자리는 비어 있을 수 있다)
     mine = lv.mine_skills()
     for champ in champs:
         slots = mine.get(champ) or []
