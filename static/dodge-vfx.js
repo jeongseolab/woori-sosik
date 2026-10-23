@@ -64,7 +64,8 @@
   // 그래서 투사체 이펙트는 Y 와 Z 를 바꿔 읽는다. 장판·시전·맞음 이펙트는 Y 가 위 그대로
   const misAxes = p => [p[0], p[2], p[1]];
   // 이 시스템의 로컬 벡터 → 롤 세상 방향(붙은 것의 방향으로 돌린다)
-  const toWorld = (inst, p) => yaw(inst.mis ? misAxes(p) : p, inst.sin, inst.cos);
+  // 파티클에 붙은 자식 시스템(pm: 부모 파티클의 회전) 은 그 회전을 먼저 거친다
+  const toWorld = (inst, p) => { if (inst.pm) p = mv(inst.pm, p); return yaw(inst.mis ? misAxes(p) : p, inst.sin, inst.cos); };
   // 오일러 각(도) → 3×3 행렬(열: X, Y, Z 축). 롤 스타일 Y·X·Z 순
   function euler(r) {
     const x = r[0] * D2R, y = r[1] * D2R, z = r[2] * D2R;
@@ -99,6 +100,7 @@
     });
   }
   const skillFx = name => (FX && FX.skills[name]) || null;
+  const globalFx = kind => (FX && FX.global && FX.global[kind]) || null;
   // 적 스킬(FX.skills) 이 쓰는 텍스처 번호 전부: 시전·투사체·적중 시스템과 그 자식 시스템까지 따라가며
   // dodge-gl.js drawVfx 가 묶는 것(기본·색·곱하기·침식·팔레트) 을 모은다. names 를 주면 그 스킬들 것만
   function skillTextures(names) {
@@ -116,6 +118,8 @@
     };
     const sks = names ? names.map(n => FX.skills[n]).filter(Boolean) : Object.values(FX.skills);
     for (const sk of sks) for (const parts of Object.values(sk)) [].concat(parts).forEach(walk);
+    // 공용 이펙트(기절 별·둔화 물결) 는 늘 같이 받는다
+    for (const parts of Object.values(FX.global || {})) parts.forEach(walk);
     return [...tex];
   }
   // 뼈대 메시(자이라 E 덩굴, 초가스 Q 가시): tools/lol_vfx.py 가 애니메이션을 프레임마다 정점 위치로 구워 둔 것(skin/<이름>.bin).
@@ -238,10 +242,18 @@
     for (let i = live.length - 1; i >= 0; i--) {
       const inst = live[i];
       step(inst, dt);
-      if (inst.done) live.splice(i, 1);
+      if (inst.done) {
+        live.splice(i, 1);
+        for (const em of inst.ems) for (const p of em.ps) p.gone = true;     // 이 파티클에 붙은 자식 시스템도 멈춘다
+      }
     }
   }
   function step(inst, dt) {
+    // 파티클에 붙은 자식 시스템(파티클이 태어날 때 켜진 것) 은 그 파티클을 따라가고, 파티클이 죽으면 그만 뿜는다
+    if (inst.host) {
+      if (inst.host.gone) { stop(inst); inst.host = null; }
+      else { inst.pos = inst.host.pos.slice(); if (inst.hostTurn) inst.pm = hostFrame(inst.hostTurn, inst.host); }
+    }
     inst.age += dt;
     if (inst.ttl && inst.age > inst.ttl) stop(inst);        // 주인이 잊은 이펙트는 저절로 끈다
     if (inst.until != null && inst.age > inst.until) { kill(inst); return; }   // 남은 파티클까지 이 나이에 지운다(CC 가 풀린 적중 이펙트)
@@ -286,6 +298,7 @@
         p.age += dt;
         if (p.age >= p.die) {
           if (e.childParticleSetDefinition && e.childParticleSetDefinition.onDeath) child(inst, e, p);
+          p.gone = true;
           em.ps.splice(j, 1);
           continue;
         }
@@ -408,15 +421,33 @@
     }
     em.ps.push(p);
     em.emitted++;
+    // 자식 시스템: 롤은 childEmitOnDeath 가 아니면 파티클이 태어날 때 켜서 그 파티클에 붙인다
+    // (요네 Q3 회오리처럼 그림 없는 운반 파티클이 자식 시스템을 데리고 다니는 것)
+    if (e.childParticleSetDefinition && !e.childParticleSetDefinition.onDeath) child(inst, e, p, true);
   }
 
   // 파티클이 죽을 때 자식 시스템(childEmitOnDeath)
-  function child(inst, e, p) {
+  // 부모 시스템(inst) 안 파티클 p 의 회전 → 자식 시스템의 로컬 축(열 3개, 부모 시스템 로컬 좌표)
+  function hostFrame(inst, p) {
+    const m = euler(p.rot);
+    return inst.pm ? [mv(inst.pm, m[0]), mv(inst.pm, m[1]), mv(inst.pm, m[2])] : m;
+  }
+  // 자식 시스템을 켠다. attach: 그 파티클에 붙여 따라가게(태어날 때 켠 것). 너무 많이 쌓이면(MAX_LIVE) 더 켜지 않는다
+  const MAX_LIVE = 800;
+  function child(inst, e, p, attach = false) {
     const c = e.childParticleSetDefinition;
-    if (ev(c.chance, 0, 1) < Math.random()) return;
+    if (live.length >= MAX_LIVE || ev(c.chance, 0, 1) < Math.random()) return;
     for (const k of c.kids) {
       const ci = play(k, { scale: inst.scale });
-      if (ci) { ci.pos = p.pos.slice(); ci.prev = ci.pos.slice(); ci.sin = inst.sin; ci.cos = inst.cos; ci.target = inst.target; ci.gain = inst.gain; ci.mis = inst.mis; ci.hold = inst.hold; }
+      if (ci) {
+        ci.pos = p.pos.slice(); ci.prev = ci.pos.slice(); ci.sin = inst.sin; ci.cos = inst.cos; ci.target = inst.target; ci.gain = inst.gain; ci.mis = inst.mis; ci.hold = inst.hold;
+        if (attach) {
+          ci.host = p; ci.ttl = inst.ttl;
+          // 부모 파티클이 제 방향(particleIsLocalOrientation) 을 가지면 자식 시스템의 축도 그 회전을 따른다
+          // (요네 Q3: 운반 파티클을 X 축으로 90° 눕혀 회오리 메시가 바닥을 따라 눕는다)
+          if (e.particleIsLocalOrientation) { ci.hostTurn = inst; ci.pm = hostFrame(inst, p); }
+        }
+      }
     }
   }
 
@@ -680,7 +711,7 @@
     W.n = 0;
     for (const inst of live) {
       inst.ems.forEach((em, k) => {
-        if (!em.ps.length) return;
+        if (!em.ps.length || (em.e.texture == null && !em.e.primitive)) return;     // 그림 없는 운반 발생기(자식 시스템만 데리고 다닌다)
         const start = W.n;
         const n = build(inst, em, cam, W);
         if (!n) return;
@@ -700,6 +731,6 @@
     return out;
   }
 
-  window.DodgeVfx = { load, loadMine, play, move, stop, kill, update, batches, skillFx, skillTextures, loadSkins, VF, onReady: f => (FX ? f() : ready.push(f)),
+  window.DodgeVfx = { load, loadMine, play, move, stop, kill, update, batches, skillFx, globalFx, skillTextures, loadSkins, VF, onReady: f => (FX ? f() : ready.push(f)),
                       clear() { live.length = 0; }, density(k) { density = k; }, count: () => live.length, data: () => FX, base: () => BASE };
 })();

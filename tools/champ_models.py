@@ -54,7 +54,7 @@ OUT = os.path.join(HERE, "..", "static", "dodge", "models")
 CASTERS = {"morgana": [1], "lux": [1, 4], "zyra": [3], "nidalee": [1], "brand": [1, 2], "ahri": [3],
            "velkoz": [1, 3], "xerath": [2, 3], "ezreal": [1], "leona": [3, 4], "veigar": [1, 2, 3],
            "blitzcrank": [1], "thresh": [1], "jinx": [2], "ashe": [4], "karthus": [1], "chogath": [1],
-           "syndra": [1], "jhin": [2]}
+           "syndra": [1], "jhin": [2], "yone": [1]}
 # 나중에 내 챔피언으로 고르면 쓸 이동기(바로 쓰는 돌진·순간이동, 대상 지정·차징·패시브 제외) 와 그 스킬(Q=1 … R=4)
 MOBILITY = {"ezreal": 3, "lucian": 3, "graves": 3, "vayne": 1, "corki": 2, "tristana": 2, "gragas": 3, "gnar": 3,
             "kindred": 1, "caitlyn": 3, "ahri": 4, "fizz": 3, "riven": 3, "sejuani": 1, "malphite": 4, "sylas": 3,
@@ -89,6 +89,9 @@ SPELL_CLIPS = {("corki", 2): ["Spell3"], ("gragas", 3): ["Spell1"], ("gnar", 3):
                ("thresh", 1): ["Spell1_In"], ("kindred", 1): ["Spell1Back"], ("sylas", 3): ["Spell3_Dash"], ("tristana", 2): ["Spell2_LNG"],
                ("riven", 1): ["Spell1A"], ("rakan", 4): ["Spell4_Into"], ("naafiri", 2): ["Spell4_Idle"],
                ("yone", 3): ["Spell3_Spirit"],
+               # 요네 Q3(적 스킬): 롤 Spell1C = Spell1C_In(시전) → Spell1C_Dash(돌진) → Spell1C_Out(0.07초) → 서 있으면 Spell1C_ToIdle.
+               # 시전은 spell1, 돌진은 q3dash, 마무리는 q3out(ToIdle. Out 은 두 프레임이라 Out 의 이펙트만 켠다)
+               ("yone", 1): ["Spell1C_In"],
                # 아지르 E: Spell3_Dash 는 돌진 동작(해시로만 적힌 클립, azir_spell3_dash.anm 2초) → 한 프레임짜리 LOOP 순서.
                # 이어 붙이기는 마지막(반복) 부분을 고르는 규칙이라 한 프레임에 굳어 있었다
                ("azir", 3): ["{8f2d4d45}"]}
@@ -114,7 +117,7 @@ EXTRA_CLIPS = {"kalista": {"dash": ["Spell1_Dash_0", "Attack1_Dash_0"], "dash90"
                "poppy": {"skrun": ["Spell2_Run"]},
                # 요네 E: 영혼 상태 달리기, 남은 몸(밀려나며 서기·서 있기), 몸으로 돌아가는 돌진과 도착
                "yone": {"skrun": ["Spell3_Run01"], "bodyin": ["Spell3_BodyIn"], "body": ["Spell3_BodyLoop"],
-                        "back": ["Spell3_Dash"], "out": ["Spell3_Out"]}, "naafiri": {"skrun": ["Spell4_Run"]}, "garen": {"skrun": ["Run_Spell1"]}, "khazix": {"skrun": ["Run_Haste"]},
+                        "back": ["Spell3_Dash"], "out": ["Spell3_Out"], "q3dash": ["Spell1C_Dash"], "q3out": ["Spell1C_ToIdle"]}, "naafiri": {"skrun": ["Spell4_Run"]}, "garen": {"skrun": ["Run_Spell1"]}, "khazix": {"skrun": ["Run_Haste"]},
                "ambessa": {"spell1b": ["Spell1B"], "dash1": ["{99834a45}"], "dash1b": ["{6e4a0e24}"], "dash2": ["{5ed08d9d}"],
                            "dash3": ["{ed14ca10}"], "miss4": ["{0e9701b2}"], "hit4": ["Spell4_Hit_ToIdle"]}}
 # 21.0.0 에 더한 챔피언(연습장 내 챔피언으로 고를 수 있게) 과 그 스킬(Q=1 … R=4). 스킬이 없는 챔피언은 [] (서 있기·달리기만)

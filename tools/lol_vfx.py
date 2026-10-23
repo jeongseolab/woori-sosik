@@ -13,6 +13,7 @@
 
   python tools/lol_vfx.py
 """
+import gc
 import io
 import json
 import numpy as np
@@ -39,6 +40,8 @@ TEX_MAX = 512
 #   warn: 시전하는 동안(투사체·레이저는 시전자에서 앞으로, 장판은 그 자리) 이나 장판이 터지기 전 경고,
 #   land: 장판 자리에 시전이 끝날 때(초가스 Q 가시처럼 스스로 때를 맞추는 것), boom: 장판이 터질 때,
 #   beam: 시전자 → 끝점 빔, split: 갈라진 투사체. 투사체 이펙트(mis) 의 빔 끝은 시전자다(쓰레쉬 Q 사슬)
+#   ready: 쏠 차례가 와서 걸어오는 동안 시전자 몸에(요네 Q3 준비), tell: 시전하는 동안 시전자 발밑에(시전 동작 이벤트),
+#   out: 시전자의 돌진이 끝날 때 그 자리에(마무리 동작 이벤트). tell·out 은 롤이 Layout_Loc 뼈(몸 뒤를 본다) 에 붙여 방향을 뒤집어 켠다
 # 적 쪽 색(빨강) 이 따로 있으면 그것을 쓴다(연습장의 스킬은 모두 적 스킬)
 SKILLS = {
     "모르가나 Q": ("morgana", {"cast": ["Morgana_Q_Cas"], "mis": ["Morgana_Q_Mis"], "hit": ["Morgana_Q_Tar"]}),
@@ -71,6 +74,10 @@ SKILLS = {
     "진 W": ("jhin", {"cast": ["Jhin_W_cas"], "warn": ["Jhin_W_charging"], "beam": ["Jhin_W_beam"], "hit": ["Jhin_W_hit_tar"]}),
     "럭스 R": ("lux", {"cast": ["Lux_R_cas"], "beam": ["Lux_R_mis_beam", "Lux_R_mis_beam_middle"], "hit": ["Lux_R_tar"]}),
     "베이가 E": ("veigar", {"cast": ["Veigar_E_cas"], "warn": ["Veigar_E_Warning_Red"], "cage": ["Veigar_E_cage_Red"]}),
+    # 요네 Q3: 준비 버프(Q3_Ready_Buf) → 시전 동작 Spell1C_In 의 Q3_Dash_Tell → 돌진하며 회오리(YoneQ3Missile 의 mMissileEffectKey)
+    # → 돌진 끝 동작 Spell1C_Out 의 Q3_Slash. 맞으면 Q3_Tar(소리 YoneQ3_hit) 와 띄우기(Q3_Knockup)
+    "요네 Q3": ("yone", {"ready": ["Yone_Q3_Ready_Buf"], "tell": ["Yone_Q3_Dash_Tell"], "mis": ["Yone_Q3_Dash_Mis_Secondary"],
+                       "out": ["Yone_Q3_Slash"], "hit": ["Yone_Q3_Tar", "Yone_Q3_Knockup"]}),
 }
 
 # 내 챔피언 스킬(static/dodge.js 의 MOBILITY 칸) 의 이펙트. 롤은 스킬 스크립트가 이펙트를 켜는데 스크립트는 클라이언트에 없어서,
@@ -111,7 +118,7 @@ MINE_EXTRA = {
     ("nocturne", 1): {"pop": ["Nocturne_W_spellblock_01"]},
     ("yuumi", 2): {"buf": ["Yuumi_P_Shield"]},
     ("skarner", 1): {"buf": ["Skarner_W_Shield_Bubble_Child"], "pop": ["Skarner_W_Shield_Dissipate"]},
-    ("twitch", 0): {"cast": ["Twitch_Q_Bamf"], "buf": ["Twitch_Q_Haste"]},
+    ("twitch", 0): {"cast": ["Twitch_Q_Bamf"], "buf": ["Twitch_Q_Haste", "Twitch_Q_Invisible"]},
     ("udyr", 2): {"buf": ["Udyr_PhoenixStance"]},
     # 나피리 W 는 롤 스킬 이름이 NaafiriR(무리의 부름) 이라 이펙트도 Naafiri_R_* (Naafiri_W_* 는 옛 W, 챔피언에게 돌진)
     ("naafiri", 1): {"cast": ["Naafiri_R_Transform"], "buf": ["Naafiri_R_Buff", "Naafiri_R_Movespeed"]},
@@ -175,6 +182,21 @@ MINE_EXTRA = {
     ("zed", 1): {"mis": ["Zed_W_Mis"], "anchor": ["Zed_Clone_Idle"], "land": ["Zed_W_cloneswap_buf"]},
     ("zed", 3): {"dash": ["Zed_R_Dash"], "tar": ["Zed_R_tar_TargetMarker"]},
     ("ziggs", 1): {"mis": ["Ziggs_W_mis"], "anchor": ["Ziggs_W_Countdown"], "blast": ["Ziggs_W_hit"]},
+    # 이름 규칙에 안 걸려 빠져 있던 것(22.0.0): 도착·나타남(Ezreal_E_Flash = E_end, Kassadin_R_appear, 로크 E 순간이동 끝),
+    # 돌진(케인 Q1 → 착지 Q2), 킨드레드 Q 공격 속도, 르블랑 W·R(RW) 착지 폭발, 오리아나 W 자기 편(green) 이펙트,
+    # 아칼리 W 연막, 카직스 R 투명 상태(트위치 Q 투명은 위).
+    # 킨드레드 R(Kindred_R_AOE) 은 넣지 않는다: 바닥 문양(ArbitraryQuad) 이 안 그려지고 섬광·NoDeath_Buff 가 화면을 하얗게 덮는다
+    ("ezreal", 2): {"land": ["Ezreal_E_Flash"]},
+    ("kassadin", 3): {"land": ["Kassadin_R_appear"]},
+    ("locke", 2): {"cast": ["Locke_E_Blink_Start"], "dash": ["Locke_E_Dash_Trail"], "land": ["Locke_E_Blink_End"]},
+    ("kayn", 0): {"dash": ["Kayn_Primary_Q1"], "land": ["Kayn_Primary_Q2"]},
+    ("kindred", 0): {"buf": ["Kindred_Q_AS_Buf"]},
+    # mark: 돌아갈 자리 표식(dodge.js recall)
+    ("leblanc", 1): {"land": ["LeBlanc_W_aoe_impact"], "mark": ["LeBlanc_W_return_indicator"], "back": ["LeBlanc_W_return_activation"]},
+    ("leblanc", 3): {"cast": ["Leblanc_RW_cas"], "land": ["LeBlanc_RW_aoe_impact_02"], "mark": ["LeBlanc_RW_return_indicator"], "back": ["LeBlanc_W_return_activation"]},
+    ("orianna", 1): {"cast": ["Orianna_W_Dissonance_cas_green"], "buf": ["Orianna_W_Dissonance_ally_green"]},
+    ("akali", 1): {"drop": ["Akali_W_Smoke"], "buf": ["Akali_W_InvisibilityEnter"]},
+    ("khazix", 3): {"buf": ["Khazix_R_Invisible"]},
 }
 
 
@@ -450,7 +472,9 @@ class Pack:
                 continue
             o = {k: simplify(e[k]) for k in KEEP if k in e}
             o["texture"] = self.tex(e.get("texture"))
-            if o["texture"] is None and not e.get("primitive"):
+            # 그림이 없어도 자식 시스템을 데리고 다니는 운반 발생기는 둔다(요네 Q3 회오리: 투사체의 그림은 모두 자식 시스템에 있다)
+            carrier = bool(((e.get("childParticleSetDefinition") or {}).get("childrenIdentifiers")))
+            if o["texture"] is None and not e.get("primitive") and not carrier:
                 continue
             if "particleColorTexture" in o:
                 o["particleColorTexture"] = self.tex(e["particleColorTexture"])
@@ -570,46 +594,46 @@ def collect(o, out):
 
 
 def main():
-    # 먼저 쓰일 시스템들의 텍스처를 한꺼번에 받아 둔다
-    paths, cache = set(), {}
-    for skill, (champ, parts) in SKILLS.items():
-        if champ not in cache:
-            cache[champ] = load(champ)
-        d, _ = cache[champ]
-        rmap = resource_map(d)
-        for keys in parts.values():
-            for k in keys:
-                if rmap.get(k) in d:
-                    collect(d[rmap[k]], paths)
-                    # 자식 시스템까지(한 단계 더)
-                    for e in d[rmap[k]].get("complexEmitterDefinitionData") or []:
-                        for c in ((e.get("childParticleSetDefinition") or {}).get("childrenIdentifiers") or []):
-                            kk = c.get("effectKey") or c.get("effectName")
-                            if rmap.get(kk, kk) in d:
-                                collect(d[rmap.get(kk, kk)], paths)
-    print("텍스처", len(paths), "장 받는 중", flush=True)
-    prefetch(paths)
+    # 적 스킬: 챔피언 하나씩 읽고 바로 버린다(bin 을 모두 들고 있으면 메모리가 모자라 꺼진다)
     pack = Pack()
     skills = {}
-    for skill, (champ, parts) in SKILLS.items():
-        if champ not in cache:
-            print(champ, flush=True)
-            cache[champ] = load(champ)
-        d, w = cache[champ]
+    for champ in dict.fromkeys(champ for champ, _ in SKILLS.values()):
+        print(champ, flush=True)
+        d, w = load(champ)
         rmap = resource_map(d)
-        out = {}
-        for part, keys in parts.items():
-            names = []
-            for k in keys:
-                path = rmap.get(k)
-                if not path:
-                    print("  키 없음:", skill, k, file=sys.stderr)
-                    continue
-                got = pack.add_system(d, w, path)
-                if got:
-                    names.append(got)
-            out[part] = names
-        skills[skill] = out
+        mine = [(skill, parts) for skill, (c, parts) in SKILLS.items() if c == champ]
+        # 먼저 쓰일 시스템들의 텍스처를 한꺼번에 받아 둔다
+        paths = set()
+        for _, parts in mine:
+            for keys in parts.values():
+                for k in keys:
+                    if rmap.get(k) in d:
+                        collect(d[rmap[k]], paths)
+                        # 자식 시스템까지(한 단계 더)
+                        for e in d[rmap[k]].get("complexEmitterDefinitionData") or []:
+                            for c in ((e.get("childParticleSetDefinition") or {}).get("childrenIdentifiers") or []):
+                                kk = c.get("effectKey") or c.get("effectName")
+                                if rmap.get(kk, kk) in d:
+                                    collect(d[rmap.get(kk, kk)], paths)
+        prefetch(paths)
+        for skill, parts in mine:
+            out = {}
+            for part, keys in parts.items():
+                names = []
+                for k in keys:
+                    path = rmap.get(k)
+                    if not path:
+                        print("  키 없음:", skill, k, file=sys.stderr)
+                        continue
+                    got = pack.add_system(d, w, path)
+                    if got:
+                        names.append(got)
+                out[part] = names
+            skills[skill] = out
+        del d, w, rmap
+        _FLIPS.clear()
+        gc.collect()
+    skills = {k: skills[k] for k in SKILLS}
     systems = {k: v for k, v in pack.systems.items() if v}
     textures = sorted((t for t in pack.textures.values() if t["i"] is not None), key=lambda t: t["i"])
     meshes = sorted((m for m in pack.meshes.values() if m["i"] is not None), key=lambda m: m["i"])
@@ -655,6 +679,9 @@ def main():
             json.dump({"slots": parts, "systems": subsys, "meshes": [{k: v for k, v in m.items() if k != "i"} for m in subm]},
                       f, ensure_ascii=False, separators=(",", ":"))
         print("내 챔피언", champ, {k: list(v) for k, v in parts.items()}, flush=True)
+        del d, w, rmap, sub
+        _FLIPS.clear()
+        gc.collect()
     textures = sorted((t for t in pack.textures.values() if t["i"] is not None), key=lambda t: t["i"])
     fx = {"skills": skills, "systems": systems,
           "textures": [[t["w"], t["h"]] for t in textures],

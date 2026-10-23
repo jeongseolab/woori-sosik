@@ -15,6 +15,7 @@ wem(Wwise Vorbis) 은 vgmstream-cli 로 풀고 ogg(Vorbis) 로 다시 줄인다(
 import argparse
 import json
 import os
+import re
 import struct
 import subprocess
 import sys
@@ -59,6 +60,7 @@ CAST = {
     "진 W": ["Play_sfx_Jhin_JhinW_OnCast"],
     "럭스 R": ["Play_sfx_Lux_LuxR_OnCast"],
     "베이가 E": ["Play_sfx_Veigar_VeigarEventHorizon_OnCast"],
+    "요네 Q3": ["Play_sfx_Yone_YoneQ3_OnCast"],
 }
 
 
@@ -89,6 +91,24 @@ HIT = {
 }
 BOOM = {
     "카서스 Q": ["Play_sfx_Karthus_KarthusLayWasteSoundDummy_buffactivate"],
+}
+# 쏠 차례가 와서 걸어오는 동안(준비 버프). 쏘면 끊는다(롤은 Stop_ 이벤트로 끊는다)
+READY = {
+    "요네 Q3": ["Play_sfx_Yone_YoneQ3Ready_OnBuffActivate"],
+}
+
+
+# 챔피언 스킬이 아닌 소리(Maps/Shipping/Common.wad 의 공용 뱅크): 연습장의 소리 이름 → (뱅크, 롤 이벤트들)
+# 소환사 주문(점멸·유체화·정화 = SummonerBoost), 레벨 업, 내가 죽을 때, 보호막이 깨질 때, 쿨타임 중에 눌렀을 때
+COMMON_WAD = r"C:\Riot Games\League of Legends\Game\DATA\FINAL\Maps\Shipping\Common.wad.client"
+GLOBAL = {
+    "flash": ("misc_gameplay_sfx", ["Play_sfx_SummonerFlash_OnCast"]),
+    "ghost": ("misc_gameplay_sfx", ["Play_sfx_SummonerHaste_OnCast"]),
+    "cleanse": ("misc_gameplay_sfx", ["Play_sfx_SummonerBoost_OnCast"]),
+    "level": ("misc_gameplay_sfx", ["Play_sfx_levelup_levelup"]),
+    "death": ("misc_gameplay_sfx", ["Play_sfx_Death_Self"]),
+    "shieldBreak": ("misc_gameplay_sfx", ["Play_sfx_Misc_Gameplay_Shield_Break"]),
+    "deny": ("hud_global", ["Play_sfx_hud_base_SpellFail_Cooldown"]),
 }
 
 
@@ -232,8 +252,39 @@ def save(path, data, sr):
             f.write(data[i:i + 4096])
 
 
+# 이벤트 이름이 스킬 스크립트 이름과 달라 이름으로 못 찾는 것(옛 이름 등): (챔피언, 칸) → 쓸 때 롤이 내는 이벤트
+MINE_SOUND = {
+    ("fizz", 2): ["Play_sfx_Fizz_FizzJump_OnCast"],
+    ("corki", 1): ["Play_sfx_Corki_ValkyrieSound_OnBuffActivate"],
+    ("leblanc", 1): ["Play_sfx_Leblanc_LeblancW_missilelaunch"],
+    ("leblanc", 3): ["Play_sfx_Leblanc_LeblancRW_missilelaunch"],
+    ("lulu", 2): ["Play_sfx_Lulu_LuluFaerieShield_OnBuffActivate"],
+    ("monkeyking", 1): ["Play_sfx_MonkeyKing_MonkeyKingW_cast"],
+    ("olaf", 3): ["Play_sfx_Olaf_OlafR_OnCast", "Play_sfx_Olaf_OlafR_OnBuffActivate"],
+    ("rumble", 1): ["Play_sfx_Rumble_RumbleW_OnCast", "Play_sfx_Rumble_RumbleW_OnBuffActivate"],
+    ("xinzhao", 2): ["Play_sfx_XinZhao_XinZhaoEDash_cast"],
+    ("yasuo", 1): ["Play_sfx_Yasuo_YasuoWMovingWall_OnCast"],
+    ("azir", 1): ["Play_sfx_Azir_AzirWSpawnSound_OnBuffCast"],
+    ("akali", 1): ["Play_sfx_Akali_AkaliW_OnCastSelf"],
+    ("renekton", 2): ["Play_sfx_Renekton_RenektonSliceAndDice_OnCast"],
+    ("sion", 1): ["Play_sfx_Sion_SionWShieldStacks_OnBuffCast", "Play_sfx_Sion_SionWShieldStacks_OnBuffActivate"],
+}
+# 스킬을 쓸 때 나는 이벤트의 끝말(쓸 때·투사체가 나갈 때 / 버프가 걸릴 때)
+# 같은 스킬을 다른 때 다시 쓸 때(되돌아가기) 롤이 내는 이벤트: (챔피언, 칸) → 이벤트. sfx.json mine 의 "<칸>r"
+MINE_BACK = {
+    ("leblanc", 1): ["Play_sfx_Leblanc_LeblancWReturn_cast"],
+    ("leblanc", 3): ["Play_sfx_Leblanc_LeblancRWReturn_cast"],
+}
+CAST_END = ("oncast", "cast", "oncastself", "cast_self", "onbuffcast", "buffcast", "onmissilecast", "missilecast", "onmissilelaunch", "missilelaunch")
+BUFF_END = ("onbuffactivate", "buffactivate", "buffactivate_loop", "onbuffactivate_loop")
+# 같은 스킬 이름이라도 쓸 때 나지 않는 것: 강화 평타·되돌아갈 때·적에게만 들리는 경고·중첩·막을 때·남이 쓸 때
+# 진화(카직스) 한 뒤에만 나는 것도
+SKIP_SOUND = r"attack|return|warning|enemy|stacks|soundhit|blockcc|blades_down|strut|ready|other|evo_|long_"
+
+
 def mine_events(champ):
-    """내 챔피언의 칸(0~3) → 그 스킬을 쓸 때 롤이 내는 이벤트들(Play_sfx_<챔피언>_<스킬 스크립트 이름>_OnCast)"""
+    """내 챔피언의 칸(0~3) → 그 스킬을 쓸 때 롤이 내는 이벤트들. 스킬과 그 능력에 딸린 스킬(mChildSpells) 의 스크립트 이름으로
+    Play_sfx_<챔피언>_<이름>_OnCast·OnBuffActivate·missilelaunch 등을 찾는다(쓸 때 나는 것 먼저, 많아야 3개)"""
     d, w = lol_vfx.load(champ)
     root = next((v for k, v in d.items() if k.endswith("CharacterRecords/Root")), None)
     if not root:
@@ -246,16 +297,44 @@ def mine_events(champ):
                 if "SFX" in (bu.get("name") or "").upper():
                     evs += bu.get("events") or []
     out = {}
+    spells = root.get("spells") or []
     for slot, kind in lol_vfx.mine_skills().get(champ, []):
-        spells = root.get("spells") or []
+        if (champ, slot) in MINE_BACK:
+            out[str(slot) + "r"] = MINE_BACK[(champ, slot)]
+        if (champ, slot) in MINE_SOUND:
+            out[str(slot)] = MINE_SOUND[(champ, slot)]
+            continue
         if slot >= len(spells):
             continue
-        name = spells[slot].split("/")[-1].lower()
-        got = [e for e in evs if e.lower().startswith("play_") and e.lower().endswith("_%s_oncast" % name)]
-        if not got:
-            got = [e for e in evs if e.lower().startswith("play_") and ("_%s_" % name) in e.lower() and "cast" in e.lower()][:1]
+        ab = spells[slot].rsplit("/", 1)[0]
+        kids = (d.get(ab) or {}).get("mChildSpells") or []
+        names = list(dict.fromkeys(n.split("/")[-1].lower() for n in [spells[slot]] + kids))
+        names += [n.replace("wrapper", "") for n in names if "wrapper" in n]
+        # 다시 눌러 쓰는 두 번째 스킬(리 신 W2·제드 R2·아칼리 Eb·실라스 E2 …) 은 처음 쓸 때 나지 않는다(처음 것의 소리가 있을 때)
+        root_n = names[0]
+        second = {n for n in names if re.fullmatch(re.escape(root_n) + r"(two|2|b)", n)
+                  or (root_n.endswith("one") and n == root_n[:-3] + "two")}
+        got = []
+        for e in evs:
+            el = e.lower()
+            if not el.startswith("play_sfx_") or re.search(SKIP_SOUND, el):
+                continue
+            for i, n in enumerate(names):
+                m = re.search(r"(?:^|_)%s_(.+)$" % re.escape(n), el[len("play_sfx_"):])
+                if m:
+                    suf = m.group(1)
+                    rank = 0 if suf in CAST_END or suf.startswith("cast_") else 1 if suf in BUFF_END else None
+                    if rank is not None:
+                        got.append((i, rank, e))
+                    break
+        if any(names[i] not in second for i, _, _ in got):
+            got = [g for g in got if names[g[0]] not in second]
+        got.sort()
         if got:
-            out[str(slot)] = got[:2]
+            seen = {}
+            for _, _, e in got:
+                seen.setdefault(e.lower(), e)
+            out[str(slot)] = list(seen.values())[:3]
     return out, w
 
 
@@ -267,7 +346,7 @@ def main():
     # 챔피언마다 필요한 이벤트
     want = {}
     for skill, (champ, _) in lol_vfx.SKILLS.items():
-        want.setdefault(champ, set()).update(CAST.get(skill, []) + LAUNCH.get(skill, []) + HIT.get(skill, []) + BOOM.get(skill, []))
+        want.setdefault(champ, set()).update(CAST.get(skill, []) + LAUNCH.get(skill, []) + HIT.get(skill, []) + BOOM.get(skill, []) + READY.get(skill, []))
         for part in fx["skills"].get(skill, {}).values():
             for sysname in part:
                 snd = (fx["systems"].get(sysname) or {}).get("sound")
@@ -339,7 +418,7 @@ def main():
         mine[champ] = {k: [e for e in v if e in table] for k, v in slots.items() if any(e in table for e in v)}
         print("내 챔피언", champ, mine[champ], flush=True)
     with open(os.path.join(OUT, "sfx.json"), "w", encoding="utf-8") as fo:
-        json.dump({"cast": CAST, "launch": LAUNCH, "hit": HIT, "boom": BOOM, "mine": mine, "events": table}, fo, ensure_ascii=False, separators=(",", ":"))
+        json.dump({"cast": CAST, "launch": LAUNCH, "hit": HIT, "boom": BOOM, "ready": READY, "mine": mine, "events": table}, fo, ensure_ascii=False, separators=(",", ":"))
     print("이벤트", len(table), "파일", sum(len(f) for v in table.values() for f in v))
 
 
