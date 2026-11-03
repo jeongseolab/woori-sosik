@@ -371,7 +371,7 @@ async def _member_card(acc, fresh=False):
     return {**board["player"], "account_id": acc["id"],
             "op": slim(board["op"]) if board["op"] else None,
             "tiers": {t: [slim(c) for c in cs] for t, cs in board["tiers"].items()},
-            "bracket": board["bracket"]}
+            "bracket": board["bracket"], "meta_pending": board["meta_pending"]}
 
 
 @app.get("/api/rooms/{room_id}/member/{account_id}")

@@ -63,10 +63,11 @@ const memoDone = new Map();   // 주소 -> 다 받은 값. 있으면 로딩 화�
 // fresh 면 OP.GG 에서 새로 받게 하고, 받은 것으로 기억을 바꾼다
 function load(path, fresh = false) {
   if (!fresh && memo.has(path)) return memo.get(path);
+  if (fresh) settleTries.delete(path);   // 직접 새로 받으면 다시 맞추기도 처음부터
   const url = fresh ? path + (path.includes("?") ? "&" : "?") + "fresh=1" : path;
   const p = api(url);
   memo.set(path, p);
-  p.then(d => { if (memo.get(path) === p) memoDone.set(path, d); },
+  p.then(d => { if (memo.get(path) === p) { memoDone.set(path, d); settleLater(path, d); } },
          () => { if (memo.get(path) === p) memo.delete(path); });   // 실패는 기억하지 않는다
   return p;
 }
@@ -74,14 +75,27 @@ function load(path, fresh = false) {
 // 이미 다 받은 값(없으면 undefined)
 function known(path) { return memoDone.get(path); }
 
+// 티어표·방 카드가 "구간 공식 티어를 아직 다 못 받음"(meta_pending) 이면 서버가 뒤에서 받는 중이다.
+// 그대로 두면 먼저 받은 쪽(예: 그룹방 카드) 과 나중에 받은 쪽(내 티어표) 이 서로 달라 보인다.
+// 그래서 몇 초 뒤 그 주소만 다시 받아 맞춘다(5번까지)
+const SETTLE_MS = 4000, SETTLE_TRIES = 5;
+const settleTries = new Map();
+function settleLater(path, d) {
+  if (!d || !d.meta_pending) { settleTries.delete(path); return; }
+  const n = settleTries.get(path) || 0;
+  if (n >= SETTLE_TRIES) return;
+  settleTries.set(path, n + 1);
+  setTimeout(() => { if (me) refresh([path]); else settleTries.delete(path); }, SETTLE_MS);
+}
+
 // 바뀐 것을 잊는다. test 에 맞는 주소를 모두 지운다
 function forget(test) {
   for (const k of [...memo.keys()]) {
-    if (typeof test === "string" ? k === test : test.test(k)) { memo.delete(k); memoDone.delete(k); }
+    if (typeof test === "string" ? k === test : test.test(k)) { memo.delete(k); memoDone.delete(k); settleTries.delete(k); }
   }
 }
 
-function forgetAll() { memo.clear(); memoDone.clear(); lastStamp = null; }
+function forgetAll() { memo.clear(); memoDone.clear(); settleTries.clear(); lastStamp = null; }
 
 // 서버가 돌려준 새 값을 그대로 기억한다(다시 물어볼 필요 없게)
 function remember(path, data) {
@@ -177,6 +191,7 @@ async function refresh(paths) {
     try { d = await api(path); } catch { continue; }
     if (!me) return;
     if (!sameData(memoDone.get(path), d)) { remember(path, d); changed.push(path); }
+    settleLater(path, d);
   }
   if (changed.length) repaint(changed);
 }

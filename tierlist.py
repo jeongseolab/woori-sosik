@@ -190,8 +190,12 @@ async def build(game_name: str, tagline: str, fresh=False, puuid=None):
 
     # 내 티어 구간의 공식 티어는 챔피언마다 OP.GG 에 물어야 하고 한 번에 3~4초 걸린다.
     # 그룹방(4명, 챔피언 40개 남짓)이 처음 열릴 때 이것만 20초 넘게 기다렸다.
-    # 그래서 META_WAIT 초까지만 기다리고, 못 받은 챔피언은 전체 구간 공식 티어(한 번에 다 온다)
-    # 를 쓴다. 못 받은 것도 뒤에서 마저 받아 쌓아 두니 다음에 열 때는 구간 티어가 나온다
+    # 그래서 META_WAIT 초까지만 기다리고, 그 안에 다 못 받으면 이번에는 모든 챔피언에
+    # 전체 구간 공식 티어(한 번에 다 온다)를 쓴다. 못 받은 것은 뒤에서 마저 받아 쌓아 두니
+    # 다음에 열 때는 구간 티어가 나온다.
+    # 예전에는 챔피언마다 "그때까지 받은 것만 구간 티어" 로 섞어서, 같은 사람의 티어표가 부르는 때에
+    # 따라 달라졌다(개인 화면은 혼자 부르고, 그룹방은 4명이 한꺼번에 OP.GG 줄을 서서 더 많이 놓친다).
+    # 그래서 한 장 안에서는 구간 티어든 전체 구간 티어든 한 가지만 쓴다
     asked = {}
     if bracket:
         for c in champs:
@@ -200,12 +204,14 @@ async def build(game_name: str, tagline: str, fresh=False, puuid=None):
                     opgg.champion_meta(c["key"], c["lane"], bracket))
     if asked:
         await asyncio.wait(asked.values(), timeout=META_WAIT)
+    use_bracket = bool(asked) and all(t.done() for t in asked.values())
     by_lane = await opgg.lane_meta()
 
     def official(c):
-        """내 티어 구간의 공식 티어. 아직 없으면 전체 구간 것을 쓰고 그렇다고 표시한다."""
-        task = asked.get(c["name"])
-        got = task.result() if task and task.done() else None
+        """내 티어 구간의 공식 티어. 이번에 다 못 받았으면 전체 구간 것을 쓰고 그렇다고 표시한다."""
+        task = asked.get(c["name"]) if use_bracket else None
+        # champion_meta 는 OP.GG 고장만 None 으로 돌려준다. 다른 고장으로 끝난 것도 티어표를 깨지 않게
+        got = task.result() if task and not task.cancelled() and not task.exception() else None
         if got and got.get("tier"):
             return got, "bracket"
         got = by_lane.get(c["lane"], {}).get(c["name"])
@@ -249,6 +255,8 @@ async def build(game_name: str, tagline: str, fresh=False, puuid=None):
         "champion_count": len(champs),
         "games": len(rows),
         "target_games": RECENT_GAMES,
+        # 구간 공식 티어를 이번에 다 못 받아 전체 구간 것을 썼다. 뒤에서 받고 있으니 화면이 곧 다시 부른다
+        "meta_pending": bool(asked) and not use_bracket,
     }
 
 
