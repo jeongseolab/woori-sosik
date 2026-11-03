@@ -1044,13 +1044,15 @@
       layer(tFg, o.waves);
       drawBatch(air);
       gl.disable(gl.BLEND);
-      // 2) 빛 번짐: 밝은 곳만 1/2 로, 흐리고, 1/4·1/8 로 내리며 또 흐린다
-      down(RT.A, RT.h1, 0.8);
-      blur(RT.h1, RT.h2, 1);
-      down(RT.h1, RT.q1, 0);
-      blur(RT.q1, RT.q2, 1.4);
-      down(RT.q1, RT.e1, 0);
-      blur(RT.e1, RT.e2, 1.8);
+      // 2) 빛 번짐: 밝은 곳만 1/2 로, 흐리고, 1/4·1/8 로 내리며 또 흐린다(bloom 0 이면 건너뛴다)
+      if (o.bloom !== 0) {
+        down(RT.A, RT.h1, 0.8);
+        blur(RT.h1, RT.h2, 1);
+        down(RT.h1, RT.q1, 0);
+        blur(RT.q1, RT.q2, 1.4);
+        down(RT.q1, RT.e1, 0);
+        blur(RT.e1, RT.e2, 1.8);
+      }
       // 3) 화면으로
       bindFull(P.final);
       to(null);
@@ -1081,6 +1083,11 @@
       resize,
       frame,
       ok: () => !lost,
+      // 성능 표시창에 띄울 그래픽 카드 이름
+      renderer() {
+        const d = gl.getExtension("WEBGL_debug_renderer_info");
+        return String(d ? gl.getParameter(d.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER));
+      },
       setAtlas(img) { gl.deleteTexture(tAtlas); tAtlas = texture(img); },
       loadModel,
       model: key => models.get(key) || null,

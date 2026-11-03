@@ -1710,6 +1710,10 @@
     // 전체 화면은 칸이 커서(1080p 에 배율 1.5 면 2880×1620) 프레임마다 그리는 양이 창 모드의 몇 배다.
     // 그래서 게임 화면의 실제 픽셀 수를 1920×1080 까지만 쓴다(HUD 는 DOM 이라 그대로 선명)
     const FULL_MAX_PX = 1920 * 1080;
+    // 성능 표시창(F8, 또는 주소에 ?perf=1): 렉이 나는 컴퓨터에서 무엇이 무거운지 하나씩 꺼 보며 찾는다.
+    // scale 해상도 배율, noBloom 빛 번짐, noVfx 롤 이펙트, noModels 3D 모델
+    const perf = { on: /[?&]perf=1\b/.test(location.search), scale: 1, noBloom: false, noVfx: false, noModels: false,
+                   gaps: [], draws: [], last: 0, el: null, timer: 0 };
     let quality = 0;
 
     // 바닥 좌표(x, y) 와 높이 z -> 화면 좌표. k: 그 깊이에서 1유닛이 몇 픽셀인지
@@ -1789,7 +1793,7 @@
     function sizeView(u, mw, mh) {
       let dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
       if (isFull()) dpr = Math.min(dpr, Math.sqrt(FULL_MAX_PX / Math.max(1, VW * VH)));
-      DPR = dpr * QUALITY[quality];
+      DPR = dpr * QUALITY[quality] * perf.scale;
       canvas.style.width = VW + "px";
       canvas.style.height = VH + "px";
       canvas.width = Math.round(VW * DPR);
@@ -1828,6 +1832,8 @@
     }
     // 아이폰 사파리처럼 요소 전체 화면을 못 하는 곳에서는 버튼을 숨긴다
     fullBtn.hidden = !document.fullscreenEnabled;
+    // 주소에 ?perf=1 이 있으면 성능 표시창을 처음부터 띄운다
+    if (perf.on) { perf.on = false; perfToggle(); }
 
     function toArena(e) {
       const r = canvas.getBoundingClientRect();
@@ -5812,8 +5818,9 @@
       if (gl) {
         fxgl.frame({ bg: bgCv, fg: fgCv, waves: player ? screenWaves() : [], shake: { x: sx, y: sy },
                      ca: ca, dead: deadFx, hurt: hurt / 0.4, low,
-                     actors: modelActors(), cam: { S, OX, OY, FOCAL, CAM_D, COS, SIN, W2: ARENA.w / 2, H2: ARENA.h / 2 },
-                     vfx: window.DodgeVfx ? DodgeVfx.batches({ COS, SIN, CAM_D, W2: ARENA.w / 2, H2: ARENA.h / 2 }) : null });
+                     actors: perf.noModels ? [] : modelActors(), cam: { S, OX, OY, FOCAL, CAM_D, COS, SIN, W2: ARENA.w / 2, H2: ARENA.h / 2 },
+                     bloom: perf.noBloom ? 0 : undefined,
+                     vfx: window.DodgeVfx && !perf.noVfx ? DodgeVfx.batches({ COS, SIN, CAM_D, W2: ARENA.w / 2, H2: ARENA.h / 2 }) : null });
         mainCtx.setTransform(1, 0, 0, 1, 0, 0);
         mainCtx.clearRect(0, 0, canvas.width, canvas.height);
       }
@@ -5942,6 +5949,56 @@
       if (window.DodgeVfx) DodgeVfx.density(q === QUALITY.length - 1 ? LOW_DENSITY : 1);
       fit();
     }
+    // ── 성능 표시창 ──
+    function perfNote(now, drawMs) {
+      // 0.25초 넘는 틈은 다른 탭·멈춤이라 뺀다(watchSpeed 와 같다)
+      const gap = now - perf.last;
+      if (perf.last && gap <= 250) { perf.gaps.push(gap); if (perf.gaps.length > 180) perf.gaps.shift(); }
+      perf.last = now;
+      perf.draws.push(drawMs); if (perf.draws.length > 180) perf.draws.shift();
+    }
+    function perfToggle() {
+      perf.on = !perf.on;
+      perf.gaps.length = perf.draws.length = 0; perf.last = 0;
+      if (!perf.on) { if (perf.el) perf.el.remove(); perf.el = null; clearInterval(perf.timer); return; }
+      const el = perf.el = document.createElement("div");
+      el.className = "dodge-perf";
+      el.style.cssText = "position:absolute;left:8px;top:44px;z-index:30;padding:8px 10px;background:rgba(1,10,19,.85);"
+        + "border:1px solid #785a28;color:#f0e6d2;font:12px/1.5 ui-monospace,Consolas,monospace;pointer-events:auto;max-width:340px";
+      el.innerHTML = `<div data-p="text"></div><div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px">
+        <button type="button" data-p="scale"></button><button type="button" data-p="bloom"></button>
+        <button type="button" data-p="vfx"></button><button type="button" data-p="models"></button></div>
+        <div style="opacity:.7;margin-top:4px">F8 닫기 · 하나씩 꺼 보고 FPS 가 크게 오르는 것을 알려 주세요</div>`;
+      el.querySelectorAll("button").forEach(b => { b.style.cssText = "font:12px sans-serif;padding:2px 6px;cursor:pointer"; });
+      el.addEventListener("pointerdown", e => e.stopPropagation());
+      el.querySelector('[data-p="scale"]').onclick = () => { perf.scale = perf.scale === 1 ? 0.75 : perf.scale === 0.75 ? 0.5 : 1; fit(); perfPaint(); };
+      el.querySelector('[data-p="bloom"]').onclick = () => { perf.noBloom = !perf.noBloom; perfPaint(); };
+      el.querySelector('[data-p="vfx"]').onclick = () => { perf.noVfx = !perf.noVfx; perfPaint(); };
+      el.querySelector('[data-p="models"]').onclick = () => { perf.noModels = !perf.noModels; perfPaint(); };
+      stageEl.appendChild(el);
+      perfPaint();
+      perf.timer = setInterval(perfPaint, 500);
+    }
+    function perfPaint() {
+      const el = perf.el;
+      if (!el) return;
+      const st = a => { if (!a.length) return [0, 0]; const d = a.slice().sort((x, y) => x - y); return [d[d.length >> 1], d[Math.floor(d.length * 0.95)]]; };
+      const [g50, g95] = st(perf.gaps), [d50, d95] = st(perf.draws);
+      const avg = perf.gaps.length ? perf.gaps.reduce((a, b) => a + b, 0) / perf.gaps.length : 0;
+      const hitches = perf.gaps.filter(g => g > 50).length;
+      const f = n => n.toFixed(1);
+      el.querySelector('[data-p="text"]').innerHTML = [
+        `FPS <b>${avg ? Math.round(1000 / avg) : "-"}</b> · 프레임 ${f(g50)} / ${f(g95)}ms (중간/느린 5%) · 끊김 ${hitches}`,
+        `게임 코드 ${f(d50)} / ${f(d95)}ms`,
+        `해상도 ${canvas.width}×${canvas.height} (화면 ${VW}×${VH}, 배율 ${(window.devicePixelRatio || 1).toFixed(2)}, 자동 화질 ${QUALITY[quality]})`,
+        `${isFull() ? "전체 화면" : "창 모드"} · ${fxgl ? esc(fxgl.renderer()) : "WebGL 없음(2D)"}`,
+      ].join("<br>");
+      el.querySelector('[data-p="scale"]').textContent = "해상도 " + Math.round(perf.scale * 100) + "%";
+      el.querySelector('[data-p="bloom"]').textContent = "빛 번짐 " + (perf.noBloom ? "끔" : "켬");
+      el.querySelector('[data-p="vfx"]').textContent = "롤 이펙트 " + (perf.noVfx ? "끔" : "켬");
+      el.querySelector('[data-p="models"]').textContent = "3D 모델 " + (perf.noModels ? "끔" : "켬");
+    }
+
     function watchSpeed(gap, now) {
       if (state !== "play" || gap <= 0 || gap > 250) return;     // 다른 탭에 갔다 온 것은 빼고
       speedAvg += (gap - speedAvg) * 0.05;
@@ -5970,8 +6027,10 @@
         step(STEP);
         if (dead) { end(); break; }
       }
+      const drawAt = perf.on ? performance.now() : 0;
       draw(fdt);
       hudUpdate();
+      if (perf.on) perfNote(now, performance.now() - drawAt);
     }
 
     function start() {
@@ -6095,6 +6154,7 @@
     }
     function onKeyDown(e) {
       if (e.target.closest && e.target.closest("input, textarea, select")) return;
+      if (e.code === "F8") { e.preventDefault(); perfToggle(); return; }
       const si = bindsOf(controls).indexOf(e.code);
       if (si >= 0 && state === "play") {
         e.preventDefault();
