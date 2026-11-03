@@ -23,9 +23,9 @@ import duo
 import opgg
 import ranking
 import tierlist
-from auth import (check_by_puuid, check_login, create_account, end_session,
-                  find_account, puuid_of, rename_account, riot_key, split_riot_id,
-                  start_session, who_is)
+from auth import (RecoveryError, check_by_puuid, check_login, create_account, end_session,
+                  find_account, finish_recovery, puuid_of, rename_account, riot_key,
+                  split_riot_id, start_recovery, start_session, who_is)
 from database import get_conn, init_db
 
 # 서버를 어느 폴더에서 켜든 파일을 찾을 수 있게, 이 파일 위치를 기준으로 잡는다
@@ -202,6 +202,52 @@ async def _renamed_account(riot_id, password):
     if old is None or riot_key(old["game_name"], old["tagline"]) == riot_key(*parts):
         return None
     return old, now
+
+
+# ── ID·비밀번호 찾기 ─────────────────────────────────────
+# 1) 지금 LOL ID 를 넣으면 가입한 계정(닉네임을 바꿨으면 가입할 때의 ID) 과 바꿀 프로필 아이콘을 알려 준다
+# 2) 롤에서 아이콘을 바꾸고 새 비밀번호를 보내면, OP.GG 에서 아이콘을 새로 읽어 맞는지 본다
+
+ICON_IMG = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/profile-icons/%d.jpg"
+
+
+class RecoverIn(BaseModel):
+    riot_id: str
+
+
+class RecoverDoneIn(RecoverIn):
+    password: str
+
+
+@app.post("/api/recover/start")
+async def recover_start(body: RecoverIn):
+    name, tag = _riot_id_or_400(body.riot_id)
+    p = await opgg.profile(name, tag, fresh=True)
+    got = await asyncio.to_thread(start_recovery, p["puuid"], opgg.icon_id(p.get("profile_image_url")))
+    if got is None:
+        raise HTTPException(status_code=404, detail="이 LOL 계정으로 가입한 적이 없어요. 가입하기에서 만들어 주세요")
+    return {"riot_id": got["account"]["riot_id"],
+            "now_riot_id": p["game_name"] + "#" + p["tagline"],
+            "icon": got["icon"], "icon_url": ICON_IMG % got["icon"],
+            "expires_in": got["expires_in"]}
+
+
+@app.post("/api/recover/finish")
+async def recover_finish(body: RecoverDoneIn):
+    name, tag = _riot_id_or_400(body.riot_id)
+    if len(body.password or "") < 6:
+        raise HTTPException(status_code=400, detail="비밀번호는 6글자 이상이어야 합니다")
+    # 방금 바꾼 아이콘을 봐야 하니 들고 있던 프로필 말고 새로 묻는다
+    p = await opgg.profile(name, tag, fresh=True)
+    try:
+        user = await asyncio.to_thread(finish_recovery, p["puuid"],
+                                       opgg.icon_id(p.get("profile_image_url")), body.password)
+    except RecoveryError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    # 닉네임(대소문자 포함) 을 바꾼 사람이면 지금 닉네임으로 옮긴다(puuid 로 본인임을 확인했다)
+    if (user["game_name"], user["tagline"]) != (p["game_name"], p["tagline"]):
+        user = await asyncio.to_thread(rename_account, user["id"], p["puuid"], p["game_name"], p["tagline"])
+    return {"token": start_session(user["id"]), "user": user}
 
 
 @app.post("/api/logout")

@@ -497,6 +497,7 @@ function gateSample() {
 }
 
 function renderGate(mode = "login") {
+  if (mode === "recover") return renderRecover();
   const signup = mode === "signup";
   let last = {};
   try { last = JSON.parse(localStorage.getItem(LAST_ID_KEY) || "{}"); } catch {}
@@ -545,6 +546,7 @@ function renderGate(mode = "login") {
           <p class="err" id="gate-err" aria-live="polite"></p>
           <button type="submit">${signup ? "가입하기" : "로그인"}</button>
         </form>
+        ${signup ? "" : `<button type="button" class="link-btn" id="go-recover">ID·비밀번호 찾기</button>`}
       </div>
 
       <div class="gate-sample">${gateSample()}</div>
@@ -553,6 +555,8 @@ function renderGate(mode = "login") {
   view.querySelectorAll(".gate-tabs button").forEach(b => b.onclick = () => {
     if (b.dataset.mode !== mode) renderGate(b.dataset.mode);
   });
+  const goRecover = document.getElementById("go-recover");
+  if (goRecover) goRecover.onclick = () => renderGate("recover");
 
   const form = document.getElementById("gate-form");
 
@@ -656,6 +660,121 @@ function renderGate(mode = "login") {
   // 저장된 아이디가 있으면 바로 비밀번호부터
   // 화면이 아래로 밀려 로고가 가려지지 않게 스크롤은 하지 않는다
   (!signup && last.name ? form.password : form.lol_name).focus({ preventScroll: true });
+}
+
+// ── ID·비밀번호 찾기 ─────────────────────────────────────
+// 1) 지금 LOL ID 를 넣으면 가입한 ID 와 바꿀 프로필 아이콘을 알려 준다
+// 2) 롤에서 아이콘을 바꾸고 새 비밀번호를 적으면, 서버가 OP.GG 에서 아이콘을 읽어 본인인지 본다
+function renderRecover() {
+  let last = {};
+  try { last = JSON.parse(localStorage.getItem(LAST_ID_KEY) || "{}"); } catch {}
+  if (!view.querySelector(".gate-card")) renderGate("login");
+  const card = view.querySelector(".gate-card");
+  card.innerHTML = `
+    <h2 class="recover-title">ID·비밀번호 찾기</h2>
+    <p class="note">지금 쓰는 LOL ID 를 넣어 주세요. 가입한 ID 를 알려 드리고, 롤 프로필 아이콘으로 본인인지 확인한 뒤 비밀번호를 새로 정해요.</p>
+    <form id="recover-form" novalidate>
+      <label for="rc-name">지금 LOL ID</label>
+      <div class="id-pair">
+        <input id="rc-name" name="lol_name" placeholder="닉네임" autocomplete="username" value="${esc(last.name || "")}" required>
+        <span aria-hidden="true">#</span>
+        <input id="rc-tag" name="lol_tag" placeholder="KR1" aria-label="태그 (# 뒤)" maxlength="5" value="${esc(last.tag || "")}" required>
+      </div>
+      <p class="err" id="rc-err" aria-live="polite"></p>
+      <button type="submit">가입한 계정 찾기</button>
+    </form>
+    <div id="rc-step2" hidden></div>
+    <button type="button" class="link-btn" id="rc-back">로그인으로 돌아가기</button>`;
+  document.getElementById("rc-back").onclick = () => renderGate("login");
+
+  const form = document.getElementById("recover-form");
+  const err = document.getElementById("rc-err");
+  form.lol_name.addEventListener("input", () => {
+    const v = form.lol_name.value, at = v.lastIndexOf("#");
+    if (at > 0) { form.lol_name.value = v.slice(0, at).trim(); form.lol_tag.value = v.slice(at + 1).trim(); form.lol_tag.focus(); }
+  });
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const name = form.lol_name.value.trim(), tag = form.lol_tag.value.trim().replace(/^#+/, "");
+    if (!name) { err.textContent = "닉네임을 적어 주세요"; return form.lol_name.focus(); }
+    if (!tag) { err.textContent = "# 뒤의 태그를 적어 주세요 (예: KR1)"; return form.lol_tag.focus(); }
+    const riot_id = name + "#" + tag;
+    const button = form.querySelector("button[type=submit]");
+    button.disabled = true; button.textContent = "찾는 중…"; err.textContent = "";
+    let got;
+    try {
+      got = await api("/api/recover/start", { method: "POST", body: JSON.stringify({ riot_id }) });
+    } catch (ex) {
+      err.textContent = ex.message;
+      button.disabled = false; button.textContent = "가입한 계정 찾기";
+      return;
+    }
+    form.hidden = true;
+    showStep2(riot_id, got);
+  };
+
+  function showStep2(riot_id, got) {
+    const box = document.getElementById("rc-step2");
+    const renamed = got.riot_id !== got.now_riot_id;
+    box.hidden = false;
+    box.innerHTML = `
+      <p class="found">가입한 ID: <b>${esc(got.riot_id)}</b>${renamed ? `<br><small>지금 닉네임(${esc(got.now_riot_id)})으로 옮겨 드려요</small>` : ""}</p>
+      <div class="icon-check">
+        <img src="${esc(got.icon_url)}" alt="바꿀 프로필 아이콘" width="72" height="72">
+        <ol>
+          <li>롤 클라이언트에서 프로필 아이콘을 왼쪽 그림으로 바꿔 주세요(기본 아이콘이라 누구나 있어요).</li>
+          <li>새 비밀번호를 적고 아래 버튼을 눌러 주세요. <span id="rc-left"></span></li>
+        </ol>
+      </div>
+      <form id="rc-pw-form" novalidate>
+        <label for="rc-pw">새 비밀번호</label>
+        <input id="rc-pw" name="password" type="password" autocomplete="new-password" placeholder="6글자 이상" required>
+        <label for="rc-pw2">새 비밀번호 확인</label>
+        <input id="rc-pw2" name="password2" type="password" autocomplete="new-password" placeholder="한 번 더 입력" required>
+        <p class="err" id="rc-err2" aria-live="polite"></p>
+        <button type="submit">아이콘 확인하고 비밀번호 바꾸기</button>
+      </form>`;
+    const ends = Date.now() + got.expires_in * 1000;
+    const left = document.getElementById("rc-left");
+    let timer = null;
+    const tick = () => {
+      if (!left.isConnected) return clearInterval(timer);
+      const s = Math.max(0, Math.round((ends - Date.now()) / 1000));
+      left.textContent = s ? `(${Math.floor(s / 60)}분 ${s % 60}초 남음)` : "(시간이 지났어요. 처음부터 다시 해 주세요)";
+    };
+    timer = setInterval(tick, 1000);
+    tick();
+
+    const f = document.getElementById("rc-pw-form");
+    const err2 = document.getElementById("rc-err2");
+    f.password.focus();
+    f.onsubmit = async (e) => {
+      e.preventDefault();
+      const password = f.password.value;
+      if (password.length < 6) { err2.textContent = "비밀번호는 6글자 이상이어야 합니다"; return f.password.focus(); }
+      if (password !== f.password2.value) { err2.textContent = "비밀번호 확인이 달라요. 두 칸에 똑같이 적어 주세요"; return f.password2.focus(); }
+      const button = f.querySelector("button[type=submit]");
+      button.disabled = true; button.textContent = "아이콘 확인 중…"; err2.textContent = "";
+      let data;
+      try {
+        data = await api("/api/recover/finish", { method: "POST", body: JSON.stringify({ riot_id, password }) });
+      } catch (ex) {
+        err2.textContent = ex.message;
+        button.disabled = false; button.textContent = "아이콘 확인하고 비밀번호 바꾸기";
+        return;
+      }
+      clearInterval(timer);
+      forgetAll();
+      warmed = false;
+      setToken(data.token);
+      me = data.user;
+      try { localStorage.setItem(LAST_ID_KEY, JSON.stringify({ name: me.game_name, tag: me.tagline })); } catch {}
+      toast("비밀번호를 바꿨어요. 아이콘은 원래대로 돌려도 돼요");
+      location.hash = "#/tier";
+      route();
+    };
+  }
+  form.lol_name.focus({ preventScroll: true });
 }
 
 // ── 티어표 ──────────────────────────────────────────────

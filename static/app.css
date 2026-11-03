@@ -182,6 +182,17 @@ main:has(.gate) { padding-bottom: 24px; }
 .pw-toggle:hover { color: var(--text); filter: none; }
 .caps { margin: 10px 0 0; font-size: 13px; color: var(--t3); }
 .err { color: var(--lose); font-size: 14px; margin: 10px 0 0; }
+/* ID·비밀번호 찾기 */
+.link-btn { display: block; margin: 12px auto 0; padding: 4px 8px; background: none; border: 0;
+  color: var(--muted); font-size: 13px; text-decoration: underline; cursor: pointer; }
+.link-btn:hover { color: inherit; }
+.recover-title { margin: 0 0 8px; font-size: 18px; }
+.found { margin: 14px 0 10px; }
+.found small { color: var(--muted); }
+.icon-check { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 6px; }
+.icon-check img { border-radius: 10px; flex: none; }
+.icon-check ol { margin: 0; padding-left: 18px; font-size: 14px; }
+.icon-check li + li { margin-top: 6px; }
 .err:empty { display: none; }
 
 /* 예시 티어표 */

@@ -18,6 +18,7 @@
 import hashlib
 import hmac
 import secrets
+import time
 from datetime import datetime
 
 from database import get_conn
@@ -146,6 +147,70 @@ def rename_account(account_id: int, puuid: str, game_name: str, tagline: str):
     conn.commit()
     conn.close()
     return find_account(account_id)
+
+
+# ── 비밀번호 찾기 ─────────────────────────────────────
+# 이메일을 받지 않으니 본인 확인은 롤 계정으로 한다: 프로필 아이콘을 정해 준 것으로 바꾸면 본인이다.
+# 0~28 은 모든 롤 계정이 처음부터 가진 기본 아이콘이라 누구나 바꿀 수 있다
+RECOVER_ICONS = range(0, 29)
+RECOVER_TTL = 10 * 60
+
+
+class RecoveryError(Exception):
+    """비밀번호 찾기를 마치지 못한 까닭(사람에게 보여 줄 글)."""
+
+
+def start_recovery(puuid: str, icon_now):
+    """그 LOL 계정으로 가입한 계정과 바꿀 아이콘. 가입한 적 없으면 None.
+
+    아직 안 끝난 찾기가 있으면 같은 아이콘을 준다. 남이 이름을 넣고 계속 눌러
+    본인이 바꿔야 할 아이콘을 자꾸 바꿔 놓는 것을 막는다.
+    """
+    conn = get_conn()
+    try:
+        row = conn.execute("SELECT * FROM accounts WHERE puuid = ?", (puuid,)).fetchone()
+        if row is None:
+            return None
+        now = time.time()
+        old = conn.execute("SELECT icon, created_at FROM account_recovery WHERE puuid = ?",
+                           (puuid,)).fetchone()
+        if old and now - old["created_at"] < RECOVER_TTL:
+            icon, started = old["icon"], old["created_at"]
+        else:
+            icon, started = secrets.choice([i for i in RECOVER_ICONS if i != icon_now]), now
+            conn.execute(
+                "INSERT INTO account_recovery (puuid, icon, created_at) VALUES (?, ?, ?)"
+                " ON CONFLICT (puuid) DO UPDATE SET icon = excluded.icon, created_at = excluded.created_at",
+                (puuid, icon, started))
+            conn.commit()
+        return {"account": _public(row), "icon": icon,
+                "expires_in": int(RECOVER_TTL - (now - started))}
+    finally:
+        conn.close()
+
+
+def finish_recovery(puuid: str, icon_now, password: str):
+    """아이콘이 맞으면 새 비밀번호로 바꾸고 계정을 돌려준다. 다른 기기의 로그인은 모두 끊는다."""
+    conn = get_conn()
+    try:
+        got = conn.execute("SELECT icon, created_at FROM account_recovery WHERE puuid = ?",
+                           (puuid,)).fetchone()
+        if got is None or time.time() - got["created_at"] >= RECOVER_TTL:
+            raise RecoveryError("확인 시간(10분)이 지났어요. 처음부터 다시 해 주세요")
+        if icon_now != got["icon"]:
+            raise RecoveryError("프로필 아이콘이 아직 안 바뀌었어요. 롤에서 바꾼 뒤 잠깐 기다렸다가 다시 눌러 주세요")
+        row = conn.execute("SELECT * FROM accounts WHERE puuid = ?", (puuid,)).fetchone()
+        if row is None:
+            raise RecoveryError("가입한 계정을 찾지 못했어요")
+        salt = secrets.token_hex(16)
+        conn.execute("UPDATE accounts SET pw_hash = ?, pw_salt = ? WHERE id = ?",
+                     (_hash_pw(password, salt), salt, row["id"]))
+        conn.execute("DELETE FROM account_sessions WHERE account_id = ?", (row["id"],))
+        conn.execute("DELETE FROM account_recovery WHERE puuid = ?", (puuid,))
+        conn.commit()
+        return _public(row)
+    finally:
+        conn.close()
 
 
 def puuid_of(game_name: str, tagline: str):

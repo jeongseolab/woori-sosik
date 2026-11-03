@@ -298,6 +298,12 @@ async def profile(game_name: str, tagline: str, fresh=False):
     return await _cached(key, PROFILE_TTL, fetch, fresh)
 
 
+def icon_id(url):
+    """OP.GG 프로필 아이콘 주소에서 아이콘 번호. 예: .../profileIcon4644.jpg?... -> 4644"""
+    m = re.search(r"(\d+)\.(?:png|jpe?g|webp)", url or "")
+    return int(m.group(1)) if m else None
+
+
 async def profile_of(game_name: str, tagline: str, puuid: str | None, fresh=False):
     """profile 과 같다. puuid 를 주면 지금 그 이름이 정말 그 사람인지도 본다.
 

@@ -241,6 +241,17 @@ def init_db():
         )
     """)
 
+    # ── 비밀번호 찾기 ───────────────────────────────────
+    # 본인 확인: 롤 프로필 아이콘을 여기서 정해 준 기본 아이콘(icon) 으로 바꾸게 한다.
+    # 그 계정에 로그인한 사람만 아이콘을 바꿀 수 있다. 계정(puuid) 마다 한 줄, created_at 은 초 단위 시각
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS account_recovery (
+            puuid      TEXT PRIMARY KEY,
+            icon       INTEGER NOT NULL,
+            created_at REAL NOT NULL
+        )
+    """)
+
     # ── 그룹방 ──────────────────────────────────────────
     # code 는 초대할 때 나눠 주는 짧은 암호다
     conn.execute("""
