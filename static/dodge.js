@@ -42,7 +42,7 @@
 (function () {
   // 게임 버전 "앞.가운데.끝". 앞 = 새 챔피언 추가, 가운데 = 스킬 추가·버그 수정, 끝 = 아주 미묘한 변화.
   // 하나를 올리면 그 뒤 숫자는 0 으로. 서버는 앞 숫자가 같은 기록끼리만 순위를 매긴다(ranking.py 의 DODGE_VERSION 과 같게)
-  const VERSION = "22.0.0";
+  const VERSION = "22.0.2";
 
   const ARENA = { w: 1400, h: 900 };
   const CHAMP = { radius: 65, speed: 335 };
@@ -814,6 +814,7 @@
   // inner: 장판 중심부 반지름(file castRadius). 그림으로만 구분한다(맞는 건 바깥 원 기준 그대로)
   // from: 몇 초부터 나오는지. rare: 가끔만. phys: 물리 피해(나머지는 마법 피해. 이렐리아 W 처럼 피해 종류마다 줄이는 양이 다른 스킬이 본다)
   // fxGain: 롤 이펙트 밝기 배율(없으면 ENEMY_GAIN 1.8). 1.8배면 하얗게 타서 모양이 안 보이는 스킬만 낮춘다
+  //   애쉬 R·요네 Q3 는 원래 크고 밝은 이펙트라 1.8배면 화면을 덮어서 롤 그대로(1.0)
   const SKILLS = [
     // ── 투사체 (전부 file) ──
     { kind: "line", name: "모르가나 Q", champ: "Morgana", cast: 0.25, speed: 1200, radius: 70, range: 1300, color: "#b197fc", fxGain: 0.6, from: 0 },
@@ -836,11 +837,11 @@
     { kind: "line", name: "쓰레쉬 Q", champ: "Thresh", cast: 0.5, speed: 1900, radius: 70, range: 1100, color: "#63e6be", from: 20, look: "hook" },
     { kind: "line", name: "징크스 W", champ: "Jinx", phys: true, cast: 0.6, speed: 3300, radius: 60, range: 1500, color: "#f783ac", fxGain: 1.5, from: 25, look: "zap" },
     // 애쉬 R 은 1500 에서 시작해 초당 200 씩 빨라져 2100 까지(AcceleratingMovement)
-    { kind: "line", name: "애쉬 R", champ: "Ashe", cast: 0.25, speed: 1500, accel: 200, maxSpeed: 2100, radius: 130, range: FAR, color: "#a5d8ff", from: 25, rare: true, look: "arrow" },
+    { kind: "line", name: "애쉬 R", champ: "Ashe", cast: 0.25, speed: 1500, accel: 200, maxSpeed: 2100, radius: 130, range: FAR, color: "#a5d8ff", fxGain: 1.0, from: 25, rare: true, look: "arrow" },
     // 요네 Q3(롤 로컬 데이터 YoneQ·YoneQ3Missile): 시전 0.35초(QBaseCastTime) 뒤 앞으로 450(Q3MaxDistance) 을 1500(Q3DashSpeed) 으로 돌진하며
     // 회오리(속도 1500, 폭 80, 사거리 950) 를 날린다. 회오리는 맞힌 뒤에도 사거리 끝까지 간다(pierce). 맞으면 공중에 뜸 0.75초(Q3KnockupDuration).
     // 쏠 차례가 와서 걸어오는 동안 칼에 바람이 감긴다(Q3 준비 버프). 동작은 롤 Spell1C: 시전(spell1) → 돌진(q3dash) → 마무리(q3out)
-    { kind: "line", name: "요네 Q3", champ: "Yone", phys: true, cast: 0.35, speed: 1500, radius: 80, range: 950, color: "#a5d8ff", from: 20, anim: "spell1",
+    { kind: "line", name: "요네 Q3", champ: "Yone", phys: true, cast: 0.35, speed: 1500, radius: 80, range: 950, color: "#a5d8ff", fxGain: 1.0, from: 20, anim: "spell1",
       dash: { dist: 450, speed: 1500, anim: "q3dash", out: "q3out" }, pierce: true },
 
     // ── 지연 장판: 시전 → 바닥에 표시 → delay 초 뒤 터짐 ──
