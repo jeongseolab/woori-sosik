@@ -42,7 +42,7 @@
 (function () {
   // 게임 버전 "앞.가운데.끝". 앞 = 새 챔피언 추가, 가운데 = 스킬 추가·버그 수정, 끝 = 아주 미묘한 변화.
   // 하나를 올리면 그 뒤 숫자는 0 으로. 서버는 앞 숫자가 같은 기록끼리만 순위를 매긴다(ranking.py 의 DODGE_VERSION 과 같게)
-  const VERSION = "22.0.2";
+  const VERSION = "22.0.3";
 
   const ARENA = { w: 1400, h: 900 };
   const CHAMP = { radius: 65, speed: 335 };
@@ -4558,8 +4558,9 @@
         band(L, frameOf("beam"), f.a, f.b, w * 1.2, 60, col, al, 1, 0, 0.4, now * 4);
         band(L, frameOf("beam"), f.a, f.b, w * 0.35, 60, rgb("#ffffff"), al, 1);
       }
+      // 시전 중 빛·마법진은 3D 모델이 없어(초상화) 시전 동작을 못 보여 줄 때만. 롤은 동작만 있다
       for (const c of casters) {
-        if (c.wind <= 0 || !c.skill.cast) continue;
+        if (c.wind <= 0 || !c.skill.cast || model(c.skill.champ)) continue;
         const p = 1 - c.wind / c.skill.cast, head = upright(c.x, c.y, PORTRAIT_Z), col = rgb(gfxOf(c.skill).glow || c.skill.color);
         rq(L, frameOf("glow"), head.x, head.y, 260 * head.k * (0.5 + 0.7 * p), 260 * head.k * (0.5 + 0.7 * p), 0, col, 0.55 * p, 1);
         rq(L, frameOf("rune"), head.x, head.y, 170 * head.k, 170 * head.k, now * 2, col, 0.5 * p, 1);
@@ -4689,9 +4690,9 @@
           }
         }
       }
-      // 시전 중: 스킬 색 빛이 초상화로 빨려 들어간다. 레오나 E 돌진은 금빛 자취
+      // 시전 중: 스킬 색 빛이 초상화로 빨려 들어간다(3D 모델이면 시전 동작이 대신한다). 레오나 E 돌진은 금빛 자취
       for (const c of casters) {
-        if (c.wind > 0 && c.skill.cast > 0 && !lolFx(c.skill)) {
+        if (c.wind > 0 && c.skill.cast > 0 && !lolFx(c.skill) && !model(c.skill.champ)) {
           c.acc = (c.acc || 0) + dt * 40;
           while (c.acc >= 1) {
             c.acc -= 1;
