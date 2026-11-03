@@ -42,7 +42,7 @@
 (function () {
   // 게임 버전 "앞.가운데.끝". 앞 = 새 챔피언 추가, 가운데 = 스킬 추가·버그 수정, 끝 = 아주 미묘한 변화.
   // 하나를 올리면 그 뒤 숫자는 0 으로. 서버는 앞 숫자가 같은 기록끼리만 순위를 매긴다(ranking.py 의 DODGE_VERSION 과 같게)
-  const VERSION = "22.0.3";
+  const VERSION = "22.0.4";
 
   const ARENA = { w: 1400, h: 900 };
   const CHAMP = { radius: 65, speed: 335 };
@@ -1146,7 +1146,11 @@
   // 전체 화면을 처음 켤 때만 받는다(600KB)
   function loadRiftBake() {
     if (riftBakeImg.src) return;
-    riftBakeImg.onload = () => { riftBakeReady = true; };
+    // 다 받은 뒤 그림을 미리 풀어(decode) 둔다. 안 그러면 처음 그리는 프레임에서 4400×2400 을 푸느라 멈칫한다
+    riftBakeImg.onload = () => riftBakeImg.decode().catch(() => {}).then(() => {
+      riftBakeReady = true;
+      riftBakeImg.dispatchEvent(new Event("ready"));
+    });
     riftBakeImg.src = ART + RIFT_BAKE.src;
   }
   // 전체 화면 미니맵: 소환사의 협곡 전체 지도(CommunityDragon game/assets/maps/info/map11/2dlevelminimap_base_baron1.png)
@@ -1448,6 +1452,24 @@
     const fx2d = window.DodgeGL ? DodgeGL.canvas2d(fxImg) : null;
     const bgCv = document.createElement("canvas"), fgCv = document.createElement("canvas");
     const bgx = bgCv.getContext("2d"), fgx = fgCv.getContext("2d");
+    // 바닥(협곡 그림·경기장 바닥·테두리) 은 화면 크기나 받은 그림이 바뀔 때만 다시 그린다.
+    // 전에는 프레임마다 4400×2400 협곡 그림을 줄여 그리고 안개를 칠해서 전체 화면에서 특히 무거웠다
+    const groundCv = document.createElement("canvas");
+    let groundKey = "";
+    function groundLayer() {
+      const key = [canvas.width, canvas.height, DPR, S, OX, OY, CAM_D, isFull(), riftBakeReady, groundReady].join();
+      if (key !== groundKey) {
+        groundCv.width = canvas.width;
+        groundCv.height = canvas.height;
+        const keep = ctx;
+        ctx = groundCv.getContext("2d");
+        ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+        drawGround();
+        ctx = keep;
+        groundKey = key;
+      }
+      return groundCv;
+    }
     const atlasUp = () => { if (fxgl) fxgl.setAtlas(fxImg); };
     if (fxReady) atlasUp();
     onFx.add(atlasUp);
@@ -1685,6 +1707,9 @@
     // 성능: 게임 화면은 기기 배율을 MAX_DPR 까지만 쓴다(배율 2 화면에서 픽셀이 44% 줄고 눈으로는 거의 같다. HUD 글자는 DOM 이라 그대로 선명).
     // 그래도 느리면(watchSpeed) 해상도를 QUALITY 단계로 내리고, 가장 낮은 단계에서는 이펙트 파티클도 덜 뿌린다
     const MAX_DPR = 1.5, QUALITY = [1, 0.8, 0.65], LOW_DENSITY = 0.6;
+    // 전체 화면은 칸이 커서(1080p 에 배율 1.5 면 2880×1620) 프레임마다 그리는 양이 창 모드의 몇 배다.
+    // 그래서 게임 화면의 실제 픽셀 수를 1920×1080 까지만 쓴다(HUD 는 DOM 이라 그대로 선명)
+    const FULL_MAX_PX = 1920 * 1080;
     let quality = 0;
 
     // 바닥 좌표(x, y) 와 높이 z -> 화면 좌표. k: 그 깊이에서 1유닛이 몇 픽셀인지
@@ -1762,7 +1787,9 @@
     }
 
     function sizeView(u, mw, mh) {
-      DPR = Math.min(window.devicePixelRatio || 1, MAX_DPR) * QUALITY[quality];
+      let dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
+      if (isFull()) dpr = Math.min(dpr, Math.sqrt(FULL_MAX_PX / Math.max(1, VW * VH)));
+      DPR = dpr * QUALITY[quality];
       canvas.style.width = VW + "px";
       canvas.style.height = VH + "px";
       canvas.width = Math.round(VW * DPR);
@@ -1794,7 +1821,7 @@
       fullBtn.setAttribute("aria-pressed", String(on));
       if (on && !riftBakeReady) {
         loadRiftBake();
-        riftBakeImg.addEventListener("load", () => { if (isFull()) draw(0); }, { once: true });
+        riftBakeImg.addEventListener("ready", () => { if (isFull()) draw(0); }, { once: true });
       }
       fit();
       canvas.focus({ preventScroll: true });
@@ -5755,7 +5782,7 @@
       ctx.clearRect(0, 0, VW, VH);
       ctx.save();
       if (!gl && sm) ctx.translate(sx, sy);
-      drawGround();
+      ctx.drawImage(groundLayer(), 0, 0, VW, VH);
       if (player) drawDecals();
       if (gl) {
         ctx.restore();
