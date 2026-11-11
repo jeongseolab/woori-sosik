@@ -5,6 +5,7 @@
 //   #/rooms           그룹방 목록
 //   #/rooms/3         3번 방
 //   #/duo             듀오 궁합 (#/duo/이름#태그 면 바로 비교)
+//   #/items           아이템 추천 (#/items/222/adc 면 그 챔피언·라인, 화면은 items-ui.js)
 
 const view = document.getElementById("view");
 const TOKEN_KEY = "mytier-token";
@@ -441,6 +442,7 @@ async function route() {
   if (page === "rooms") return renderRooms(target);
   if (page === "duo") return renderDuo(target);
   if (page === "dodge") return renderDodge(target);
+  if (page === "items") return renderItems(target);
   return renderTier(target);
 }
 

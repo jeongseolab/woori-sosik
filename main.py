@@ -20,6 +20,9 @@ from pydantic import BaseModel
 
 import changes
 import duo
+import item_context
+import item_tree
+import items
 import opgg
 import ranking
 import tierlist
@@ -529,6 +532,100 @@ def dodge_finish(body: DodgeEnd, authorization: str = Header(None)):
 @app.get("/api/dodge/me")
 def dodge_me(authorization: str = Header(None)):
     return ranking.my_dodge(_need_login(authorization)["id"])
+
+
+# ── 아이템 추천 ──────────────────────────────────────────
+
+_LANES = ("top", "jungle", "mid", "adc", "support")
+
+
+def _ids(text):
+    """"1,2,3" → [{"id": 1}, ...]. 숫자가 아닌 것은 버린다. 한 팀 5명까지."""
+    out = []
+    for part in (text or "").split(","):
+        part = part.strip()
+        if part.isdigit():
+            out.append({"id": int(part)})
+    return out[:5]
+
+
+@app.get("/api/items/build")
+def item_build(champion: int, lane: str = None, gold: int = None, slots: int = 6, boots: bool = True,
+               t: float = None, lane_state: float = None, allies: str = None, enemies: str = None,
+               foes: str = None, now_gold: int = None, authorization: str = Header(None)):
+    """챔피언 빌드 추천. gold 가 없으면 골드 제한 없이(6칸 끝까지).
+
+    게임 상황(모두 고를 수 있음): t 게임 시간(분), lane_state 라인전 -1(밀림)~1(앞섬),
+    allies·enemies 아군(나 빼고)·적 챔피언 번호를 쉼표로, foes 맞라인 적(바텀은 둘). 넣으면 reasons 에 왜 바뀌었는지가 온다.
+    usual: 내 경기(쌓아 둔 협곡 판) 에서 이 챔피언으로 보통 번 골드. 화면이 "평소 골드로" 예산을 고를 때 쓴다.
+
+    tree: 라인이 있으면 OP.GG 템트리를 뼈대로 짠 빌드(items.plan_build). OP.GG 가 안 되면 source "value"(위 빌드와 같다).
+      템트리는 12시간 파일에 두어서 처음 한 번만 OP.GG 를 기다린다(1~3초)
+    now: now_gold 가 있으면 빈 가방에서 그 골드로 이번에 살 것(items.plan_buy). 게임 중에는 오버레이가 진짜 가방으로 한다
+    """
+    user = _need_login(authorization)
+    if lane not in _LANES:
+        lane = None
+    ctx = item_context.make_context(t, lane_state, _ids(allies), _ids(enemies), _ids(foes)[:2])
+    try:
+        build = items.recommend(champion, lane, gold, slots, (), boots, ctx)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e.args[0]))
+    tree = item_tree.fetch(champion, lane) if lane else None
+    plan = items.plan_build(champion, lane, tree, ctx)
+    out_tree = {"source": plan["source"], "reasons": plan["reasons"],
+                "items": [{**items.item_out(i), "slot": p["slot"], "note": p["note"]}
+                          for i, p in zip(plan["items"], plan["picks"])]}
+    now = None
+    if now_gold is not None:
+        now = items.plan_buy(champion, lane, plan["items"], [], max(0, min(20000, now_gold)), ctx)
+    usual = items.usual_gold(opgg.stored_matches(user["puuid"]), champion) if user.get("puuid") else None
+    return {**build, "usual": usual, "tree": out_tree, "now": now}
+
+
+# ── Tier.gg 앱(데스크톱) 내려받기 ─────────────────────────
+# 앱 파일은 GitHub 릴리스(app-v1.0.0 같은 태그, .github/workflows/app.yml 이 만든다) 에 있다.
+# 화면이 버전·크기·주소를 보여 주게 가장 최근 app-v* 릴리스를 찾아 10분 들고 있는다(GitHub API 는 시간당 60번 제한)
+
+APP_REPO = "jeongseolab/woori-sosik"
+APP_ASSETS = {"windows": "Tier.gg.exe", "macos": "Tier.gg.zip"}     # app/build.py 가 만드는 이름 그대로
+_app_release = {"at": 0.0, "value": None}
+
+
+def _latest_app_release():
+    import time
+    import httpx
+    now = time.time()
+    if now - _app_release["at"] < 600:
+        return _app_release["value"]
+    value = None
+    try:
+        r = httpx.get("https://api.github.com/repos/%s/releases?per_page=20" % APP_REPO, timeout=8,
+                      headers={"Accept": "application/vnd.github+json"})
+        r.raise_for_status()
+        for rel in r.json():
+            if rel.get("draft") or not str(rel.get("tag_name", "")).startswith("app-v"):
+                continue
+            files = {a["name"]: a for a in rel.get("assets") or []}
+            value = {"version": rel["tag_name"][5:], "published_at": rel.get("published_at"),
+                     "page": rel.get("html_url"),
+                     "assets": {os_: {"url": files[n]["browser_download_url"], "size": files[n]["size"], "name": n}
+                                for os_, n in APP_ASSETS.items() if n in files}}
+            break
+    except (httpx.HTTPError, ValueError, KeyError):
+        # 잠깐 실패면 예전 값을 그대로 쓰고 1분 뒤 다시 본다
+        _app_release["at"] = now - 540
+        return _app_release["value"]
+    _app_release.update(at=now, value=value)
+    return value
+
+
+@app.get("/api/app/latest")
+def app_latest():
+    """가장 최근 Tier.gg 앱 릴리스: {version, published_at, page, assets: {windows|macos: {url, size, name}}}.
+    아직 올린 적이 없으면 version 이 null(화면은 "준비 중" 으로 보여 준다). 로그인 없이 볼 수 있다."""
+    rel = _latest_app_release()
+    return rel or {"version": None, "assets": {}, "page": "https://github.com/%s/releases" % APP_REPO}
 
 
 # 이 줄은 항상 맨 아래! 위의 주소들을 먼저 찾고, 없으면 static 을 내려준다

@@ -10,17 +10,21 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=IBM+Plex+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="app.css">
+  <link rel="stylesheet" href="items.css">
+  <link rel="stylesheet" href="app-page.css">
 </head>
 <body>
   <header class="top" id="top" hidden>
-    <a class="logo" href="#/tier" aria-label="Tier.gg 처음으로"><svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#f0b429"/><rect x="6" y="7" width="20" height="4.5" rx="2" fill="#0f1b33"/><rect x="6" y="13.75" width="14" height="4.5" rx="2" fill="#0f1b33"/><rect x="6" y="20.5" width="8" height="4.5" rx="2" fill="#0f1b33"/></svg><span>Tier.gg</span></a>
+    <a class="logo" href="#/tier" aria-label="Tier.gg 처음으로"><svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#f0b429"/><rect x="6" y="7" width="20" height="4.5" rx="2" fill="#0f1b33"/><rect x="6" y="13.75" width="14" height="4.5" rx="2" fill="#0f1b33"/><rect x="6" y="20.5" width="8" height="4.5" rx="2" fill="#0f1b33"/></svg><span>Tier.gg</span><span class="logo-tag" title="Tier.gg 웹. 게임 중 아이템 추천은 Tier.gg 앱에서">웹</span></a>
     <nav class="tabs">
       <a href="#/tier" data-tab="tier">내 티어표</a>
       <a href="#/rooms" data-tab="rooms">그룹방</a>
+      <a href="#/items" data-tab="items">아이템 추천</a>
       <a href="#/duo" data-tab="duo">듀오 궁합</a>
       <a href="#/dodge" data-tab="dodge">연습장</a>
     </nav>
     <div class="who">
+      <a class="app-get" href="#/items">앱 받기</a>
       <span id="who-name"></span>
       <button type="button" class="ghost" id="logout">로그아웃</button>
     </div>
@@ -34,6 +38,8 @@
   <script src="dodge-gl.js"></script>
   <script src="dodge-vfx.js"></script>
   <script src="dodge.js"></script>
+  <script src="items-ui.js"></script>
+  <script src="app-ui.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -1,0 +1,255 @@
+/* Tier.gg 앱 안내·내려받기(#/items). app.css 의 색·글꼴을 그대로 쓴다.
+   움직임은 두 곳만: 오른쪽 데모(한 판을 따라가는 장면) 와 받기 버튼(누르면 차오름). 나머지는 조용히 둔다 */
+
+.ap { --bronze: #8a6d3b; --shop: #0a1426; }
+
+/* 머리 */
+.ap-hero { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 40px; align-items: center; margin: 8px 0 56px; }
+.ap-kind { display: inline-flex; align-items: center; gap: 8px; margin: 0 0 18px; color: var(--gold); font-weight: 700; font-size: 14px; }
+.ap-app-mark { width: 18px; height: 18px; border-radius: 5px; background:
+  linear-gradient(var(--night), var(--night)) 4px 4px / 10px 3px no-repeat,
+  linear-gradient(var(--night), var(--night)) 4px 8px / 7px 3px no-repeat,
+  linear-gradient(var(--night), var(--night)) 4px 12px / 4px 3px no-repeat, var(--gold); }
+.ap h1 { font-size: clamp(40px, 5.4vw, 60px); line-height: 1.04; margin: 0 0 20px; letter-spacing: -.02em; }
+.ap-lead { color: var(--muted); font-size: 16px; line-height: 1.7; margin: 0 0 28px; max-width: 34em; }
+
+/* 받기 */
+.ap-dl {
+  position: relative; overflow: hidden; isolation: isolate;
+  display: inline-flex; align-items: center; gap: 12px;
+  padding: 0 34px 0 28px; height: 64px; border-radius: 14px;
+  background: var(--gold); color: var(--night); text-decoration: none;
+  font: 22px/1 var(--display); letter-spacing: -.01em;
+  box-shadow: 0 10px 30px -12px rgba(240, 180, 41, .65), inset 0 -3px 0 rgba(0, 0, 0, .18);
+  transition: transform .15s ease, box-shadow .15s ease;
+}
+.ap-dl svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.ap-dl:hover { transform: translateY(-1px); box-shadow: 0 14px 34px -12px rgba(240, 180, 41, .8), inset 0 -3px 0 rgba(0, 0, 0, .18); }
+.ap-dl:active { transform: translateY(1px); }
+.ap-dl:focus-visible, .ap-dl-alt:focus-visible { outline: 3px solid var(--text); outline-offset: 3px; }
+.ap-dl[aria-disabled="true"] { background: var(--panel-2); color: var(--muted); box-shadow: none; cursor: default; transform: none; }
+.ap-dl-fill { position: absolute; inset: 0; z-index: -1; transform: scaleX(0); transform-origin: left; background: #ffd46b; }
+.ap-dl.going .ap-dl-fill { transform: scaleX(1); transition: transform .9s cubic-bezier(.3, .7, .3, 1); }
+.ap-dl.going svg { animation: ap-drop .45s ease-in-out infinite alternate; }
+.ap-dl.done svg { stroke-width: 2.8; }
+@keyframes ap-drop { to { transform: translateY(3px); } }
+.ap-meta { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 14px 0 6px; color: var(--muted); font-size: 13px; }
+.ap-meta span:first-child { color: var(--text); font-weight: 700; }
+.ap-other { margin: 10px 0 0; font-size: 16px; color: var(--muted); }
+/* 다른 OS 받기: 작은 글 링크가 아니라 테두리 버튼으로(주 버튼보다는 한 단계 낮게) */
+.ap-other a {
+  display: inline-flex; align-items: center; height: 46px; padding: 0 20px; border-radius: 12px;
+  border: 1px solid var(--line); color: var(--text); text-decoration: none;
+  font: 18px/1 var(--display); letter-spacing: -.01em;
+}
+.ap-other a:hover { border-color: var(--gold); color: var(--gold); }
+.ap-other a[aria-disabled="true"] { color: var(--muted); cursor: default; border-color: var(--line); }
+
+/* 데모 무대 */
+.ap-stage {
+  position: relative; aspect-ratio: 16 / 11; overflow: hidden; border-radius: 18px;
+  border: 1px solid var(--line);
+  background:
+    radial-gradient(120% 90% at 85% 10%, rgba(240, 180, 41, .10), transparent 55%),
+    radial-gradient(90% 80% at 10% 100%, rgba(77, 171, 247, .10), transparent 60%),
+    linear-gradient(160deg, #142441, #0b162c 70%);
+}
+.ap-rift { position: absolute; inset: 0; width: 100%; height: 100%; }
+.ap-rift path { fill: none; stroke: rgba(240, 180, 41, .14); stroke-width: 2; stroke-dasharray: 2 10; stroke-linecap: round; }
+.ap-scene { position: absolute; inset: 0; opacity: 0; transition: opacity .5s ease; }
+.ap-stage[data-scene="select"] [data-for="select"],
+.ap-stage[data-scene="shop"] [data-for="shop"],
+.ap-stage[data-scene="game"] [data-for="game"] { opacity: 1; }
+
+/* 장면 1: 챔프 선택 */
+.ap-teams { position: absolute; left: 6%; top: 50%; transform: translateY(-50%); display: flex; align-items: center; gap: 14px; }
+.ap-team { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.ap-team img { display: block; width: clamp(28px, 4.2vw, 44px); height: auto; aspect-ratio: 1; border-radius: 50%; border: 2px solid var(--line); background: var(--panel); }
+.ap-team .me img { border-color: var(--gold); box-shadow: 0 0 0 3px rgba(240, 180, 41, .25); }
+.ap-team.them img { filter: grayscale(1) brightness(.35); }
+.ap-vs { font: 14px/1 var(--display); color: var(--muted); }
+
+/* 장면 2: 상점 */
+.ap-shop {
+  position: absolute; left: 6%; top: 9%; width: 62%; padding: 14px 16px 16px;
+  background: var(--shop); border: 1px solid var(--bronze); border-radius: 6px;
+  box-shadow: 0 20px 40px -20px #000;
+}
+.ap-shop-tabs { display: flex; gap: 14px; font-size: 13px; color: var(--muted); border-bottom: 1px solid #1d2b45; padding-bottom: 8px; }
+.ap-shop-tabs b { color: #e8d7a8; border-bottom: 2px solid var(--bronze); padding-bottom: 6px; margin-bottom: -9px; }
+.ap-shop-title { margin: 12px 0 10px; font-size: 13px; font-weight: 700; color: #e8d7a8; }
+.ap-block { margin-top: 10px; }
+.ap-block small { display: block; color: var(--muted); font-size: 11px; margin-bottom: 5px; }
+.ap-block div { display: flex; flex-wrap: wrap; gap: 5px; }
+.ap-block img { width: clamp(22px, 3.4vw, 34px); height: auto; aspect-ratio: 1; border: 1px solid #2a3b5c; }
+
+/* 장면 3: 게임 중 */
+.ap-hud { position: absolute; left: 50%; bottom: 7%; transform: translateX(-50%); display: flex; align-items: center; gap: 18px;
+  padding: 8px 18px; border-radius: 999px; background: rgba(6, 12, 24, .75); border: 1px solid #1d2b45; font-weight: 700; }
+.ap-clock { color: var(--muted); font-variant-numeric: tabular-nums; }
+.ap-gold { display: inline-flex; align-items: center; gap: 7px; color: var(--gold); font-variant-numeric: tabular-nums; }
+.ap-gold i { width: 14px; height: 14px; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #ffe08a, var(--gold) 55%, var(--gold-deep)); }
+
+/* Tier.gg 앱 창(실제 창과 같은 모양) */
+.ap-window {
+  position: absolute; right: 5%; top: 8%; width: 44%; padding: 12px 14px 14px;
+  background: rgba(15, 27, 51, .94); border: 1px solid var(--gold); border-radius: 4px;
+  box-shadow: 0 24px 40px -18px #000; font-size: clamp(10px, 1.25vw, 13px); line-height: 1.45;
+  transition: opacity .4s ease, transform .4s ease;
+}
+.ap-window img { width: clamp(18px, 2.6vw, 28px); height: auto; aspect-ratio: 1; display: block; }
+.ap-w-head { display: block; color: var(--gold); font-size: 1.12em; margin-bottom: 2px; }
+.ap-window small { display: block; color: var(--muted); }
+.ap-w-build { display: flex; gap: 3px; margin: 8px 0 6px; }
+.ap-w-done { color: var(--text) !important; }
+.ap-w-done::before { content: "✓ "; color: var(--gold); font-weight: 700; }
+.ap-w-row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+.ap-w-row span { color: var(--text); }
+.ap-w-row em { font-style: normal; color: var(--gold); font-weight: 700; margin-left: 4px; }
+.ap-w-game, .ap-stage[data-scene="game"] .ap-w-select { display: none; }
+.ap-stage[data-scene="game"] .ap-w-game { display: block; }
+.ap-stage[data-scene="shop"] .ap-window { opacity: 0; transform: translateY(-6px); }
+
+@media (prefers-reduced-motion: no-preference) {
+  .ap-stage.run[data-scene="select"] .ap-team li { animation: ap-in .35s ease both; animation-delay: calc(var(--i) * 70ms); }
+  .ap-stage.run[data-scene="select"] .ap-team.them img { animation: ap-reveal .4s ease forwards; animation-delay: calc(500ms + (var(--i) + 1) * 420ms); }
+  .ap-stage.run[data-scene="select"] .ap-pop { animation: ap-pop .3s cubic-bezier(.3, 1.5, .6, 1) both; animation-delay: calc(2.9s + var(--i) * 90ms); }
+  .ap-stage.run[data-scene="select"] .ap-w-done { animation: ap-in .35s ease both 3.6s; }
+  .ap-stage.run[data-scene="shop"] .ap-shop { animation: ap-rise .5s cubic-bezier(.2, .8, .3, 1) both .1s; }
+  .ap-stage.run[data-scene="shop"] .ap-block { animation: ap-in .4s ease both; animation-delay: calc(.6s + var(--i) * 450ms); }
+  .ap-stage.run[data-scene="game"] .ap-w-row { animation: ap-in .4s ease both; animation-delay: calc(2.3s + var(--i) * 350ms); }
+  .ap-stage.run[data-scene="game"] .ap-gold { animation: ap-pulse .3s ease 2.1s; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ap-team.them img { filter: none; }
+  .ap-scene, .ap-window { transition: none; }
+}
+@keyframes ap-in { from { opacity: 0; transform: translateY(6px); } }
+@keyframes ap-rise { from { opacity: 0; transform: translateY(16px) scale(.98); } }
+@keyframes ap-pop { from { opacity: 0; transform: scale(.4); } }
+@keyframes ap-reveal { to { filter: none; } }
+@keyframes ap-pulse { 50% { transform: scale(1.12); } }
+
+/* 단계 줄: 데모와 같이 움직인다 */
+.ap-steps { list-style: none; margin: 14px 0 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.ap-steps button {
+  position: relative; overflow: hidden; width: 100%; height: 100%; text-align: left;
+  display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; align-content: start;
+  padding: 12px 12px 14px; border-radius: 10px; border: 1px solid var(--line);
+  background: transparent; color: var(--muted); font-weight: 400;
+}
+.ap-steps button:hover { color: var(--text); filter: none; }
+.ap-steps button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.ap-steps button[aria-selected="true"] { background: var(--panel); color: var(--text); border-color: var(--panel-2); }
+.ap-step-n { grid-row: span 2; width: 24px; height: 24px; border-radius: 50%; border: 1px solid var(--line);
+  display: grid; place-items: center; font-size: 12px; font-weight: 700; }
+.ap-steps button[aria-selected="true"] .ap-step-n { background: var(--gold); border-color: var(--gold); color: var(--night); }
+.ap-steps b { font-size: 14px; }
+.ap-steps small { font-size: 12px; line-height: 1.45; }
+.ap-step-bar { position: absolute; left: 0; bottom: 0; height: 2px; width: 100%; background: var(--gold); transform: scaleX(0); transform-origin: left; }
+.ap-steps button[aria-selected="true"] .ap-step-bar { transform: scaleX(1); }
+@media (prefers-reduced-motion: no-preference) {
+  .ap-steps button.auto[aria-selected="true"] .ap-step-bar { animation: ap-bar 7s linear both; }
+}
+@keyframes ap-bar { from { transform: scaleX(0); } }
+
+/* 웹과 앱 */
+.ap-split { display: grid; grid-template-columns: 1fr 1fr; gap: 0; margin: 0 0 56px; border-top: 1px solid var(--line); }
+.ap-split > div { padding: 22px 24px 0 0; }
+.ap-split > div + div { padding-left: 24px; border-left: 1px solid var(--line); }
+.ap-split h2 { font-size: 22px; margin: 0 0 6px; }
+.ap-split > div + div h2 { color: var(--gold); }
+.ap-split p { margin: 0; color: var(--muted); line-height: 1.65; max-width: 30em; }
+
+/* 설치 */
+.ap-install { margin: 0 0 56px; padding: 26px 28px; border-radius: 16px; background: var(--panel); border: 1px solid var(--line); scroll-margin-top: 90px; }
+.ap-install.lit { animation: ap-lit 1.6s ease; }
+@keyframes ap-lit { 0%, 40% { border-color: var(--gold); box-shadow: 0 0 0 4px rgba(240, 180, 41, .18); } }
+.ap-install-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
+.ap-install h2, .ap-faq h2 { font-size: 26px; margin: 0; }
+.ap-install .seg { margin: 0; }
+.ap-install-steps { list-style: none; counter-reset: s; margin: 0 0 14px; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px; }
+.ap-install-steps[hidden] { display: none; }
+.ap-install-steps li { counter-increment: s; }
+.ap-install-steps li::before { content: counter(s); display: grid; place-items: center; width: 30px; height: 30px; margin-bottom: 10px;
+  border-radius: 50%; background: var(--night); border: 1px solid var(--gold); color: var(--gold); font-weight: 700; }
+.ap-install-steps b { display: block; margin-bottom: 4px; }
+.ap-install-steps p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.65; }
+.ap code { background: var(--night); padding: 1px 6px; border-radius: 4px; font-size: .92em; word-break: break-all; }
+
+/* 알아 둘 것 */
+.ap-faq { margin: 0 0 40px; max-width: 760px; }
+.ap-faq h2 { margin-bottom: 10px; }
+.ap-faq details { border-bottom: 1px solid var(--line); }
+.ap-faq summary { cursor: pointer; padding: 16px 0; font-weight: 700; list-style: none; display: flex; justify-content: space-between; gap: 12px; }
+.ap-faq summary::-webkit-details-marker { display: none; }
+.ap-faq summary::after { content: "+"; color: var(--gold); font-weight: 700; }
+.ap-faq details[open] summary::after { content: "−"; }
+.ap-faq p { margin: 0 0 16px; color: var(--muted); line-height: 1.7; }
+.ap-web-link { color: var(--muted); font-size: 14px; }
+.ap-web-link a { color: var(--text); }
+
+/* 웹 미리보기(#/items/web) 머리 */
+.ib-webbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 0 14px; padding: 10px 14px; border-radius: 10px;
+  background: var(--panel); border: 1px dashed var(--line); font-size: 14px; color: var(--muted); }
+.ib-webbar a { color: var(--gold); font-weight: 700; }
+
+@media (max-width: 860px) {
+  .ap-hero { grid-template-columns: minmax(0, 1fr); gap: 32px; }
+  .ap-split { grid-template-columns: 1fr; }
+  .ap-split > div + div { padding-left: 0; border-left: 0; border-top: 1px solid var(--line); margin-top: 22px; }
+  .ap-install-steps { grid-template-columns: 1fr; gap: 18px; }
+}
+@media (max-width: 640px) {
+  .ap-steps { grid-template-columns: 1fr; }
+  .ap-steps button { grid-template-columns: auto 1fr; }
+  .ap-dl { width: 100%; justify-content: center; padding: 0 20px; font-size: 20px; }
+  .ap-other a { width: 100%; justify-content: center; }
+  .ap-install { padding: 20px 18px; }
+  .ap-window { width: 52%; right: 4%; }
+}
+
+/* 머리줄: 웹·앱 구분 */
+.logo-tag { margin-left: 2px; padding: 2px 6px; border-radius: 5px; border: 1px solid var(--line); color: var(--muted);
+  font: 700 11px/1.2 var(--body); letter-spacing: 0; align-self: center; }
+.who .app-get { padding: 6px 12px; font-size: 13px; border-radius: 6px; text-decoration: none; color: var(--gold);
+  border: 1px solid rgba(240, 180, 41, .45); font-weight: 700; white-space: nowrap; }
+.who .app-get:hover { border-color: var(--gold); }
+.ib-web-tag { font: 700 13px/1 var(--body); color: var(--muted); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; vertical-align: middle; margin-left: 6px; }
+
+/* 앱 안(Tier.gg 앱 창) */
+.in-app .who .app-get { display: none; }
+.in-app .logo-tag { color: var(--night); background: var(--gold); border-color: var(--gold); }
+.ah-head { margin: 8px 0 22px; }
+.ah h1 { font-size: clamp(36px, 4.4vw, 48px); }
+.ah-card { padding: 24px 26px; border-radius: 16px; background: var(--panel); border: 1px solid var(--line); min-height: 140px; }
+.ah-row { display: flex; gap: 14px; align-items: flex-start; }
+.ah-row small { display: block; color: var(--muted); margin-top: 4px; line-height: 1.6; }
+.ah-title { font: 24px/1.2 var(--display); letter-spacing: -.01em; }
+.ah-dot { flex: none; width: 12px; height: 12px; margin-top: 8px; border-radius: 50%; background: var(--muted); }
+.ah-dot.select, .ah-dot.game { background: var(--gold); box-shadow: 0 0 0 0 rgba(240, 180, 41, .6); }
+@media (prefers-reduced-motion: no-preference) {
+  .ah-dot.select, .ah-dot.game { animation: ah-live 1.6s ease-out infinite; }
+}
+@keyframes ah-live { to { box-shadow: 0 0 0 10px rgba(240, 180, 41, 0); } }
+.ah-sub { font: 700 13px/1 var(--body); color: var(--muted); margin: 22px 0 10px; letter-spacing: 0; }
+.ah-icons { display: flex; flex-wrap: wrap; gap: 6px; }
+.ah-icons img { width: 44px; height: 44px; border-radius: 8px; border: 2px solid var(--line); }
+.ah-icons img.own { border-color: var(--gold); }
+.ah-buy { display: grid; gap: 10px; }
+.ah-buy > div { display: flex; gap: 12px; align-items: center; }
+.ah-buy img { width: 44px; height: 44px; border-radius: 8px; flex: none; }
+.ah-buy em { font-style: normal; color: var(--gold); margin-left: 4px; }
+.ah-buy small { display: block; color: var(--muted); font-size: 13px; }
+.ah-why { margin-top: 18px; }
+.ah-off { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  margin: -6px 0 18px; padding: 10px 12px; border-radius: 10px; background: var(--night); border: 1px dashed var(--line); color: var(--muted); font-size: 14px; }
+.ah-empty b { font: 22px/1.2 var(--display); }
+.ah-empty p { color: var(--muted); }
+.ah-steps { margin-top: 12px; }
+.ah-step { height: 100%; display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; align-content: start;
+  padding: 12px 12px 14px; border-radius: 10px; border: 1px solid var(--line); color: var(--muted); }
+.ah-step b { font-size: 14px; }
+.ah-step small { font-size: 12px; line-height: 1.45; }
+.ah-step.on { background: var(--panel); color: var(--text); border-color: var(--gold); }
+.ah-step.on .ap-step-n { background: var(--gold); border-color: var(--gold); color: var(--night); }

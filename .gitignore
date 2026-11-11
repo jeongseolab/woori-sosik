@@ -15,3 +15,7 @@ __pycache__/
 .playwright-mcp/
 tools/.cache/
 .rift-bake/
+
+# Tier.gg 앱 만들 때 생기는 것(python app/build.py)
+build/
+dist/
