@@ -303,7 +303,7 @@ function appWireDownloads(rel) {
   const primary = box.querySelector(".ap-dl");
   const asset = assets[primary.dataset.os];
   if (rel && rel.version) {
-    meta.innerHTML = `<span>버전 ${esc(rel.version)}</span>${asset ? `<span>${appSize(asset.size)}</span>` : ""}<span>무료</span>${rel.published_at ? `<span>${appDate(rel.published_at)}</span>` : ""}`;
+    meta.innerHTML = `<span>버전 ${esc(rel.version)}</span>${asset && asset.size ? `<span>${appSize(asset.size)}</span>` : ""}<span>무료</span>${rel.published_at ? `<span>${appDate(rel.published_at)}</span>` : ""}`;
   } else {
     meta.innerHTML = `<span>첫 버전을 준비하고 있어요. 곧 받을 수 있어요.</span>`;
   }

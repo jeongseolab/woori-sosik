@@ -613,11 +613,33 @@ def _latest_app_release():
                                 for os_, n in APP_ASSETS.items() if n in files}}
             break
     except (httpx.HTTPError, ValueError, KeyError):
-        # 잠깐 실패면 예전 값을 그대로 쓰고 1분 뒤 다시 본다
-        _app_release["at"] = now - 540
-        return _app_release["value"]
+        # GitHub API 는 로그인 없이 IP 마다 한 시간에 60번이다. Render 는 여러 서비스가 IP 를 같이 써서 금방 막힌다(403).
+        # 그때는 릴리스 피드(releases.atom, API 한도와 따로) 에서 태그만 읽고 파일 주소를 만든다(크기는 모른다)
+        value = _app_release_from_feed(httpx) or _app_release["value"]
+        _app_release.update(at=now - (300 if value else 540), value=value)
+        return value
     _app_release.update(at=now, value=value)
     return value
+
+
+def _app_release_from_feed(httpx):
+    import re
+    try:
+        r = httpx.get("https://github.com/%s/releases.atom" % APP_REPO, timeout=8, follow_redirects=True)
+        r.raise_for_status()
+    except httpx.HTTPError:
+        return None
+    for entry in re.findall(r"<entry>(.*?)</entry>", r.text, re.S):
+        tag = re.search(r"/releases/tag/(app-v[0-9.]+)\"", entry)
+        if not tag:
+            continue
+        tag = tag.group(1)
+        when = re.search(r"<updated>([^<]+)</updated>", entry)
+        base = "https://github.com/%s/releases/download/%s/" % (APP_REPO, tag)
+        return {"version": tag[5:], "published_at": when.group(1) if when else None,
+                "page": "https://github.com/%s/releases/tag/%s" % (APP_REPO, tag),
+                "assets": {os_: {"url": base + n, "size": None, "name": n} for os_, n in APP_ASSETS.items()}}
+    return None
 
 
 @app.get("/api/app/latest")
