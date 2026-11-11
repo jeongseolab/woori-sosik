@@ -32,6 +32,72 @@ function appBridge(timeout = 4000) {
     setTimeout(done, timeout);
   });
 }
+// ── 앱 업데이트 띠: 앱이 새 버전을 받아 두면(app/updater.py) 어느 탭에서든 위에 뜬다 ─────────────
+// 1.1.1 처럼 자동 업데이트가 없던 앱에는 "이번 한 번만 새로 받아 주세요" 를 보여 준다
+async function appUpdateWatch() {
+  const api = await appBridge(8000);
+  if (!api) return;
+  let info = {};
+  try { info = await api.info(); } catch { return; }
+  if (!api.update_state) {
+    const rel = await appLatest();
+    const os = /darwin/.test(info.os) ? "macos" : "windows";
+    const a = rel && rel.assets && rel.assets[os];
+    if (a && appNewer(rel.version, info.version)) {
+      appUpdateBar(`새 버전 ${esc(rel.version)}이 나왔어요. 이번 한 번만 새로 받아 지금 파일과 바꿔 주시면, 다음부터는 앱이 알아서 업데이트해요.`,
+        `<a class="au-btn" href="${esc(a.url)}" target="_blank" rel="noopener">새 버전 받기</a>`);
+    }
+    return;
+  }
+  let shown = "";
+  const tick = async () => {
+    let st;
+    try { st = await api.update_state(); } catch { st = {}; }
+    const key = st.state + (st.latest || "");
+    if (key !== shown) {
+      shown = key;
+      if (st.state === "ready") {
+        appUpdateBar(`새 버전 ${esc(st.latest)}을 받아 뒀어요. 다시 시작하면 바뀌어요.`,
+          `<button type="button" class="au-btn" data-restart>지금 다시 시작</button>`);
+        const b = document.querySelector("[data-restart]");
+        if (b) b.onclick = async () => { b.disabled = true; b.textContent = "다시 켜는 중…"; if (!(await api.restart())) b.textContent = "앱을 닫았다가 다시 켜 주세요"; };
+      } else if (st.state === "manual" && st.url) {
+        const why = st.reason === "translocated" ? "앱을 응용 프로그램 폴더로 옮기면 다음부터 알아서 업데이트돼요."
+          : st.reason === "readonly" ? "앱이 있는 폴더에 쓸 수 없어서 직접 받아야 해요." : "";
+        appUpdateBar(`새 버전 ${esc(st.latest)}이 나왔어요. ${why}`, `<a class="au-btn" href="${esc(st.url)}" target="_blank" rel="noopener">새 버전 받기</a>`);
+      } else if (st.state === "error" && st.url) {
+        appUpdateBar(`새 버전 ${esc(st.latest)}을 자동으로 받지 못했어요.`, `<a class="au-btn" href="${esc(st.url)}" target="_blank" rel="noopener">직접 받기</a>`);
+      } else {
+        appUpdateBar(null);
+      }
+    }
+    if (st.state !== "ready") setTimeout(tick, st.state === "downloading" || st.state === "checking" || st.state === "idle" ? 3000 : 60000);
+  };
+  tick();
+}
+
+function appNewer(a, b) {
+  const pa = String(a || "").split(".").map(Number), pb = String(b || "").split(".").map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] || 0, y = pb[i] || 0;
+    if (x !== y) return x > y;
+  }
+  return false;
+}
+
+function appUpdateBar(text, action = "") {
+  let bar = document.querySelector(".au-bar");
+  if (!text) { if (bar) bar.remove(); return; }
+  if (!bar) {
+    bar = document.createElement("div");
+    bar.className = "au-bar";
+    bar.setAttribute("role", "status");
+    document.body.prepend(bar);
+  }
+  bar.innerHTML = `<p>${text}</p>${action}`;
+}
+
+if (IN_APP) appUpdateWatch();
 const APP_SCENE_MS = 7000;
 let appRelease;                 // /api/app/latest 결과(한 번만 받는다)
 

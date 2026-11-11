@@ -32,6 +32,13 @@ FastAPI 로 만든 롤 전적 서비스. 데이터는 OP.GG 가 공개한 MCP �
   - 옵션: `--web-url`(다른 서버), `--overlay-only`(작은 창만), 그 밖의 것은 작은 창으로(`--demo`, `--demo-select`, `--no-itemset`, `--remove-itemset`, `--game`)
 - 만들기: `python app/build.py`(그 OS 에서). Windows `dist/Tier.gg.exe`(파일 하나), macOS `dist/Tier.gg.zip`(Tier.gg.app). 창 제목도 "Tier.gg".
   `app-v1.1.0` 같은 태그를 올리면 `.github/workflows/app.yml` 이 두 OS 에서 만들어 GitHub 릴리스에 붙인다
+- 자동 업데이트(`app/updater.py`, 1.2.0 부터): 켜면 뒤에서 가장 최근 `app-v*` 릴리스를 보고(그 뒤 6시간마다), 새 버전이면
+  받아서 GitHub 이 주는 sha256·크기를 맞춰 본 뒤 실행 파일 자리에 넣어 둔다(Windows 는 돌고 있는 exe 를 `.old` 로 비키고,
+  macOS 는 `.app` 을 바꾼다). 앱 창 위에 "다시 시작하면 바뀌어요" 띠가 뜨고, 안 눌러도 다음에 켜면 새 버전이다. 게임 중일 수
+  있어서 스스로 다시 켜지는 않는다. 다시 켤 때는 `PYINSTALLER_RESET_ENVIRONMENT=1` 로 새로 풀게 한다(안 그러면 옛 버전이
+  풀어 둔 폴더를 물려받았다가 그 폴더가 지워진다). 쓸 수 없는 폴더·macOS 다운로드 폴더에서 바로 연 앱은 "새 버전 받기" 띠만.
+  1.1.1 은 업데이트 기능이 없어서 웹이 "이번 한 번만 새로 받아 주세요" 띠를 띄운다. 시험: `--update-feed URL`(가짜 릴리스 목록),
+  `python -m pytest test_updater.py`
 - 내려받기 화면(`static/app-ui.js`, `static/app-page.css`): `GET /api/app/latest` 가 가장 최근 `app-v*` 릴리스의 버전·크기·주소를
   준다(10분 기억). 아직 없으면 "준비 중". OS 를 알아서 골라 큰 버튼, 다른 OS 는 작은 버튼. 오른쪽 데모는 한 판(챔프 선택 →
   게임 시작 → 귀환)을 따라가고 아래 단계 줄이 같이 움직인다(움직임 줄이기 설정이면 멈춤)

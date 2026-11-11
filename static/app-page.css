@@ -253,3 +253,11 @@
 .ah-step small { font-size: 12px; line-height: 1.45; }
 .ah-step.on { background: var(--panel); color: var(--text); border-color: var(--gold); }
 .ah-step.on .ap-step-n { background: var(--gold); border-color: var(--gold); color: var(--night); }
+
+/* 앱 업데이트 띠(app-ui.js appUpdateBar) */
+.au-bar { display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: var(--gold); color: var(--night); font-size: 14px; }
+.au-bar p { margin: 0; flex: 1; line-height: 1.5; }
+.au-btn { flex: none; padding: 7px 14px; border-radius: 8px; border: 0; background: var(--night); color: var(--gold); font: 700 13px/1 var(--body); text-decoration: none; cursor: pointer; }
+.au-btn:hover { filter: brightness(1.2); }
+.au-btn:focus-visible { outline: 2px solid var(--night); outline-offset: 2px; }
+.au-btn:disabled { opacity: .7; cursor: default; }

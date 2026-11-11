@@ -11,6 +11,7 @@
   python app/tiergg_app.py                              # 개발 중에 그대로
   python app/tiergg_app.py --web-url http://localhost:8765/   # 내 PC 서버로
   python app/tiergg_app.py --overlay-only               # 예전처럼 작은 창만
+  python app/tiergg_app.py --update-feed URL            # 업데이트 확인을 다른 주소로(시험용)
   python app/build.py                                   # 실행 파일 만들기
 
 작은 창의 옵션(--demo, --demo-select, --no-itemset, --game ...) 은 그대로 넘긴다.
@@ -20,7 +21,7 @@ import os
 import subprocess
 import sys
 
-APP_VERSION = "1.1.1"
+APP_VERSION = "1.2.0"
 WEB_URL = "https://tier-gg.onrender.com/"
 WINDOW_TITLE = "Tier.gg"        # 앱 창·작은 창 제목(작업 표시줄·Dock 에 보이는 이름)
 
@@ -31,10 +32,12 @@ else:
     ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "tools"))
+sys.path.insert(0, os.path.join(ROOT, "app"))
 
 import logging  # noqa: E402
 
 import item_tree  # noqa: E402
+import updater  # noqa: E402
 
 log = logging.getLogger("tiergg.app")
 DATA_DIR = item_tree._cache_dir()          # Windows %APPDATA%\TierGG, macOS ~/Library/Application Support/TierGG
@@ -93,11 +96,25 @@ class Overlay:
 class Api:
     """앱 창의 웹이 부르는 것(window.pywebview.api.*). 값은 JSON 으로 넘어간다."""
 
-    def __init__(self, overlay):
-        self._overlay = overlay
+    def __init__(self, overlay, upd):
+        self._overlay, self._upd = overlay, upd
+        self._window = None
 
     def info(self):
-        return {"version": APP_VERSION, "os": sys.platform, "overlay": self._overlay.running()}
+        return {"version": APP_VERSION, "os": sys.platform, "overlay": self._overlay.running(), "updater": True}
+
+    def update_state(self):
+        """{state: idle|checking|latest|downloading|ready|manual|error, current, latest?, url?, reason?}"""
+        return self._upd.snapshot()
+
+    def restart(self):
+        """받아 둔 새 버전으로 다시 켠다."""
+        if not self._upd.relaunch():
+            return False
+        self._overlay.stop()
+        if self._window is not None:
+            self._window.destroy()
+        return True
 
     def status(self):
         try:
@@ -123,13 +140,17 @@ p{margin:0;color:#9aabc9;font-size:14px}b{font-size:20px}</style>
 <script>setTimeout(function(){location.replace(%s)},150)</script>"""
 
 
-def run_app(web_url, passthrough):
+def run_app(web_url, passthrough, update_feed=None):
     import webview
     overlay = Overlay(passthrough)
     overlay.start()
+    upd = updater.Updater(APP_VERSION, DATA_DIR, feed=update_feed)
+    upd.start()
+    api = Api(overlay, upd)
     url = web_url + ("&" if "?" in web_url else "?") + "app=1"
-    window = webview.create_window(WINDOW_TITLE, html=SPLASH % json.dumps(url), js_api=Api(overlay),
+    window = webview.create_window(WINDOW_TITLE, html=SPLASH % json.dumps(url), js_api=api,
                                    width=1280, height=860, min_size=(900, 600), background_color="#0f1b33")
+    api._window = window
     log.info("Tier.gg 앱 %s 시작 %s", APP_VERSION, url)
     try:
         # private_mode=False: 로그인(웹의 localStorage) 을 앱 데이터 폴더에 남긴다
@@ -148,13 +169,14 @@ def main():
     overlay_child, argv = _take(argv, "--overlay")
     overlay_only, argv = _take(argv, "--overlay-only")
     web_url, argv = _take(argv, "--web-url", True)
+    update_feed, argv = _take(argv, "--update-feed", True)
     if overlay_child or overlay_only:
         import item_overlay
         item_overlay.APP_NAME = WINDOW_TITLE
         sys.argv = [sys.argv[0]] + argv
         item_overlay.main()
         return
-    run_app(web_url or WEB_URL, argv)
+    run_app(web_url or WEB_URL, argv, update_feed)
 
 
 if __name__ == "__main__":
