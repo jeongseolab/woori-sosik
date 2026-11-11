@@ -1159,14 +1159,21 @@
   const fxImg = new Image(), groundImg = new Image(), riftMapImg = new Image();
   let fxReady = false, groundReady = false, riftMapReady = false;
   const onFx = new Set();     // 그림 한 장을 다 받으면 부를 것(효과층이 텍스처로 올린다)
+  // 그림마다 다 받고 풀어(decode) 둔 뒤 끝나는 약속을 돌려준다. 연습장 로딩 화면이 이걸 기다려서, 바닥이 임시 무늬로 보이는 채로 시작하지 않는다
+  let artP = null;
   function loadArt() {
-    if (fxImg.src) return;
-    fxImg.onload = () => { fxReady = true; onFx.forEach(f => f()); };
-    groundImg.onload = () => { groundReady = true; };
-    riftMapImg.onload = () => { riftMapReady = true; };
-    fxImg.src = ART + "fx.webp";
-    groundImg.src = ART + "ground.jpg";
-    riftMapImg.src = ART + "minimap.jpg";
+    if (artP) return artP;
+    const img = (im, file, ok) => new Promise(res => {
+      im.onload = () => im.decode().catch(() => {}).then(() => { ok(); res(); });
+      im.onerror = () => res();       // 못 받으면 임시 그림으로 그리고 로딩은 끝낸다
+      im.src = ART + file;
+    });
+    artP = [
+      img(fxImg, "fx.webp", () => { fxReady = true; onFx.forEach(f => f()); }),
+      img(groundImg, "ground.jpg", () => { groundReady = true; }),
+      img(riftMapImg, "minimap.jpg", () => { riftMapReady = true; }),
+    ];
+    return artP;
   }
   // 스프라이트 한 칸을 떼어 둔다. color 를 주면 그 색을 곱해 입힌다(흰 텍스처용). 한 번 만든 건 다시 쓴다
   const SPR = new Map();
@@ -1491,7 +1498,7 @@
     loadArt();
     // 3D 모델을 판 시작 전에 미리 받아 둔다. 처음 나올 때 받기 시작하면 일찍 나오는 챔피언(모르가나·초가스 등) 은
     // 다 받기 전까지 초상화로 보인다
-    // 연습장을 열면 규칙 화면보다 먼저 롤 로딩 화면을 띄우고, 첫 판 처음에 나올 모델과 적 스킬 이펙트를 다 받을 때까지 시작을 막는다(나머지는 뒤에서. later).
+    // 연습장을 열면 규칙 화면보다 먼저 롤 로딩 화면을 띄우고, 맵 그림과 첫 판 처음에 나올 모델·적 스킬 이펙트를 다 받을 때까지 시작을 막는다(나머지는 뒤에서. later).
     // 받은 모델·텍스처는 dodge-gl.js 가 페이지에 남겨 둬서 티어표·그룹방에 갔다 와도 다시 받지 않는다(그때는 곧바로 끝난다)
     let loading = true;
     const loadingEl = root.querySelector("[data-loading]"), loadingFill = root.querySelector("[data-loading-fill]");
@@ -1576,7 +1583,11 @@
     // 로딩 화면에서는 처음(0초) 부터 나오는 스킬만 기다리고, 나머지 스킬의 모델·텍스처는 로딩 화면이 닫힌 뒤
     // 처음 나오는 시각(from) 이 이른 것부터 뒤에서 받는다. 다 받기 전에는 그 스킬을 아직 안 열린 것으로 친다(pickSkill)
     const later = new Set(SKILLS.filter(s => s.from > 0));
+    // 맵(바닥·미니맵)·효과 그림도 다 받아야 로딩 화면을 닫는다
+    const art = loadArt();
+    want(art.length);
     const firstLoad = Promise.all([
+      gate(Promise.all(art.map(p => p.then(one)))),
       ensureModels([...withSummons([faceKey]), ...SKILLS.filter(s => !later.has(s)).map(s => s.champ)]),
       ensureEnemyFx(SKILLS.filter(s => !later.has(s))),
     ]);
