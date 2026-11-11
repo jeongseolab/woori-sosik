@@ -98,6 +98,17 @@ function appUpdateBar(text, action = "") {
 }
 
 if (IN_APP) appUpdateWatch();
+
+// 작은 창을 "−" 로 숨겼거나 닫았으면, 앱 창을 맨 앞으로 가져올 때 다시 보인다(app/tiergg_app.py Api.show_overlay)
+if (IN_APP) {
+  let askedAt = 0;
+  window.addEventListener("focus", async () => {
+    if (Date.now() - askedAt < 1500) return;
+    askedAt = Date.now();
+    const api = await appBridge(2000);
+    if (api && api.show_overlay) api.show_overlay().catch(() => {});
+  });
+}
 const APP_SCENE_MS = 7000;
 let appRelease;                 // /api/app/latest 결과(한 번만 받는다)
 
@@ -135,7 +146,7 @@ const appChamp = key => `<img src="${esc(champImg(key))}" alt="" width="44" heig
 const APP_STEPS = [
   { key: "select", title: "챔프 선택", text: "내 픽과 상대 조합으로 빌드를 정해 상점 추천 탭에 넣어요" },
   { key: "shop", title: "게임 시작", text: "상점을 열면 추천 탭에 Tier.gg 빌드가 있어요. 전체 화면에서도 보여요" },
-  { key: "game", title: "귀환할 때마다", text: "지금 골드와 가방을 읽고 이번에 살 하위템을 알려 줘요" },
+  { key: "game", title: "귀환할 때마다", text: "지금 골드와 가방을 읽고 이번에 살 아이템을 알려 줘요" },
 ];
 
 function appStage() {
@@ -256,7 +267,7 @@ async function renderAppLanding() {
         <div class="ap-copy">
           <p class="ap-kind"><span class="ap-app-mark" aria-hidden="true"></span>Tier.gg 앱 전용</p>
           <h1>귀환할 때마다<br>살 템이 떠요</h1>
-          <p class="ap-lead">아이템 추천은 PC에 까는 Tier.gg 앱에서 써요. 앱에는 웹의 티어표·그룹방·듀오 궁합·연습장이 그대로 있고, 롤과 같이 켜 두면 챔프 선택에서 빌드를 상점 추천 탭에 넣고 게임 중에는 이번에 살 하위템을 알려 줘요. 따로 입력할 건 없어요.</p>
+          <p class="ap-lead">아이템 추천은 PC에 까는 Tier.gg 앱에서 써요. 앱에는 웹의 티어표·그룹방·듀오 궁합·연습장이 그대로 있고, 롤과 같이 켜 두면 챔프 선택에서 빌드를 상점 추천 탭에 넣고 게임 중에는 이번에 살 아이템을 알려 줘요. 따로 입력할 건 없어요.</p>
           ${appDownloadButtons(os)}
         </div>
         <div class="ap-show">${appStage()}</div>
@@ -448,7 +459,10 @@ function appHomeCard(st) {
   const icons = ids => `<div class="ah-icons">${ids.map(i => appItem(i)).join("")}</div>`;
   const off = st.overlay === false ? `
     <div class="ah-off"><span>작은 창이 꺼져 있어요. 켜야 게임 중에 이번에 살 것이 떠요.</span>
-      <button type="button" data-show-overlay>작은 창 켜기</button></div>` : "";
+      <button type="button" data-show-overlay>작은 창 켜기</button></div>`
+    : st.hidden ? `
+    <div class="ah-off"><span>작은 창을 숨겨 뒀어요. 챔프 선택이 시작되면 다시 떠요.</span>
+      <button type="button" data-show-overlay>지금 보이기</button></div>` : "";
   if (st.mode === "select") {
     return `${off}
       <div class="ah-row"><span class="ah-dot select" aria-hidden="true"></span><div>

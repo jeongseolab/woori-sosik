@@ -1042,6 +1042,8 @@
     return modelAsked;
   }
   const modelKey = champ => String(champ || "").toLowerCase();
+  // 내 챔피언 스킬이 세우는 소환물의 모델(아지르 W 모래 병사). 내 챔피언과 같이 받는다
+  const SUMMONS = { azir: ["azirsoldier"] };
   // HUD(DOM) 초상화는 캔버스가 아니라서 OP.GG 그림을 그대로 쓴다
   const hudFace = key => "https://opgg-static.akamaized.net/meta/images/lol/latest/champion/" + key + ".png";
   // 게임이 시작되기 전에 미리 받아 둔다. 못 받아도 원으로 그린다
@@ -1515,8 +1517,6 @@
         loading = false; loadingEl.hidden = true; root.classList.remove("dodge-loading");
       });
     }
-    // 내 챔피언 스킬이 세우는 소환물의 모델(아지르 W 모래 병사). 내 챔피언과 같이 받는다
-    const SUMMONS = { azir: ["azirsoldier"] };
     const withSummons = ks => ks.flatMap(k => [k, ...(SUMMONS[modelKey(k)] || [])]);
     // 아직 안 받은 모델이 있으면 로딩 화면을 띄우고 받는다.
     // quiet 면(시작 창에서 내 챔피언을 바꿨을 때) 로딩 화면 없이 뒤에서 받고, 다 받기 전에 시작하면 그때 로딩 화면을 띄운다(start)
@@ -6570,5 +6570,37 @@
     return { destroy, suspend, resume, setOpts, setBest, setChamp, mode: () => controls.mode };
   }
 
-  window.DodgeGame = { mount, fmt, SKILLS, VERSION };
+  // 연습장을 열기 전에 첫 로딩 화면이 기다리는 파일(약 6.5MB) 을 뒤에서 받아 둔다. Tier.gg 앱이 켜지면 부른다(app.js warmUp).
+  // mount 의 firstLoad 와 같은 것을 같은 주소로 받는다: 모델은 DodgeGL.rawModel(페이지 메모리 + Cache Storage),
+  // 이펙트 텍스처·효과음은 브라우저 HTTP 저장소(main.py 가 하루 저장 + 뒤에서 확인으로 내준다). 그래서 연습장을 열면 바로 끝난다
+  let prefetched = null;
+  function prefetch(champ) {
+    if (prefetched) return prefetched;
+    const keep = url => fetch(url).then(r => (r.ok ? r.arrayBuffer() : null)).catch(() => null);
+    const me = loadControls().champ || (MOBILITY[modelKey(champ)] ? modelKey(champ) : "ezreal");
+    const first = SKILLS.filter(s => !(s.from > 0));
+    const names = first.map(s => s.name);
+    preload();
+    ["fx.webp", "ground.jpg", "minimap.jpg", "lol-logo.webp"].forEach(f => keep(ART + f));     // loadArt 의 그림(다음엔 304 로 짧게)
+    const models = loadModelIndex().then(() => {
+      if (!window.DodgeGL || !DodgeGL.rawModel) return null;
+      const keys = [...new Set([champAlias(me), ...(SUMMONS[modelKey(me)] || []), ...first.map(s => s.champ)].map(modelKey))]
+        .filter(k => modelIndex[k]);
+      return Promise.all(keys.map(k => DodgeGL.rawModel(k, MODELS, modelIndex[k].v).catch(() => null)));
+    });
+    const vfx = !window.DodgeVfx ? null : DodgeVfx.load(ART + "vfx/").then(() => Promise.all([
+      ...DodgeVfx.skillTextures(names).map(i => keep(ART + "vfx/t/" + i + ".webp")),
+      DodgeVfx.loadSkins(),
+    ])).catch(() => null);
+    // 소리는 그림을 다 받은 뒤에(그사이 연습장을 열면 그쪽과 회선을 나눠 쓰지 않게)
+    prefetched = Promise.all([models, vfx]).then(() => fetch(ART + "sfx/lol/sfx.json").then(r => r.json())).then(j => {
+      const mineEv = new Set(Object.values(j.mine || {}).flatMap(sl => Object.values(sl).flat()));
+      const evs = new Set(names.flatMap(n => [j.cast, j.launch, j.hit, j.boom, j.ready].flatMap(tb => (tb && tb[n]) || [])));
+      const files = [...evs].filter(ev => !mineEv.has(ev)).flatMap(ev => (j.events[ev] || []).flat());
+      return Promise.all([...files.map(f => keep(ART + "sfx/lol/" + f)), ...SAMPLES.map(n => keep(ART + "sfx/" + n + ".ogg"))]);
+    }).catch(() => null);
+    return prefetched;
+  }
+
+  window.DodgeGame = { mount, fmt, SKILLS, VERSION, prefetch };
 })();

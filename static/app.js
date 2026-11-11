@@ -115,7 +115,11 @@ async function warmUp() {
   checkStamp();
   const quiet = p => p.catch(() => null);
   load("/api/dodge/me").catch(() => {});
-  await quiet(load("/api/tierlist"));
+  const tiers = await quiet(load("/api/tierlist"));
+  // 앱에서는 연습장 첫 로딩 파일(약 6.5MB) 도 미리 받는다(웹은 휴대폰 데이터를 아끼려고 연습장을 열 때 받는다)
+  if (typeof IN_APP !== "undefined" && IN_APP && window.DodgeGame && DodgeGame.prefetch) {
+    setTimeout(() => DodgeGame.prefetch(tiers && tiers.op && tiers.op.key), 1500);
+  }
   const rooms = await quiet(loadRooms());
   for (const r of rooms || []) {
     const room = await quiet(load("/api/rooms/" + r.id + "?lite=1"));

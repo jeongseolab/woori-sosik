@@ -90,14 +90,16 @@
   // ── 자료 ──
   let FX = null, BASE = "";
   const ready = [];
+  let loading = null;
   function load(base) {
     if (FX) return Promise.resolve(FX);
+    if (loading) return loading;       // 미리 받기(prefetch) 와 연습장이 같이 불러도 한 번만
     BASE = base;
-    return fetch(base + "fx.json").then(r => { if (!r.ok) throw new Error(r.status); return r.json(); }).then(j => {
+    return loading = fetch(base + "fx.json").then(r => { if (!r.ok) throw new Error(r.status); return r.json(); }).then(j => {
       FX = j;
       ready.forEach(f => f());
       return FX;
-    });
+    }).finally(() => { loading = null; });
   }
   const skillFx = name => (FX && FX.skills[name]) || null;
   const globalFx = kind => (FX && FX.global && FX.global[kind]) || null;

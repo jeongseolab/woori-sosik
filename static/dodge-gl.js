@@ -1145,5 +1145,6 @@
     };
   }
 
-  window.DodgeGL = { create, canvas2d, shapes };
+  // rawModel: 연습장을 열기 전에 모델 파일만 받아 둘 때(dodge.js prefetch). WebGL 없이 된다
+  window.DodgeGL = { create, canvas2d, shapes, rawModel };
 })();

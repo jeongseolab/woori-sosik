@@ -27,7 +27,12 @@ FastAPI 로 만든 롤 전적 서비스. 데이터는 OP.GG 가 공개한 MCP �
     로그인은 앱 데이터 폴더(`web/`) 에 남는다. 서버가 잠들어 있으면 그동안 로딩 화면
   - 작은 창(`tools/item_overlay.py`): 따로 띄운 프로세스(tkinter 와 웹 창이 둘 다 메인 스레드를 써야 해서). 지금 상태를
     `status.json` 에 남기고, 앱 창의 웹이 `window.pywebview.api.status()` 로 읽는다. 오른쪽 클릭으로 닫았으면 앱 창에서 다시 켠다.
-    앱 창을 닫으면(부모 프로세스가 없어지면) 같이 꺼진다
+    앱 창을 닫으면(부모 프로세스가 없어지면) 같이 꺼진다.
+    "−" 는 창만 숨긴다(상점 추천 탭 넣기는 계속). 앱 창이 맨 앞으로 오면(Windows 는 창의 Activated, macOS 는 웹의 focus)
+    앱이 `status.json.show` 를 만들어 다시 보이고, 숨긴 뒤 챔프 선택·게임이 시작돼도 다시 보인다. 작은 창은 눌러도 포커스를
+    가져가지 않는다(WS_EX_NOACTIVATE: 게임 창이 포커스를 잃지 않게)
+  - 연습장 미리 받기: 앱에서는 로그인하면(`app.js` warmUp) `DodgeGame.prefetch` 가 연습장 첫 로딩 파일(약 6.5MB) 을 같은
+    주소로 받아 둔다. 연습장을 열 때 받는 파일이 191개 → 10개(바뀌었는지 묻는 것만). 웹은 휴대폰 데이터 때문에 안 한다
   - 앱 데이터: Windows `%APPDATA%\TierGG`, macOS `~/Library/Application Support/TierGG` — `app.log`(문제 알릴 때), 템트리 캐시, 상태, 로그인
   - 옵션: `--web-url`(다른 서버), `--overlay-only`(작은 창만), 그 밖의 것은 작은 창으로(`--demo`, `--demo-select`, `--no-itemset`, `--remove-itemset`, `--game`)
 - 만들기: `python app/build.py`(그 OS 에서). Windows `dist/Tier.gg.exe`(파일 하나), macOS `dist/Tier.gg.zip`(Tier.gg.app). 창 제목도 "Tier.gg".

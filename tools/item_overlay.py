@@ -42,6 +42,25 @@ APP_NAME = "Tier.gg"
 #   PARENT_PID: 앱 창 프로세스. 그게 꺼지면 이 창도 끈다(한 파일 exe 는 끄라고 해도 자식이 남을 수 있다)
 STATUS_FILE = None
 PARENT_PID = None
+# 작은 창의 "−" 로 숨겼는가. 숨겨도 챔프 선택 → 상점 추천 탭 넣기는 그대로 한다(창만 안 보인다).
+# 다시 보이기: 앱 창을 맨 앞으로 가져오면 앱이 STATUS_FILE + ".show" 를 만든다(show_requested), 또는 챔프 선택·게임이 시작될 때
+HIDDEN = False
+
+
+def show_file():
+    return STATUS_FILE + ".show" if STATUS_FILE else None
+
+
+def show_requested():
+    """앱이 다시 보이라고 했으면 그 표시를 지우고 True."""
+    f = show_file()
+    if not f or not os.path.exists(f):
+        return False
+    try:
+        os.remove(f)
+    except OSError:
+        pass
+    return True
 
 
 def _pid_alive(pid):
@@ -91,7 +110,7 @@ def write_status(a):
     global _last_status
     if not STATUS_FILE:
         return
-    st = status_of(a)
+    st = {**status_of(a), "hidden": HIDDEN}
     if st == _last_status:
         return
     _last_status = st
@@ -325,6 +344,22 @@ def run_text(step, once=False):
         time.sleep(POLL)
 
 
+def _no_activate(root):
+    """Windows: 작은 창을 눌러도 포커스를 가져가지 않게(게임 창이 포커스를 잃지 않고, "−" 를 눌러도 앱 창이 '맨 앞으로 왔다' 고
+    착각하지 않는다). 끌기·누르기는 그대로 된다."""
+    if not sys.platform.startswith("win"):
+        return
+    try:
+        import ctypes
+        u = ctypes.windll.user32
+        root.update_idletasks()
+        hwnd = u.GetParent(root.winfo_id()) or root.winfo_id()
+        GWL_EXSTYLE, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW = -20, 0x08000000, 0x00000080
+        u.SetWindowLongW(hwnd, GWL_EXSTYLE, u.GetWindowLongW(hwnd, GWL_EXSTYLE) | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW)
+    except Exception:
+        pass
+
+
 def run_window(step):
     import tkinter as tk
 
@@ -338,8 +373,15 @@ def run_window(step):
     root.geometry("+%d+%d" % (root.winfo_screenwidth() - 380, 140))
     font = ("Malgun Gothic", 10)
 
-    head = tk.Label(root, bg=BG, fg=GOLD, font=("Malgun Gothic", 11, "bold"), anchor="w", padx=10, pady=6)
-    head.pack(fill="x")
+    top = tk.Frame(root, bg=BG)
+    top.pack(fill="x")
+    head = tk.Label(top, bg=BG, fg=GOLD, font=("Malgun Gothic", 11, "bold"), anchor="w", padx=10, pady=6)
+    head.pack(side="left", fill="x", expand=True)
+    # "−": 창을 숨긴다(앱 창을 맨 앞으로 가져오면 다시 보인다)
+    hide_btn = tk.Label(top, text="−", bg=BG, fg=MUTED, font=("Malgun Gothic", 12, "bold"), padx=10, cursor="hand2")
+    hide_btn.pack(side="right", anchor="n")
+    hide_btn.bind("<Enter>", lambda e: hide_btn.config(fg=GOLD))
+    hide_btn.bind("<Leave>", lambda e: hide_btn.config(fg=MUTED))
     sub = tk.Label(root, bg=BG, fg=MUTED, font=("Malgun Gothic", 9), anchor="w", padx=10)
     sub.pack(fill="x")
     buy_box = tk.Frame(root, bg=BG, padx=10)
@@ -368,7 +410,29 @@ def run_window(step):
     root.bind("<B1-Motion>", lambda e: root.geometry("+%d+%d" % (e.x_root - drag["x"], e.y_root - drag["y"])))
     root.bind("<Button-3>", lambda e: root.destroy())
 
-    state = {"advice": None, "shown": None}
+    state = {"advice": None, "shown": None, "hidden_mode": None}
+
+    def mode_of(a):
+        return a.get("mode") if isinstance(a, dict) else "wait"
+
+    def hide(_e=None):
+        global HIDDEN
+        HIDDEN = True
+        state["hidden_mode"] = mode_of(state["advice"])
+        root.withdraw()
+        write_status(state["advice"])
+        return "break"                  # 끌기(ButtonPress-1) 로 넘기지 않는다
+
+    def show():
+        global HIDDEN
+        HIDDEN = False
+        root.deiconify()
+        root.attributes("-topmost", True)
+        write_status(state["advice"])
+
+    hide_btn.bind("<ButtonPress-1>", hide)
+    show_requested()                    # 지난번에 남은 요청은 버린다
+    _no_activate(root)
 
     def poll():
         while True:
@@ -384,6 +448,16 @@ def run_window(step):
         if parent_gone():               # 앱 창을 닫았다
             root.destroy()
             return
+        if HIDDEN:
+            now = mode_of(state["advice"])
+            # 앱 창을 맨 앞으로 가져왔거나, 숨길 때와 달리 챔프 선택·게임이 시작됐으면 다시 보인다
+            if show_requested() or (now in ("select", "game") and now != state["hidden_mode"]):
+                show()
+            else:
+                root.after(500, draw)
+                return
+        else:
+            show_requested()            # 보이는 중에 온 요청은 버린다
         try:
             paint()
         except Exception as e:

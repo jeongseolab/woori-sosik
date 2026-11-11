@@ -21,7 +21,7 @@ import os
 import subprocess
 import sys
 
-APP_VERSION = "1.2.1"
+APP_VERSION = "1.2.2"
 WEB_URL = "https://tier-gg.onrender.com/"
 WINDOW_TITLE = "Tier.gg"        # 앱 창·작은 창 제목(작업 표시줄·Dock 에 보이는 이름)
 
@@ -80,10 +80,11 @@ class Overlay:
     def start(self):
         if self.running():
             return False
-        try:
-            os.remove(STATUS)               # 예전 판의 상태를 보여 주지 않게
-        except OSError:
-            pass
+        for f in (STATUS, STATUS + ".show"):  # 예전 판의 상태·보이기 요청을 남기지 않게
+            try:
+                os.remove(f)
+            except OSError:
+                pass
         self.p = subprocess.Popen(self.cmd())
         log.info("작은 창 켬 pid=%s", self.p.pid)
         return True
@@ -126,7 +127,18 @@ class Api:
         return st
 
     def show_overlay(self):
-        return self._overlay.start()
+        """작은 창을 보이게: 꺼졌으면 켜고, "−" 로 숨겼으면 다시 보이라고 한다(앱 창이 맨 앞으로 올 때 웹이 부른다)."""
+        if self._overlay.start():
+            return True
+        try:
+            with open(STATUS, encoding="utf-8") as f:
+                hidden = json.load(f).get("hidden")
+        except (OSError, ValueError):
+            hidden = False
+        if hidden:
+            with open(STATUS + ".show", "w") as f:
+                f.write("1")
+        return bool(hidden)
 
 
 # 서버가 자고 있으면(무료 서버) 첫 화면까지 30초쯤 걸린다. 그동안 빈 창 대신 보여 준다
@@ -140,6 +152,33 @@ p{margin:0;color:#9aabc9;font-size:14px}b{font-size:20px}</style>
 <script>setTimeout(function(){location.replace(%s)},150)</script>"""
 
 
+def _on_activate(cb):
+    """Windows: 앱 창이 맨 앞으로 올 때(Form.Activated) cb. 웹의 focus 이벤트는 창을 바꿔 올 때 오지 않아서 창 쪽에서 듣는다.
+    pywebview 의 창(BrowserForm) 이 이미 Activated 를 듣고 있어서 그 함수에 덧붙인다(창을 만들기 전에 부른다).
+    macOS 는 웹(app-ui.js) 의 focus 로 한다."""
+    if not sys.platform.startswith("win"):
+        return
+    try:
+        from webview.platforms import winforms
+        form = winforms.BrowserView.BrowserForm
+        orig = form.on_activated
+
+        def on_activated(self, *a):
+            orig(self, *a)
+            _quiet(cb)
+        form.on_activated = on_activated
+    except Exception:
+        log.exception("앱 창 Activated 연결 실패")
+
+
+def _quiet(cb):
+    try:
+        if cb():
+            log.info("앱 창이 맨 앞으로 와서 작은 창을 다시 보임")
+    except Exception:
+        log.exception("작은 창 다시 보이기 실패")
+
+
 def run_app(web_url, passthrough, update_feed=None):
     import webview
     overlay = Overlay(passthrough)
@@ -150,8 +189,10 @@ def run_app(web_url, passthrough, update_feed=None):
     window = webview.create_window(WINDOW_TITLE, html=SPLASH % json.dumps(url), js_api=api,
                                    width=1280, height=860, min_size=(900, 600), background_color="#0f1b33")
     api._window = window
-    # 작은 창은 앱 창이 뜬 뒤에 켠다(같이 켜면 둘이 CPU 를 나눠 써서 앱 창이 늦게 뜬다)
+    # 작은 창은 앱 창이 뜬 뒤에 켠다(같이 켜면 둘이 CPU 를 나눠 써서 앱 창이 늦게 뜬다).
+    # 그 뒤로는 앱 창이 맨 앞으로 올 때마다 숨긴(−)·닫은 작은 창을 다시 보인다
     window.events.shown += lambda: overlay.start()
+    _on_activate(lambda: overlay.p is not None and api.show_overlay())     # 처음 켤 때는 shown 이 켠다
     log.info("Tier.gg 앱 %s 시작 %s", APP_VERSION, url)
     try:
         # private_mode=False: 로그인(웹의 localStorage) 을 앱 데이터 폴더에 남긴다
