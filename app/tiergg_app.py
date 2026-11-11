@@ -21,7 +21,7 @@ import os
 import subprocess
 import sys
 
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.2.1"
 WEB_URL = "https://tier-gg.onrender.com/"
 WINDOW_TITLE = "Tier.gg"        # 앱 창·작은 창 제목(작업 표시줄·Dock 에 보이는 이름)
 
@@ -143,7 +143,6 @@ p{margin:0;color:#9aabc9;font-size:14px}b{font-size:20px}</style>
 def run_app(web_url, passthrough, update_feed=None):
     import webview
     overlay = Overlay(passthrough)
-    overlay.start()
     upd = updater.Updater(APP_VERSION, DATA_DIR, feed=update_feed)
     upd.start()
     api = Api(overlay, upd)
@@ -151,6 +150,8 @@ def run_app(web_url, passthrough, update_feed=None):
     window = webview.create_window(WINDOW_TITLE, html=SPLASH % json.dumps(url), js_api=api,
                                    width=1280, height=860, min_size=(900, 600), background_color="#0f1b33")
     api._window = window
+    # 작은 창은 앱 창이 뜬 뒤에 켠다(같이 켜면 둘이 CPU 를 나눠 써서 앱 창이 늦게 뜬다)
+    window.events.shown += lambda: overlay.start()
     log.info("Tier.gg 앱 %s 시작 %s", APP_VERSION, url)
     try:
         # private_mode=False: 로그인(웹의 localStorage) 을 앱 데이터 폴더에 남긴다

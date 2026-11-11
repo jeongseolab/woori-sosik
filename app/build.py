@@ -27,6 +27,17 @@ BUILD = os.path.join(ROOT, "build", "app")
 DIST = os.path.join(ROOT, "dist")
 
 
+# 작은 창(tkinter) 이 딸려 오는 Tcl/Tk 파일 900여 개 중 안 쓰는 것: 시간대(600여 개)·번역·예제 그림.
+# 한 파일 exe 는 켤 때마다 안의 파일을 전부 임시 폴더에 풀어서, 파일 수가 곧 켜는 시간이다(765개 빼니 0.45초 빨라짐).
+# encoding 은 남긴다(한글 Windows 의 cp949 를 Tcl 이 읽는다)
+TRIM = r'''import re as _re
+_DROP = _re.compile(r'^_tcl_data/(tzdata|msgs)/|^_tk_data/(msgs|images|demos)/')
+_n = len(a.datas)
+a.datas = [d for d in a.datas if not _DROP.match(d[0].replace(chr(92), '/'))]
+print('Tier.gg: Tcl/Tk 파일', _n - len(a.datas), '개 뺌')
+'''
+
+
 def make_icon():
     """웹 로고(금색 칸 + 남색 막대 셋) 를 그대로 그린다. → (png, ico)"""
     os.makedirs(BUILD, exist_ok=True)
@@ -48,8 +59,10 @@ def main():
     png, ico = make_icon()
     windows = sys.platform.startswith("win")
     sep = os.pathsep
-    args = [sys.executable, "-m", "PyInstaller", os.path.join(HERE, "tiergg_app.py"),
-            "--name", APP_FILE, "--windowed", "--noconfirm", "--clean",
+    # 1) 설정 파일(spec) 을 만들고 2) 안 쓰는 파일을 빼도록 고친 뒤 3) 그걸로 만든다
+    args = [sys.executable, "-c", "from PyInstaller.utils.cliutils.makespec import run; run()",
+            os.path.join(HERE, "tiergg_app.py"),
+            "--name", APP_FILE, "--windowed",
             "--paths", ROOT, "--paths", os.path.join(ROOT, "tools"),
             "--add-data", os.path.join(ROOT, "static", "items") + sep + "static/items",
             "--hidden-import", "item_overlay", "--hidden-import", "lcu", "--hidden-import", "item_tree", "--hidden-import", "updater",
@@ -59,12 +72,21 @@ def main():
             "--exclude-module", "fastapi", "--exclude-module", "uvicorn", "--exclude-module", "psycopg",
             "--exclude-module", "PIL", "--exclude-module", "numpy",
             "--icon", ico if windows else png,
-            "--distpath", DIST, "--workpath", BUILD, "--specpath", BUILD]
+            "--specpath", BUILD]
     if windows:
         args.append("--onefile")
     else:
         args += ["--osx-bundle-identifier", "gg.tier.app"]
     subprocess.run(args, check=True, cwd=ROOT)
+    spec = os.path.join(BUILD, APP_FILE + ".spec")
+    with open(spec, encoding="utf-8") as f:
+        text = f.read()
+    if "pyz = PYZ(a.pure)" not in text:
+        raise SystemExit("spec 모양이 바뀜: TRIM 을 넣을 곳이 없음")
+    with open(spec, "w", encoding="utf-8") as f:
+        f.write(text.replace("pyz = PYZ(a.pure)", TRIM + "pyz = PYZ(a.pure)", 1))
+    subprocess.run([sys.executable, "-m", "PyInstaller", spec, "--noconfirm", "--clean",
+                    "--distpath", DIST, "--workpath", BUILD], check=True, cwd=ROOT)
     if windows:
         out = os.path.join(DIST, APP_FILE + ".exe")
     else:

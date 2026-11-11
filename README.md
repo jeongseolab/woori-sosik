@@ -32,6 +32,8 @@ FastAPI 로 만든 롤 전적 서비스. 데이터는 OP.GG 가 공개한 MCP �
   - 옵션: `--web-url`(다른 서버), `--overlay-only`(작은 창만), 그 밖의 것은 작은 창으로(`--demo`, `--demo-select`, `--no-itemset`, `--remove-itemset`, `--game`)
 - 만들기: `python app/build.py`(그 OS 에서). Windows `dist/Tier.gg.exe`(파일 하나), macOS `dist/Tier.gg.zip`(Tier.gg.app). 창 제목도 "Tier.gg".
   `app-v1.1.0` 같은 태그를 올리면 `.github/workflows/app.yml` 이 두 OS 에서 만들어 GitHub 릴리스에 붙인다
+- 켜는 시간: 한 파일 exe 는 켤 때마다 안의 파일을 임시 폴더에 다 푼다. 그래서 `build.py` 가 작은 창(tkinter) 의 안 쓰는
+  Tcl/Tk 파일 765개(시간대·번역·예제 그림)를 빼고, 작은 창은 앱 창이 뜬 뒤에 켠다(창이 뜨기까지 2.7초 → 2.1초)
 - 자동 업데이트(`app/updater.py`, 1.2.0 부터): 켜면 뒤에서 가장 최근 `app-v*` 릴리스를 보고(그 뒤 6시간마다), 새 버전이면
   받아서 GitHub 이 주는 sha256·크기를 맞춰 본 뒤 실행 파일 자리에 넣어 둔다(Windows 는 돌고 있는 exe 를 `.old` 로 비키고,
   macOS 는 `.app` 을 바꾼다). 앱 창 위에 "다시 시작하면 바뀌어요" 띠가 뜨고, 안 눌러도 다음에 켜면 새 버전이다. 게임 중일 수
