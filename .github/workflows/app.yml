@@ -21,6 +21,8 @@ jobs:
         os: [windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
+    env:
+      PYTHONIOENCODING: utf-8     # Windows 서버 기본 출력(cp1252) 은 한글을 못 찍는다
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

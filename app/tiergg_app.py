@@ -20,7 +20,7 @@ import os
 import subprocess
 import sys
 
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.1.1"
 WEB_URL = "https://tier-gg.onrender.com/"
 WINDOW_TITLE = "Tier.gg"        # 앱 창·작은 창 제목(작업 표시줄·Dock 에 보이는 이름)
 

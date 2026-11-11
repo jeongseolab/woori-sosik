@@ -16,6 +16,10 @@ import sys
 
 from PIL import Image, ImageDraw
 
+# GitHub 의 Windows 서버는 출력이 cp1252 라 한글을 찍다가 멈춘다(앱은 다 만들었는데 실패로 끝남). UTF-8 로
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 APP_FILE = "Tier.gg"           # 실행 파일·.app 이름(받은 사람이 보는 이름)
 ROOT = os.path.abspath(os.path.join(HERE, ".."))
