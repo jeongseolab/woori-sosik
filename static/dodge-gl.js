@@ -482,6 +482,33 @@
       gl_FragColor = vec4(c * uAlpha, uAlpha);
     }`;
 
+  // 몸 빛(롤 VfxPrimitiveAttachedMesh): 챔피언 모델을 VS_MODEL 과 같은 자리·자세로 놓고, 조각은 롤 이펙트 셰이더(FS_VFX) 로 칠한다.
+  // UV 는 모델 UV 에 입자의 UV 변환(아핀: uUv = 원점·u축, uUv2 = v축) 을, 색·[프레임, 색 조회, 침식] 은 입자 하나의 값을 그대로
+  const VS_AVATAR = `
+    attribute vec3 aPos; attribute vec2 aUv;
+    uniform vec4 uPlace; uniform vec2 uRot; uniform float uScale;
+    uniform vec4 uC; uniform vec3 uC2; uniform vec2 uC3; uniform vec2 uRes;
+    uniform vec4 uUv; uniform vec2 uUv2; uniform vec4 uCol; uniform vec4 uX4; uniform vec4 uMuK;
+    varying vec2 vUv; varying vec4 vCol; varying vec4 vX; varying vec2 vMu;
+    void main() {
+      vec3 p = aPos * uScale;
+      float wx = uPlace.x + p.z * uRot.x - p.x * uRot.y;
+      float wy = uPlace.y + p.z * uRot.y + p.x * uRot.x;
+      float wz = p.y + uPlace.z;
+      float dy = (wy - uC3.y) - uC2.x * uC2.y, dz = wz - uC2.x * uC2.z;
+      float yc = -dy * uC2.z + dz * uC2.y;
+      float zc = -dy * uC2.y - dz * uC2.z;
+      float k = uC.w / zc * uC.x;
+      float sx = uC.y + (wx - uC3.x) * k, sy = uC.z - yc * k;
+      vec2 ndc = vec2(sx / uRes.x * 2.0 - 1.0, 1.0 - sy / uRes.y * 2.0);
+      float d = clamp((zc - 500.0) / 6000.0, 0.0, 1.0) * 2.0 - 1.0;
+      gl_Position = vec4(ndc * zc, d * zc, zc);
+      vUv = uUv.xy + uUv.zw * aUv.x + uUv2 * aUv.y;
+      vCol = uCol;
+      vX = uX4;
+      vMu = aUv * uMuK.zw + uMuK.xy;
+    }`;
+
   // ── 롤 이펙트(dodge-vfx.js 가 만든 삼각형) ──
   // 정점(롤 좌표 x, y 위, z 북쪽) → 바닥 좌표(x, -z, 높이 y) → 화면. 투영은 VS_MODEL 과 같다
   const VS_VFX = `
@@ -623,6 +650,7 @@
         final: program(VS_FULL, FS_FINAL),
         model: program(VS_MODEL, FS_MODEL),
         vfx: program(VS_VFX, FS_VFX),
+        avatar: program(VS_AVATAR, FS_VFX),
       };
     } catch (e) {
       console.warn("dodge-gl: 셰이더를 만들지 못해 2D 로 그립니다", e);
@@ -869,6 +897,7 @@
         const md = models.get(ac.key);
         if (!md) continue;
         pose(md, ac.anim, ac.time, ac.loop !== false, ac.from, ac.mix == null ? 1 : ac.mix);
+        md.posed = ac;          // drawAvatars 가 이 자세를 다시 쓴다(같은 챔피언이 둘이면 그 챔피언 것으로 다시 잡는다)
         gl.bindBuffer(gl.ARRAY_BUFFER, md.posBuf);
         gl.bufferSubData(gl.ARRAY_BUFFER, 0, md.out);
         gl.vertexAttribPointer(aPos, 3, gl.FLOAT, false, 12, 0);
@@ -959,6 +988,90 @@
         .then(put, () => { rec.failed = true; settle(); });
       return rec;
     }
+    // 묶음 하나의 텍스처·값을 셰이더(u: vfx 또는 avatar 프로그램의 uniform) 에 묶는다. 텍스처를 아직 다 못 받았으면 false
+    function material(u, b) {
+      const e = b.e, base = vfxTex(e.texture);
+      if (!base || !base.t) return false;
+      const ct = vfxTex(e.particleColorTexture), mt = e.textureMult && vfxTex(e.textureMult.textureMult);
+      const er = e.alphaErosionDefinition && vfxTex(e.alphaErosionDefinition.erosionMapName);
+      const pd = e.paletteDefinition, pt = pd && vfxTex(pd.paletteTexture);
+      // 곱하기·침식·색·팔레트 텍스처를 다 받을 때까지 그리지 않는다. 기본 텍스처만으로 그리면
+      // 모양을 깎는 마스크가 빠져 메시가 통째로 더해지고, 처음 날아오는 스킬이 하얗게 탄다(모르가나 Q 등)
+      if ([ct, mt, er, pt].some(r => r && !r.t && !r.failed)) return false;
+      bindTex(0, base.t, u.uTex);
+      const div = e.texDiv || [1, 1];
+      gl.uniform2f(u.uDiv, Math.max(1, div[0]), Math.max(1, div[1]));
+      const on = [ct && ct.t ? 1 : 0, mt && mt.t ? 1 : 0, er && er.t ? 1 : 0, pt && pt.t ? 1 : 0];
+      gl.uniform2f(u.uWrap, base.wrap && !(div[0] > 1 || div[1] > 1) ? 1 : 0, on[1] && mt.wrap ? 1 : 0);
+      gl.uniform4f(u.uOn, on[0], on[1], on[2], on[3]);
+      bindTex(1, on[0] ? ct.t : white, u.uColTex);
+      bindTex(2, on[1] ? mt.t : white, u.uMult);
+      bindTex(3, on[2] ? er.t : white, u.uErode);
+      bindTex(4, on[3] ? pt.t : white, u.uPal);
+      gl.uniform1f(u.uErodeA, on[2] && !er.opaque ? 1 : 0);
+      if (on[3]) {
+        const cnt = pd.paletteCount || 1, sel = pd.paletteSelector && pd.paletteSelector.c ? pd.paletteSelector.c[0] : 0;
+        const mix = pd.palleteSrcMixColor && pd.palleteSrcMixColor.c ? pd.palleteSrcMixColor.c : [1, 0, 0, 0];
+        gl.uniform4f(u.uPalSel, (sel + 0.5) / cnt, 0, 0, 0);
+        gl.uniform4f(u.uPalMix, mix[0], mix[1], mix[2], mix[3]);
+      }
+      gl.uniform1f(u.uAdd, b.add ? 1 : 0);
+      gl.uniform1f(u.uRef, e.alphaRef == null ? 5 : e.alphaRef);
+      return true;
+    }
+    // 몸 빛: 묶음 자리(바닥 좌표) 에서 가장 가까운 챔피언(120 안) 의 모델을 그 챔피언 자세 그대로 이펙트로 칠한다
+    function drawAvatars(list, actors, cam) {
+      if (!list || !actors || !actors.length || !cam) return;
+      const avs = list.filter(b => b.avatar);
+      if (!avs.length) return;
+      const q = P.avatar, u = q.u;
+      gl.useProgram(q.p);
+      gl.uniform4f(u.uC, cam.S, cam.OX, cam.OY, cam.FOCAL);
+      gl.uniform3f(u.uC2, cam.CAM_D, cam.COS, cam.SIN);
+      gl.uniform2f(u.uC3, cam.W2, cam.H2);
+      gl.uniform2f(u.uRes, cssW, cssH);
+      const aPos = q.a("aPos"), aUv = q.a("aUv");
+      gl.enableVertexAttribArray(aPos);
+      gl.enableVertexAttribArray(aUv);
+      gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL); gl.depthMask(false);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+      for (const b of avs) {
+        const A = b.avatar;
+        let best = null, bd = 120 * 120;
+        for (const ac of actors) {
+          if (!models.has(ac.key)) continue;
+          const d = (ac.x - A.x) ** 2 + (ac.y - A.y) ** 2;
+          if (d < bd) { bd = d; best = ac; }
+        }
+        if (!best || !material(u, b)) continue;
+        const md = models.get(best.key);
+        if (md.posed !== best) {
+          pose(md, best.anim, best.time, best.loop !== false, best.from, best.mix == null ? 1 : best.mix);
+          md.posed = best;
+          gl.bindBuffer(gl.ARRAY_BUFFER, md.posBuf);
+          gl.bufferSubData(gl.ARRAY_BUFFER, 0, md.out);
+        }
+        gl.bindBuffer(gl.ARRAY_BUFFER, md.posBuf);
+        gl.vertexAttribPointer(aPos, 3, gl.FLOAT, false, 12, 0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, md.uvBuf);
+        gl.vertexAttribPointer(aUv, 2, gl.FLOAT, false, 8, 0);
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, md.idxBuf);
+        gl.uniform4f(u.uPlace, best.x, best.y, best.z || 0, 0);
+        gl.uniform2f(u.uRot, Math.cos(best.angle), Math.sin(best.angle));
+        gl.uniform1f(u.uScale, md.m.scale);
+        const c = A.col, X = A.x4, uv = A.uv, mu = A.mu || [0, 0, 0, 0];
+        gl.uniform4f(u.uUv, uv[0], uv[1], uv[2], uv[3]);
+        gl.uniform2f(u.uUv2, uv[4], uv[5]);
+        gl.uniform4f(u.uCol, c[0], c[1], c[2], c[3]);
+        gl.uniform4f(u.uX4, X[0], X[1], X[2], 0);
+        gl.uniform4f(u.uMuK, mu[0], mu[1], mu[2], mu[3]);
+        gl.drawElements(gl.TRIANGLES, md.m.I, gl.UNSIGNED_SHORT, 0);
+      }
+      gl.disableVertexAttribArray(aUv);
+      gl.depthMask(true);
+      gl.disable(gl.DEPTH_TEST);
+    }
     // list: DodgeVfx.batches() 의 묶음. ground 면 바닥층만, 아니면 나머지만
     function drawVfx(list, cam, ground) {
       if (!list || !list.length || !cam) return;
@@ -978,14 +1091,8 @@
       gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
       for (const b of list) {
         if (!!b.ground !== !!ground) continue;
-        const e = b.e, base = vfxTex(e.texture);
-        if (!base || !base.t) continue;
-        const ct = vfxTex(e.particleColorTexture), mt = e.textureMult && vfxTex(e.textureMult.textureMult);
-        const er = e.alphaErosionDefinition && vfxTex(e.alphaErosionDefinition.erosionMapName);
-        const pd = e.paletteDefinition, pt = pd && vfxTex(pd.paletteTexture);
-        // 곱하기·침식·색·팔레트 텍스처를 다 받을 때까지 그리지 않는다. 기본 텍스처만으로 그리면
-        // 모양을 깎는 마스크가 빠져 메시가 통째로 더해지고, 처음 날아오는 스킬이 하얗게 탄다(모르가나 Q 등)
-        if ([ct, mt, er, pt].some(r => r && !r.t && !r.failed)) continue;
+        if (b.avatar) continue;          // 몸 빛은 drawAvatars 가 모델로 그린다
+        if (!material(u, b)) continue;
         if (b.verts.byteLength > vcap) { vcap = b.verts.byteLength * 2; gl.bufferData(gl.ARRAY_BUFFER, vcap, gl.DYNAMIC_DRAW); }
         gl.bufferSubData(gl.ARRAY_BUFFER, 0, b.verts);
         let off = 0;
@@ -993,25 +1100,6 @@
           if (a >= 0) { gl.enableVertexAttribArray(a); gl.vertexAttribPointer(a, sizes[k], gl.FLOAT, false, VF * 4, off * 4); }
           off += sizes[k];
         });
-        bindTex(0, base.t, u.uTex);
-        const div = e.texDiv || [1, 1];
-        gl.uniform2f(u.uDiv, Math.max(1, div[0]), Math.max(1, div[1]));
-        const on = [ct && ct.t ? 1 : 0, mt && mt.t ? 1 : 0, er && er.t ? 1 : 0, pt && pt.t ? 1 : 0];
-        gl.uniform2f(u.uWrap, base.wrap && !(div[0] > 1 || div[1] > 1) ? 1 : 0, on[1] && mt.wrap ? 1 : 0);
-        gl.uniform4f(u.uOn, on[0], on[1], on[2], on[3]);
-        bindTex(1, on[0] ? ct.t : white, u.uColTex);
-        bindTex(2, on[1] ? mt.t : white, u.uMult);
-        bindTex(3, on[2] ? er.t : white, u.uErode);
-        bindTex(4, on[3] ? pt.t : white, u.uPal);
-        gl.uniform1f(u.uErodeA, on[2] && !er.opaque ? 1 : 0);
-        if (on[3]) {
-          const cnt = pd.paletteCount || 1, sel = pd.paletteSelector && pd.paletteSelector.c ? pd.paletteSelector.c[0] : 0;
-          const mix = pd.palleteSrcMixColor && pd.palleteSrcMixColor.c ? pd.palleteSrcMixColor.c : [1, 0, 0, 0];
-          gl.uniform4f(u.uPalSel, (sel + 0.5) / cnt, 0, 0, 0);
-          gl.uniform4f(u.uPalMix, mix[0], mix[1], mix[2], mix[3]);
-        }
-        gl.uniform1f(u.uAdd, b.add ? 1 : 0);
-        gl.uniform1f(u.uRef, e.alphaRef == null ? 5 : e.alphaRef);
         gl.drawArrays(gl.TRIANGLES, 0, b.n);
       }
       locs.forEach(a => { if (a >= 0) gl.disableVertexAttribArray(a); });
@@ -1040,6 +1128,7 @@
       drawBatch(ground);
       drawVfx(o.vfx, o.cam, true);
       drawModels(o.actors, o.cam);
+      drawAvatars(o.vfx, o.actors, o.cam);
       drawVfx(o.vfx, o.cam, false);
       layer(tFg, o.waves);
       drawBatch(air);

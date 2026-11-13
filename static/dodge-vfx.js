@@ -335,6 +335,14 @@
         if (e.rotation0) { const r = life(e.rotation0, f, [0, 0, 0]); p.rot[0] += r[0] * dt; p.rot[1] += r[1] * dt; p.rot[2] += r[2] * dt; }
         if (e.particleUVScrollRate) { const s = life(e.particleUVScrollRate, f, [0, 0]); p.scroll[0] += s[0] * dt; p.scroll[1] += s[1] * dt; }
         if (p.uvSpin) p.uvRot += p.uvSpin * dt;
+        // 꼬리(Trail): 파티클이 지나온 자리를 적어 둔다. 한 번에 하나만 사는 발생기(요네 E 돌진 머리: 1초에 1.5개, 수명 0.125초) 는
+        // 파티클끼리 이을 수 없어, build 가 이 자취로 리본을 만든다. [x, y, z, 지나온 길이]
+        if (isTrail(e)) {
+          const h = p.hist || (p.hist = []), last = h[h.length - 1];
+          const d = last ? last[3] + Math.hypot(p.pos[0] - last[0], p.pos[1] - last[1], p.pos[2] - last[2]) : (p.dist || 0);
+          if (!last || d - last[3] > 1) h.push([p.pos[0], p.pos[1], p.pos[2], d]);
+          if (h.length > 48) h.shift();
+        }
       }
       if (em.ps.length) alive = true;
       if (!inst.stopped && (L == null || em.age < t0 + L)) alive = true;
@@ -482,8 +490,12 @@
     const cs = camera(cam);
 
     if (T === "VfxPrimitiveCameraTrail" || T === "VfxPrimitiveArbitraryTrail") {
-      // 리본: 새 파티클(머리) → 옛 파티클(꼬리)
-      const pts = ps.slice().reverse();
+      // 리본: 새 파티클(머리) → 옛 파티클(꼬리). 파티클이 하나뿐이면 그 파티클이 지나온 자취(hist) 로
+      let pts = ps.slice().reverse();
+      if (pts.length < 2 && pts[0] && pts[0].hist && pts[0].hist.length > 1) {
+        const p0 = pts[0];
+        pts = p0.hist.slice().reverse().map(h => Object.assign(Object.create(p0), { pos: [h[0], h[1], h[2]], dist: h[3] }));
+      }
       if (pts.length < 2) return 0;
       const tr = prim.mTrail || {};
       let walked = 0;
@@ -572,7 +584,7 @@
         continue;
       }
       const ori = orientation(inst, e, p);
-      if (T === "VfxPrimitiveMesh" || T === "VfxPrimitiveAttachedMesh") {
+      if (T === "VfxPrimitiveMesh") {
         const m = FX.meshes[prim.mesh];
         if (!m) continue;
         if (m.skin && !m.raw) { if (!m.bad) loadSkin(m); continue; }
@@ -650,6 +662,7 @@
     }
     return m;
   }
+  const isTrail = e => { const T = e.primitive && e.primitive.T; return T === "VfxPrimitiveCameraTrail" || T === "VfxPrimitiveArbitraryTrail"; };
   function scaleOf(e, p) {
     const k = life(e.scale0, p.f, [1, 1, 1]);
     return [p.scale[0] * k[0], p.scale[1] * k[1], p.scale[2] * k[2]];
@@ -714,6 +727,20 @@
     for (const inst of live) {
       inst.ems.forEach((em, k) => {
         if (!em.ps.length || (em.e.texture == null && !em.e.primitive)) return;     // 그림 없는 운반 발생기(자식 시스템만 데리고 다닌다)
+        // 몸 빛(VfxPrimitiveAttachedMesh, 발생기 이름 Avatar): 롤은 붙은 챔피언의 몸 메시를 이 텍스처·색으로 한 번 더 그린다.
+        // 여기서는 정점을 만들지 않고 값만 넘긴다. dodge-gl.js drawAvatars 가 그 자리의 챔피언 모델을 같은 자세로 다시 그린다
+        if (em.e.primitive && em.e.primitive.T === "VfxPrimitiveAttachedMesh") {
+          for (const p of em.ps) {
+            const col = colorOf(em.e, p);
+            if (col[3] <= 0.002) continue;
+            if (inst.gain) { col[0] *= inst.gain; col[1] *= inst.gain; col[2] *= inst.gain; }
+            const o0 = uvT(em.e, p, [0, 0]), o1 = uvT(em.e, p, [1, 0]), o2 = uvT(em.e, p, [0, 1]);
+            out.push({ e: em.e, start: 0, n: 0, ground: false, add: ADDITIVE.has(em.e.blendMode), pass: em.e.pass || 0, k,
+                       avatar: { x: p.pos[0], y: -p.pos[2], col, x4: extra(em.e, p), uv: [o0[0], o0[1], o1[0] - o0[0], o1[1] - o0[1], o2[0] - o0[0], o2[1] - o0[1]],
+                                 mu: em.e.textureMult ? multUv(em.e, p) : null } });
+          }
+          return;
+        }
         const start = W.n;
         const n = build(inst, em, cam, W);
         if (!n) return;
