@@ -567,3 +567,26 @@ def test_item_set_has_component_paths():
     first = next(b for b in s["blocks"] if b["type"].startswith("1번째"))
     assert [int(x["id"]) for x in first["items"]] == [1036, 1053, 1042, 1043, 1037]     # 롱소드 → 흡혈의 낫 → 단검 → 곡궁 → 곡괭이
     assert not any("광전사" in b["type"] for b in s["blocks"])                        # 신발은 빼고
+
+
+def test_spell_hints_and_lane_pick():
+    import copy, sys, os
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools"))
+    import item_overlay as O
+    # 순간이동은 탑 쪽으로: 베인(탑·원딜) 과 루시안(원딜·미드) 이 같이 있으면 순간이동 든 베인이 탑
+    tp = _p("베인", "MIDDLE")
+    tp["tp"] = True
+    team = [tp, _p("아리", "MIDDLE"), _p("리 신", "", smite=True), _p("징크스", "BOTTOM"), _p("레오나", "UTILITY")]
+    assert X.assign_lanes(team, SHARES)[0] == "top"
+    # 작은 창에서 고른 라인이 가장 세다(데모 징크스를 탑으로 고르면 탑, 맞라이너는 적 탑)
+    O.TREE_OVERRIDE = {}
+    try:
+        g = copy.deepcopy(O.DEMO)
+        a = O.advise(g)
+        O.LANE_PICK.update(champ=a["champion_id"], lane="top")
+        b = O.advise(g)
+        assert b["lane"] == "top" and b["lane_picked"] and b["opponent"] != "드레이븐"
+        assert O._situation(b).startswith("탑 ·")
+    finally:
+        O.LANE_PICK.clear()
+        O.TREE_OVERRIDE = None

@@ -158,9 +158,14 @@ def _cid(raw):
     return None
 
 
-def _has_smite(p):
+def _spells(p):
+    """소환사 주문 이름들(영문 raw 이름 + 표시 이름, 소문자 한 줄)."""
     sp = p.get("summonerSpells") or {}
-    return any("smite" in " ".join(str(v) for v in (s or {}).values()).lower() for s in sp.values())
+    return " ".join(" ".join(str(v) for v in (s or {}).values()) for s in sp.values()).lower()
+
+
+def _has_smite(p):
+    return "smite" in _spells(p)
 
 
 def _player(p):
@@ -169,7 +174,8 @@ def _player(p):
     return {"id": _cid(p.get("rawChampionName")), "items": inv, "kills": sc.get("kills", 0),
             "deaths": sc.get("deaths", 0), "cs": sc.get("creepScore", 0), "level": p.get("level", 1),
             "item_gold": _item_gold(inv), "team": p.get("team"), "api_lane": LIVE_LANE.get(p.get("position") or ""),
-            "smite": _has_smite(p), "name": p.get("championName")}
+            "smite": _has_smite(p), "tp": "teleport" in _spells(p),
+            "bot_spell": any(k in _spells(p) for k in ("summonerheal", "summonerbarrier")), "name": p.get("championName")}
 
 
 # 라인 비율(OP.GG) 이 없을 때 챔피언 역할로 어림한다
@@ -196,7 +202,8 @@ def assign_lanes(team, shares=None, fixed=None):
     (베인을 미드로) 그것만 믿지 않고 다섯 자리 배치 중 가장 그럴듯한 것을 고른다.
 
     점수: 그 챔피언이 그 라인을 가는 비율(OP.GG, log) + API 가 준 라인이면 +2 + 강타면 정글 +6(아니면 -6)
-    + fixed(사람 번호 → 라인, 챔프 선택에서 받은 내 라인) 이면 +8.
+    + 순간이동이면 탑 +1.5 · 회복·방어막이면 원딜 +1 + fixed(사람 번호 → 라인: 작은 창에서 고른 라인·챔프 선택의 내 라인) 이면 +20.
+    (2026-11-13 봇전: API 는 탑 베인을 미드로, 우리 팀에 미드 둘·탑 없음. 맞라이너 마오카이를 이 점수로 찾는다)
     """
     fixed = fixed or {}
     n = len(team)
@@ -210,8 +217,12 @@ def assign_lanes(team, shares=None, fixed=None):
             v += 2.0
         if p.get("smite"):
             v += 6.0 if lane == "jungle" else -6.0
+        if p.get("tp") and lane == "top":
+            v += 1.5
+        if p.get("bot_spell") and lane == "adc":
+            v += 1.0
         if fixed.get(k) == lane:
-            v += 8.0
+            v += 20.0
         return v
     table = [[score(k, l) for l in LANES] for k in range(n)]
     best = max(itertools.permutations(range(len(LANES)), n), key=lambda pm: sum(table[k][pm[k]] for k in range(n)))

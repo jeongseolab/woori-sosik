@@ -159,6 +159,11 @@ def fetch_live():
         return None
 
 
+# 작은 창에서 사용자가 고른 내 라인 {"champ": 챔피언 번호, "lane": 라인}. 라인 퀘스트는 어떤 API 에도 안 나와서(롤 Live API·
+# 클라이언트 세션 모두 확인, 2026-11-13) 자동으로 고른 라인이 틀리면 사용자가 한 번 눌러 바꾼다. 게임이 끝나면 지운다
+LANE_PICK = {}
+
+
 def advise(game, my_lane=None):
     """게임 자료 → 보여 줄 것(dict). 협곡이 아니거나 나를 못 찾으면 이유(str).
 
@@ -173,12 +178,15 @@ def advise(game, my_lane=None):
     live = X.from_live(game, my_lane, shares)
     if isinstance(live, str):
         return live
+    if LANE_PICK.get("champ") == live["champion"] and LANE_PICK.get("lane"):
+        live = X.from_live(game, LANE_PICK["lane"], shares)
     inventory, gold, cid, lane, ctx = live["inventory"], live["gold"], live["champion"], live["lane"], live["ctx"]
     tree = tree_of(cid, lane)
     plan = I.plan_build(cid, lane, tree, ctx, inventory)
     buy = I.plan_buy(cid, lane, plan["items"], inventory, gold, ctx)
     have = set(inventory)
-    return {"champion": I.data()["champions"][cid]["name"], "lane": lane, "gold": gold,
+    return {"champion": I.data()["champions"][cid]["name"], "champion_id": cid, "lane": lane, "gold": gold,
+            "lane_picked": LANE_PICK.get("champ") == cid and bool(LANE_PICK.get("lane")),
             "buy": buy["buy"], "sell": buy["sell"], "build": plan["items"],
             "owned": {i for i in plan["items"] if i in have}, "time": live["t"], "source": plan["source"],
             "lane_state": ctx.get("lane"), "opponent": live["opponent"],
@@ -214,6 +222,8 @@ class Watcher:
 
     def __call__(self):
         game = self.get_game()
+        if not game:
+            LANE_PICK.clear()           # 게임이 끝나면 고른 라인도 지운다
         if game:
             # 챔프 선택 때 본 챔피언으로 들어온 판이면 그때 받은 라인(이전 판의 것이면 안 쓴다)
             lane = None
@@ -302,8 +312,9 @@ class FakeClient:
 
 
 def _situation(a):
-    """머리글 아래 한 줄: 시간 · 맞라이너와 비교."""
-    parts = ["%d:%02d" % (a["time"] // 1, round(a["time"] % 1 * 60) % 60)]
+    """머리글 아래 한 줄: 내 라인(눌러서 바꾸기) · 시간 · 맞라이너와 비교."""
+    parts = [L.LANE_KO.get(a.get("lane"), "라인 모름") + ("" if a.get("lane_picked") else " ▸"),
+             "%d:%02d" % (a["time"] // 1, round(a["time"] % 1 * 60) % 60)]
     s = a.get("lane_state")
     if s is not None and a.get("opponent"):
         word = "앞섬" if s > .15 else "밀림" if s < -.15 else "비슷"
@@ -377,9 +388,13 @@ def _keep_top(root):
         return
     try:
         import ctypes
-        u = ctypes.windll.user32
+        from ctypes import wintypes as W
+        u = ctypes.WinDLL("user32")
+        u.GetParent.argtypes, u.GetParent.restype = [W.HWND], W.HWND
+        # 창 번호를 HWND 로 넘겨야 한다. 그냥 -1 을 넘기면 64비트에서 32비트 정수로 잘려 "잘못된 창"(1400) 으로 실패했다
+        u.SetWindowPos.argtypes = [W.HWND, W.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_uint]
         hwnd = u.GetParent(root.winfo_id()) or root.winfo_id()
-        HWND_TOPMOST, SWP_NOSIZE, SWP_NOMOVE, SWP_NOACTIVATE = -1, 0x0001, 0x0002, 0x0010
+        HWND_TOPMOST, SWP_NOSIZE, SWP_NOMOVE, SWP_NOACTIVATE = W.HWND(-1), 0x0001, 0x0002, 0x0010
         u.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE)
     except Exception:
         pass
@@ -456,6 +471,23 @@ def run_window(step):
         write_status(state["advice"])
 
     hide_btn.bind("<ButtonPress-1>", hide)
+
+    # 게임 중 둘째 줄(라인 · 시간 · 맞라이너) 을 누르면 내 라인을 다음 라인으로(탑 → 정글 → 미드 → 원딜 → 서폿)
+    def pick_lane(_e=None):
+        a = state["advice"]
+        if not (isinstance(a, dict) and a.get("mode") != "select"):      # 게임 중(advise 의 dict) 만
+            return None
+        order = list(X.LANES)
+        cur = a.get("lane") if a.get("lane") in order else order[-1]
+        LANE_PICK.update(champ=a.get("champion_id"), lane=order[(order.index(cur) + 1) % len(order)])
+        try:
+            state["advice"] = step()            # 바로 다시 계산해서 보여 준다(2초 기다리지 않게)
+            write_status(state["advice"])
+        except Exception:
+            pass
+        return "break"                          # 끌기로 넘기지 않는다
+    sub.bind("<ButtonPress-1>", pick_lane)
+    sub.config(cursor="hand2")
     show_requested()                    # 지난번에 남은 요청은 버린다
     _no_activate(root)
 
