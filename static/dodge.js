@@ -42,7 +42,7 @@
 (function () {
   // 게임 버전 "앞.가운데.끝". 앞 = 새 챔피언 추가, 가운데 = 스킬 추가·버그 수정, 끝 = 아주 미묘한 변화.
   // 하나를 올리면 그 뒤 숫자는 0 으로. 서버는 앞 숫자가 같은 기록끼리만 순위를 매긴다(ranking.py 의 DODGE_VERSION 과 같게)
-  const VERSION = "22.0.4";
+  const VERSION = "22.1.0";
 
   const ARENA = { w: 1400, h: 900 };
   const CHAMP = { radius: 65, speed: 335 };
@@ -100,6 +100,7 @@
   //     돌아가는 동안(시전 포함) 공중에 뜨지 않는다. 쿨타임은 몸으로 돌아온 뒤부터
   //   amb: 암베사 스킬(q·w·e·r). 시전·돌진·도착 때 그 스킬의 효과를 낸다(ambStrike·ambLand)
   //   cd: 롤 최대 레벨 쿨타임(기본 스킬 5레벨, 궁극기 3레벨). 게임에서는 skillCd() 로 4~20초 안으로 맞춘다
+  //   fxBuf: 판정에는 없는 롤 버프(킨드레드 Q 공격 속도 4초) 의 이펙트를 내려앉은 뒤 이 초 동안 붙인다
   // kind: guard 는 움직이지 않고 적 스킬을 막는다
   //   parry: 이 초 동안 모든 스킬을 막고 그동안 못 움직인다(피오라 W 응수).
   //   spellShield: 이 초 안에 처음 맞는 스킬 하나를 피해·CC(공중에 뜸 포함) 모두 막는다(주문 보호막).
@@ -163,7 +164,7 @@
     gnar: { slot: 2, kind: "dash", range: 475, dur: 0.6, arc: 120, cd: 12, src: "data(TravelTime), arc: 추정" },
     kindred: [
       // 킨드레드 Q: 돌아서지 않고 뛰는 쪽 각도로 Spell1Forward·Right·Left·Back(뒤로 뛰면 끝에 그쪽을 본다. 클립 끝 몸 방향 -154°)
-      { slot: 0, kind: "dash", range: 340, fixed: true, speed: 500, msScale: true, cd: 9,
+      { slot: 0, kind: "dash", range: 340, fixed: true, speed: 500, msScale: true, cd: 9, fxBuf: 4,
         dirAnims: { cut: [45, 135], spin: "keep", anims: ["kqf", "kqr", "kql", "spell1", "spell1"] },
         src: "data(DashSpeed 500), + 이동 속도: 롤 위키, dirAnims: 롤 클립 이름(Spell1Forward/Back/Left/Right) 과 클립의 몸 방향" },
       { slot: 3, kind: "guard", lambs: { radius: 530, dur: 4 }, cd: 120, src: "data(AoERadius·BuffDuration)" },
@@ -2822,12 +2823,12 @@
           // 이즈리얼 E: 도착하면 순간이동한 쪽을 보고 착지 동작. 몸이 이미 그쪽으로 쏠려 있어 섞지 않는다(돌린 채 섞으면 몸이 두 번 돈다)
           if (act && act.faceAfter) { facing = act.faceAfter; faceNow(); }
           act = { anim: sk.exitAnim, t0: t, hold: t, until: t + clipLen(sk.exitAnim), land: true };
-          lastPose = null; blendFrom = null;
+          myBlend.last = null; myBlend.from = null;
         } else if (!sk.step) landAct(m);
         myPlay(myPart(sk, "land"));
         // 요네 E 의 buf(Yone_E_Invulnerable_Buf) 는 밀려나기 면역이라 몸으로 돌아갈 때만 붙인다(soulBack)
         // 보호막 이펙트는 돌진을 시작할 때 이미 켰다(giveBarrier)
-        if (!sk.soul && !buffIsBarrier(sk)) myBuff(sk, Math.max(sk.hasteDur || 0, sk.barrier || 0, sk.stealth || 0, sk.untarget || 0));
+        if (!sk.soul && !buffIsBarrier(sk)) myBuff(sk, Math.max(sk.hasteDur || 0, sk.barrier || 0, sk.stealth || 0, sk.untarget || 0, sk.fxBuf || 0));
       }
       if (sk.amb || sk.step) {
         if (m.ambCast) ambOpen(m);
@@ -2922,7 +2923,8 @@
         faceNow();
         act = { anim: sk.anim, t0: t, hold: t + sk.windup, until: t + sk.windup };
         amb.aimR = { dx, dy, from: t, until: t + sk.windup };
-        sfx("ambR");
+        myPlay(myPart(sk, "cast"), sk.windup);
+        if (!mySound(sk)) sfx("ambR");
         return;
       }
       // 시전 동안은 제자리(돌진 없는 dash). 스킬은 커서 쪽으로 나가고, 돌진(용견의 걸음) 은 그 뒤 이동 입력 쪽으로(ambMove)
@@ -2936,12 +2938,15 @@
       amb.buf = null;
       if (!sk.amb) mySkillStart(sk);
       act = { anim: q2 ? "spell1b" : sk.anim, t0: t, hold: t + sk.windup, until: t + sk.windup };
+      // 롤 시전 소리(Q 는 두 번째도 같은 칸 소리). 없으면 합성음
+      const voiced = mySound(sk);
+      if (q2 && amb.q2fx) { fxStop(amb.q2fx); amb.q2fx = null; }
       if (sk.amb === "w") {
-        amb.shield = { until: t + 1.5 };
+        amb.shield = { until: t + 1.5, fx: myBuff(sk, 1.5) };       // 롤 보호막 이펙트(Ambessa_W_Shield) 는 보호막이 있는 동안만
         amb.brace = { until: t + 0.5, parried: false };
-        emit({ x: player.x, y: player.y, ground: 1, size: 60, size1: 120, color: "#ffffff", color1: AMB.gold, shape: "amb_w_shield", life: 0.35, a: 0.9 });     // 롤 RimAdd 120
-        sfx("ambShield");
-      } else {
+        if (!myPlay(myPart(sk, "cast"), 0.5)) emit({ x: player.x, y: player.y, ground: 1, size: 60, size1: 120, color: "#ffffff", color1: AMB.gold, shape: "amb_w_shield", life: 0.35, a: 0.9 });     // 롤 RimAdd 120
+        if (!voiced) sfx("ambShield");
+      } else if (!voiced) {
         sfx("ghost");
       }
     }
@@ -2955,10 +2960,17 @@
         return Math.hypot(dx, dy) <= r + cr;
       });
     }
-    function ambHit(c, color = AMB.orange) {
+    // sk 를 주면 그 칸의 롤 맞은 이펙트(Q·E _Tar, part) 를 적 자리에. 없으면 손으로 그린 불꽃
+    function ambHit(c, color = AMB.orange, sk = null, part = "hit") {
       c.ambHit = t;
+      if (sk && myAt(sk, part, c.x, c.y, 1.5)) return;
       burst(c.x, c.y, 90, color, 16, 380);
       emit({ x: c.x, y: c.y, z: 90, size: 150, size1: 60, color: "#ffffff", color1: color, shape: "amb_q_tar", life: 0.3 });
+    }
+    // 롤 휘두르기 이펙트를 (x, y) 에서 a 쪽으로. 켰으면 true(손으로 그린 휘두르기는 안 그린다)
+    function ambFx(sk, part, x, y, a, ttl = 1.5) {
+      if (!myArt(sk) || !myPart(sk, part)) return false;
+      return !!fxPlay(myPart(sk, part), { x, y, h: 0, dir: { x: Math.cos(a), y: Math.sin(a) } }, ttl);
     }
     // 휘두른 자국: 부채꼴 띠(바닥 위 z 높이) 에 휘두르기 텍스처를 입힌다. 텍스처 가로가 휘두르는 방향, 세로가 밖→안.
     // sweep 초 동안 a0 에서 a1 까지 펼쳐진다(drawAmb). uFix 면 텍스처의 세로 한 줄만 쓴다(둥근 빛을 띠 모양 그대로 고르게 깔 때)
@@ -2973,6 +2985,7 @@
       if (sk.amb === "q" && !m.q2) {
         // 교활한 일격: 앞쪽 반원(375). 끝자락이 더 아프다(sweetspot). 적을 맞히면 0.5초 뒤부터 4초 동안 파열의 강타
         const R = 375;
+        if (!ambFx(sk, "strike", x, y, a)) {
         // 그림은 판정(375) 밖으로 넘치지 않게 한다(넘치면 실제보다 넓게 보인다)
         ambArc({ x, y, r0: R * 0.35, r1: R, a0: a - Math.PI / 2, a1: a + Math.PI / 2, f: "amb_q_slash", life: 0.45, sweep: 0.24, trail: 2.2, z: 40 });
         ambArc({ x, y, r0: R * 0.55, r1: R, a0: a - Math.PI / 2, a1: a + Math.PI / 2, f: "amb_q_body", col: AMB.gold, life: 0.4, sweep: 0.22, trail: 1.6, z: 55, a: 0.8 });
@@ -2983,16 +2996,21 @@
                  shape: "amb_q_sweet", rot: b + Math.PI / 2, life: 0.7, add: 0.4, a: 0.8, erode: 1 });
         }
         wave(x + Math.cos(a) * R * 0.5, y + Math.sin(a) * R * 0.5, 60, R, 0.35, 10);
+        }
         const got = ambTargets(x, y, R, { dir: a });
-        got.forEach(c => ambHit(c));
+        got.forEach(c => ambHit(c, AMB.orange, sk));
         if (got.length) {
           amb.q2 = { ready: t + 0.5, until: t + 4 };
           cdMax[sk.slot] = cdLeft[sk.slot] = 0.5;
+          // 파열의 강타를 쓸 수 있는 동안 롤 준비 이펙트
+          if (amb.q2fx) fxStop(amb.q2fx);
+          amb.q2fx = myPlay(myPart(sk, "ready"), 4, false, true);
         }
         sfx("ambSlash");
       } else if (sk.amb === "q") {
         // 파열의 강타: 앞으로 375 를 내려찍는다(폭 200 추정)
         const L = 375, end = inArena(x + Math.cos(a) * L, y + Math.sin(a) * L);
+        if (!ambFx(sk, "strike2", x, y, a, 2)) {
         ambArc({ x, y, r0: 40, r1: L, a0: a - 0.16, a1: a + 0.16, f: "amb_q2_swipe", col: AMB.gold, life: 0.35, sweep: 0.06, z: 30 });
         for (let k = 0; k < 5; k++) {
           const u = (k + 0.5) / 5;
@@ -3004,14 +3022,15 @@
         emit({ x: end.x, y: end.y, ground: 1, size: 110, size1: 230, color: AMB.gold, color1: AMB.red, shape: "amb_q2_wave", rot: a + Math.PI / 2, life: 0.4 });
         burst(end.x, end.y, 30, AMB.orange, 22, 420);
         wave(end.x, end.y, 40, 300, 0.45, 18);
+        }
         shake = Math.max(shake, 0.12);
-        ambTargets(x, y, 0, { line: [{ x, y }, end], hw: 100, dir: a }).forEach(c => ambHit(c, AMB.red));
+        ambTargets(x, y, 0, { line: [{ x, y }, end], hw: 100, dir: a }).forEach(c => ambHit(c, AMB.red, sk, "hit2"));
         sfx("ambSlam");
       } else if (sk.amb === "e") {
-        ambWhip(x, y, a, 1);
+        ambWhip(x, y, a, 1, sk);
       } else if (sk.amb === "w") {
-        // 버티기(0.5초) 가 돌진에 이어진다. 바람이 몸으로 모인다
-        for (let k = 0; k < 6; k++) {
+        // 버티기(0.5초) 가 돌진에 이어진다. 바람이 몸으로 모인다(롤 이펙트가 있으면 시전 때 켠 Parry_Windup 이 맡는다)
+        for (let k = 0; k < (myArt(sk) ? 0 : 6); k++) {
           const b = Math.random() * Math.PI * 2;
           emit({ x: x + Math.cos(b) * 140, y: y + Math.sin(b) * 140, z: rand(30, 120), vx: -Math.cos(b) * 380, vy: -Math.sin(b) * 380,
                  size: 90, size1: 30, color: "#ffffff", color1: AMB.gold, shape: "amb_w_wind", life: 0.35, a: 0.6, drag: 2 });
@@ -3020,6 +3039,7 @@
         // 겨눈 줄(1250, 폭 300 추정) 안에서 가장 먼 적 뒤로 순간이동해 제압. 없으면 커서 쪽으로 짧게 돌진(추정)
         const ex = x + m.dx * sk.range, ey = y + m.dy * sk.range;
         amb.aimR = null;
+        const blinked = ambFx(sk, "blink", x, y, Math.atan2(m.dy, m.dx), 2);
         const along = c => (c.x - x) * m.dx + (c.y - y) * m.dy;
         const far = ambTargets(x, y, 0, { line: [{ x, y }, { x: ex, y: ey }], hw: 150, dir: Math.atan2(m.dy, m.dx) }).reduce((b, c) => (!b || along(c) > along(b) ? c : b), null);
         if (far) {
@@ -3034,8 +3054,10 @@
           ambDashFx(m);
         }
         // 지나간 자리에 핏빛 잔상
-        emit({ x, y, z: 80, line: [x, y, m.tx, m.ty], size: 90, size1: 10, color: "#ffffff", color1: AMB.blood, shape: "spark", life: 0.35 });
-        emit({ x, y, z: 80, size: 200, size1: 60, color: AMB.gold, color1: AMB.blood, shape: "star", life: 0.3, spin: 3 });
+        if (!blinked) {
+          emit({ x, y, z: 80, line: [x, y, m.tx, m.ty], size: 90, size1: 10, color: "#ffffff", color1: AMB.blood, shape: "spark", life: 0.35 });
+          emit({ x, y, z: 80, size: 200, size1: 60, color: AMB.gold, color1: AMB.blood, shape: "star", life: 0.3, spin: 3 });
+        }
       }
     }
     // 용견의 걸음: 스킬 시전 중이나 시전 직후 창(amb.step) 안에 들어온 이동 입력 하나를 돌진 방향으로 쓴다.
@@ -3073,7 +3095,7 @@
     function ambStepStart(m) {
       // 칼리스타는 내려앉은 뒤 움직이면 남은 동작을 끝낸다(land). 암베사는 그대로
       act = { anim: m.dirAnim || (m.q2 ? "dash1b" : m.sk.dashAnim), t0: t, hold: t + m.dur, until: t + m.dur + 0.45, land: !m.sk.amb };
-      if (m.sk.amb) ambDashFx(m); else kalistaDashFx(m);
+      if (m.sk.amb) { if (!myPlay(myPart(m.sk, "step"), m.dur + 0.2)) ambDashFx(m); } else kalistaDashFx(m);
       sfx("ghost");
     }
     // 칼리스타 Q: 창이 커서 쪽으로 1150 날아간다(그림만. 지나간 적은 번쩍)
@@ -3110,6 +3132,11 @@
         // 거부: 둘레 325 를 내리친다. 버티는 동안 스킬을 막았으면(응수) 더 세게(HighDamageMultiplier 1.5)
         const big = amb.brace && amb.brace.parried ? 1.5 : 1, R = 325;
         amb.brace = null;
+        if (ambFx(sk, big > 1 ? "land2" : "land", x, y, m.a || 0, 2)) {
+          shake = Math.max(shake, 0.15 * big);
+          ambTargets(x, y, R).forEach(c => ambHit(c));
+          return;
+        }
         // 고리·충격파는 내리친 둘레(325) 까지만(예전엔 1.25배·커지며 1.7배까지 번져 실제보다 넓어 보였다)
         emit({ x, y, ground: 1, size: R * 0.5, size1: R, color: "#ffffff", color1: AMB.orange, shape: "amb_w_ring", life: 0.55, add: 0.6 });
         ambArc({ x, y, r0: R * 0.6, r1: R * 0.8, a0: 0, a1: Math.PI * 2, f: "amb_w_shock", col: AMB.gold, life: 0.5, sweep: 0.001, rep: 5, grow: 0.25 });
@@ -3124,7 +3151,7 @@
         sfx("ambSlam");
       } else if (sk.amb === "e") {
         // 용견의 걸음을 E 로 시작하면 내려앉으며 한 번 더 벤다
-        ambWhip(x, y, m.a + Math.PI, 0.85);
+        ambWhip(x, y, m.a + Math.PI, 0.85, sk);
       } else if (sk.amb === "r" && m.victim) {
         // 공개 처형: 제압(0.75초) 한 적을 내려찍어 기절(0.4초). 시전 중이었으면 끊긴다
         const c = m.victim;
@@ -3133,9 +3160,11 @@
         if (c.wind > 0) { c.wind = 0; c.cancelled = true; }
         c.fade = Math.max(c.fade, 1.6);
         act = { anim: "hit4", t0: t - 0.2, hold: t + 0.75, until: t + 1.3 };     // 첫 0.2초는 몸이 뒤에서 날아오는 자세라 건너뛴다
-        amb.slam = { c, at: t + 0.75 };
-        emit({ x: c.x, y: c.y, z: 150, size: 180, size1: 120, color: "#ffffff", color1: AMB.blood, shape: "amb_r_marker", life: 0.75 });
-        flashGround(c.x, c.y, 120, AMB.blood, 0.4);
+        amb.slam = { c, at: t + 0.75, sk };
+        if (!ambFx(sk, "land", x, y, Math.atan2(c.y - y, c.x - x), 2)) {
+          emit({ x: c.x, y: c.y, z: 150, size: 180, size1: 120, color: "#ffffff", color1: AMB.blood, shape: "amb_r_marker", life: 0.75 });
+          flashGround(c.x, c.y, 120, AMB.blood, 0.4);
+        }
         sfx("ambSlash");
       }
     }
@@ -3147,8 +3176,12 @@
       }
     }
     // 열상: 사슬을 한 바퀴 휘둘러 둘레 325 를 벤다(맞은 적은 1초 둔화)
-    function ambWhip(x, y, a, k) {
+    function ambWhip(x, y, a, k, sk) {
       const R = 325;
+      if (sk && ambFx(sk, "strike", x, y, a)) {
+        ambTargets(x, y, R).forEach(c => { ambHit(c, AMB.orange, sk); c.slowUntil = t + 1; });
+        return;
+      }
       ambArc({ x, y, r0: R * 0.45, r1: R, a0: a, a1: a + Math.PI * 2, f: "amb_e_ring", col: AMB.gold, life: 0.42, sweep: 0.3, trail: 3.2, z: 50, a: 0.9 * k });
       ambArc({ x, y, r0: R * 0.8, r1: R, a0: a, a1: a + Math.PI * 2, f: "amb_q_chain", life: 0.4, sweep: 0.3, trail: 2.4, z: 60, add: 0, a: k });
       ambArc({ x, y, r0: R * 0.2, r1: R, a0: a, a1: a + Math.PI * 2, f: "glow", uFix: 0.5, col: AMB.ember, life: 0.5, sweep: 0.25, a: 0.5 * k });
@@ -3189,14 +3222,19 @@
       }
       if (amb.q2 && t >= amb.q2.until) {
         amb.q2 = null;
+        if (amb.q2fx) { fxStop(amb.q2fx); amb.q2fx = null; }
         const q = mySkills().find(x => x.amb === "q");
         if (q) cdMax[q.slot] = cdLeft[q.slot] = skillCd(q);
       }
       if (amb.shield && t >= amb.shield.until) amb.shield = null;
       if (amb.brace && t >= amb.brace.until && !(dash && dash.sk.amb === "w")) amb.brace = null;
       if (amb.slam && t >= amb.slam.at) {
-        const c = amb.slam.c;
+        const c = amb.slam.c, sk = amb.slam.sk;
         amb.slam = null;
+        if (sk && ambFx(sk, "slam", c.x, c.y, Math.atan2(c.y - player.y, c.x - player.x), 2.5)) {
+          shake = Math.max(shake, 0.3);
+          c.ambHit = t;
+        } else {
         emit({ x: c.x, y: c.y, ground: 1, size: 170, size1: 210, color: "#ffffff", color1: AMB.dark, shape: "amb_r_decal", life: 1.6, add: 0, erode: 1 });
         emit({ x: c.x, y: c.y, z: 40, size: 200, size1: 300, color: "#ffffff", color1: AMB.blood, shape: "amb_r_impact", life: 0.4 });
         emit({ x: c.x, y: c.y, pillar: 420, size: 170, size1: 50, color: "#ffffff", color1: AMB.blood, shape: "beam", life: 0.4 });
@@ -3206,9 +3244,10 @@
         shake = Math.max(shake, 0.3);
         ambHit(c, AMB.blood);
         sfx("ambSlam");
+        }
       }
       // 보호막: 몸 둘레로 금빛이 피어오르고, 버티는 동안은 바람이 감긴다
-      if (amb.shield && !(t - (amb.shield.fxAt || -1) < 0.06)) {
+      if (amb.shield && !myArt(mySkills().find(x => x.amb === "w")) && !(t - (amb.shield.fxAt || -1) < 0.06)) {
         amb.shield.fxAt = t;
         const b = Math.random() * Math.PI * 2;
         emit({ x: player.x + Math.cos(b) * 60, y: player.y + Math.sin(b) * 60, z: rand(20, 140), vz: 60, size: 26, size1: 6,
@@ -3220,6 +3259,7 @@
     // 거부(W) 의 보호막이 스킬 하나의 피해를 받아 낸다. 보호막이라 CC 는 그대로 맞는다(hit). 버티는 동안 받으면 응수(더 센 내려찍기)
     function ambBlock() {
       if (!amb.shield || t >= amb.shield.until) return false;
+      if (amb.shield.fx) fxStop(amb.shield.fx);
       amb.shield = null;
       if (amb.brace) amb.brace.parried = true;
       emit({ x: player.x, y: player.y, z: 90, size: 200, size1: 260, color: "#ffffff", color1: AMB.gold, shape: "amb_w_shield", life: 0.3 });
@@ -3624,7 +3664,8 @@
         if (parry > t && !myArt(skillUsed)) emit({ x: player.x, y: player.y, z: 80, size: 130, size1: 140, color: "#ffffff", color1: "#a5d8ff", shape: "ring", life: 0.1, a: 0.8 });
         if (lambs && !lambs.fx && t < lambs.until && !(t - (lambs.fxAt || -1) < 0.3)) {
           lambs.fxAt = t;
-          emit({ x: lambs.x, y: lambs.y, ground: 1, size: lambs.radius * 1.2, size1: lambs.radius * 1.25, color: "#e7f5ff", color1: "#91a7ff", shape: "ring", life: 0.6, a: 0.7 });
+          // 둘레(530) 를 넘지 않게, 겹쳐도 하얗게 타지 않게 옅게(예전 1.2배·a 0.7 은 화면을 하얗게 덮었다)
+          emit({ x: lambs.x, y: lambs.y, ground: 1, size: lambs.radius * 0.95, size1: lambs.radius, color: "#e7f5ff", color1: "#91a7ff", shape: "ring", life: 0.6, a: 0.3 });
         }
         if (undying > t || ccImmune > t) emit({ x: player.x + rand(-40, 40), y: player.y + rand(-40, 40), z: rand(20, 140), vz: 120, size: 18, size1: 4, color: "#ffffff", color1: "#fa5252", shape: "glow", life: 0.5 });
         // 이동 속도가 올라 있으면 발밑으로 바람이 흐른다
@@ -4216,16 +4257,32 @@
     // 스킬 이름의 마지막 글자(Q W E R) → 롤 애니메이션 이름(spell1 … spell4)
     const spellAnim = s => s.anim || "spell" + ("QWER".indexOf(s.name.replace(" (갈라짐)", "").slice(-1)) + 1);
     let animClock = 0;      // 실제 시간(애니메이션이 게임이 끝나도 흐르게)
-    // 내 챔피언 동작이 바뀌면 롤처럼 앞 동작에서 BLEND 초 동안 섞어 넘어간다(롤 애니메이션 그래프의 섞기 시간은 대개 0.1초)
-    const BLEND = 0.1;
-    let lastPose = null, blendFrom = null, risenAt = null;
-    function blendPose(a) {
-      if (lastPose && lastPose.anim !== a.anim) blendFrom = { anim: lastPose.anim, time: lastPose.time, loop: lastPose.loop, at: animClock };
-      lastPose = { anim: a.anim, time: a.time, loop: a.loop };
-      const k = blendFrom ? (animClock - blendFrom.at) / BLEND : 1;
-      if (k >= 1) { blendFrom = null; return; }
-      a.from = { anim: blendFrom.anim, time: blendFrom.time + (animClock - blendFrom.at), loop: blendFrom.loop };
+    // 챔피언 동작이 바뀌면 롤처럼 앞 동작에서 BLEND 초 동안 섞어 넘어간다(롤 애니메이션 그래프의 섞기 시간은 대개 0.1초).
+    // 서 있기·걷기끼리는 LOCO_BLEND 초(롤 ConformToPath 의 mBlendOutTime 0.2). h: 섞기 상태 { last, from } (내 챔피언 myBlend, 적은 c.blend)
+    const BLEND = 0.1, LOCO_BLEND = 0.2;
+    const LOCO = new Set(["idle", "run", "toidle", "torun"]);
+    const myBlend = {};
+    let risenAt = null;
+    function blendPose(a, h = myBlend) {
+      if (h.last && h.last.anim !== a.anim) {
+        h.from = { anim: h.last.anim, time: h.last.time, loop: h.last.loop, at: animClock,
+                   dur: LOCO.has(a.anim) && LOCO.has(h.last.anim) ? LOCO_BLEND : BLEND };
+      }
+      h.last = { anim: a.anim, time: a.time, loop: a.loop };
+      const k = h.from ? (animClock - h.from.at) / h.from.dur : 1;
+      if (k >= 1) { h.from = null; return; }
+      a.from = { anim: h.from.anim, time: h.from.time + (animClock - h.from.at), loop: h.from.loop };
       a.mix = Math.max(0, k);
+    }
+    // 서 있기 ↔ 걷기: 롤처럼 멈출 때·걷기 시작할 때 전환 동작(toidle·torun. 롤 TransitionClipBlendData, 없는 챔피언은 섞기만) 을
+    // 한 번 하고 되풀이 동작을 처음부터. o.loco: { st, at, from }. 다른 동작(스킬·돌진) 중에는 o.loco = null 로 끊는다
+    function loco(o, key, moving) {
+      const st = moving ? "run" : "idle", L = o.loco;
+      if (!L || L.st !== st) o.loco = { st, at: animClock, from: L ? L.st : null };
+      const el = animClock - o.loco.at, tr = moving ? "torun" : "toidle";
+      const len = o.loco.from ? clipLenOf(key, tr) : 0;
+      if (el < len) return { anim: tr, time: el, loop: false };
+      return { anim: st, time: o.loco.from ? el - len : animClock, loop: true };
     }
     // 효과층에 넘길 3D 챔피언들
     function modelActors() {
@@ -4244,7 +4301,7 @@
         if (act && act.faceAfter && (t >= act.until || (moving && t >= act.hold))) {
           if (!moving) { facing = act.faceAfter; faceNow(); }
           act.faceAfter = null;
-          lastPose = null; blendFrom = null;
+          myBlend.last = null; myBlend.from = null;
         }
         if (act && act.land && moving && t >= act.hold) act = null;      // 착지 동작은 움직이면 끝(꼭 할 부분 hold 까지는 한다)
         const acting = act && t < act.until && (t < act.hold || !moving);
@@ -4271,6 +4328,8 @@
                    tint: hurt > 0 ? [1, 1, 1, hurt / 0.4 * 0.55] : (realm && t < realm.until) || (rift && t < rift.until && dist(player, rift) <= rift.r) ? [0.6, 0.5, 1, 0.35]
                      : parry > t ? [0.75, 0.9, 1, 0.45] : undying > t || ccImmune > t ? [1, 0.25, 0.2, 0.3]
                      : soul ? [0.65, 0.75, 1, 0.4] : ghostLeft > 0 ? [0.4, 0.85, 0.95, 0.22] : null };
+        if (me.loop && (me.anim === "run" || me.anim === "idle")) Object.assign(me, loco(myBlend, me.key, me.anim === "run"));
+        else myBlend.loco = null;
         blendPose(me);
         out.push(me);
         // 요네 E: 남은 몸(돌진하는 동안 뒤로 밀려나서 그 자리에 선다)
@@ -4306,11 +4365,17 @@
         const own = c.dash && c.dash.anim ? { anim: c.dash.anim, t0: c.dash.t0 } : !c.dash && casting && c.post ? c.post : null;
         const walk = !casting && c.moving, loop = !own && (!!c.dash || walk || !casting);     // 걷기·서 있기는 되풀이
         if (!casting) c.post = null;
-        out.push({ key: modelKey(c.skill.champ), x: c.x, y: c.y, z: c.supUntil > t ? 25 : 0, angle: Math.atan2(c.dy, c.dx),
+        const ac = { key: modelKey(c.skill.champ), x: c.x, y: c.y, z: c.supUntil > t ? 25 : 0, angle: Math.atan2(c.dy, c.dx),
                    anim: froze || stop ? "idle" : own ? own.anim : c.dash || walk ? "run" : casting ? spellAnim(c.skill) : "idle",
                    time: froze || stop ? 0 : own ? t - own.t0 : loop ? animClock : Math.max(0, since + (c.wind > 0 ? 0 : 0.5 - c.fade)),
                    loop, alpha: Math.max(0, Math.min(1, c.alpha)),
-                   tint: struck < 0.25 ? [1, 1, 1, (0.25 - struck) / 0.25 * 0.7] : froze ? [0.75, 0.1, 0.05, 0.35] : null });
+                   tint: struck < 0.25 ? [1, 1, 1, (0.25 - struck) / 0.25 * 0.7] : froze ? [0.75, 0.1, 0.05, 0.35] : null };
+        const blend = c.blend || (c.blend = {});
+        // 걷다 멈추기·서 있다 걷기만 전환 동작(돌진하며 달리기·기절해 굳은 것은 아니다)
+        if (!froze && !stop && !own && !c.dash && (walk || !casting)) Object.assign(ac, loco(blend, ac.key, walk));
+        else blend.loco = null;
+        blendPose(ac, blend);
+        out.push(ac);
       }
       return out;
     }

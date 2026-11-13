@@ -231,7 +231,7 @@ FPS = 15
 # 스킬·돌진 동작은 빨라서 15 프레임으로는 프레임 사이에 뼈가 크게 돈다(한 프레임에 90° 넘게) → 두 배로 굽는다.
 # 서 있기·달리기는 느려서 15 그대로(파일 크기)
 FAST_FPS = 30
-SLOW_ANIMS = ("idle", "run")
+SLOW_ANIMS = ("idle", "run", "toidle", "torun")
 TEX_SIZE = 512
 
 
@@ -663,7 +663,19 @@ def clip_path(clips, name, depth=0):
         return (v.get("mAnimationResourceData") or {}).get("mAnimationFilePath")
     names = v.get("mClipNameList") or [x.get("mClipName") for x in v.get("mSelectorPairDataList") or []]
     if kind == "SequencerClipData":
-        names = list(reversed(names))
+        # 같은 클립을 절반 넘게 되풀이하는 것(요네 Idle1 = Idle1_Base ×3 → 칼집에 넣기) 은 되풀이하는 그 클립이 본 동작
+        # [(시작,) 본 동작, 고르기(가끔 나오는 변형들)] 은 고르기 바로 앞의 본 동작(아리 Idle1_Base = idle1 → Idle_Var2 …)
+        rep = [n for n in names if names.count(n) > 1 and names.count(n) * 2 > len(names)]
+        rep.sort(key=lambda n: -names.count(n))
+        last = clips.get(names[-1]) if names else None
+        if last is None and names and str(names[-1]).startswith("{"):
+            h = int(names[-1][1:-1], 16)
+            last = next((c for k, c in clips.items() if fnv1a(k) == h), None)
+        main = names[-2:-1] if len(names) > 1 and (last or {}).get("__type") == "SelectorClipData" else []
+        # 그 앞 것이 넘어가는 동작(…_in·…_to_…) 이면 본 동작이 아니다
+        if main and re.search(r"(_in\d*|_to_?\w+)\.anm$", str(clip_path(clips, main[0], depth + 1)).lower()):
+            main = []
+        names = rep[:1] + main + list(reversed(names))
     elif kind == "ConditionBoolClipData":
         # 대개 "귀환 중이면" 같은 조건이라 거짓 쪽(보통 동작) 을 먼저
         names = [v.get("mFalseConditionClipName"), v.get("mTrueConditionClipName")]
@@ -687,19 +699,75 @@ def clip_path(clips, name, depth=0):
     return None
 
 
-def pick_clip(clips, names, word, avoid=("to", "haste", "fast", "homeguard", "var", "turn", "spell", "attack", "_in_", "out", "additive")):
-    """클립 이름 우선순위로 찾고, 없으면 word 로 시작하는 단순한 이름 중 하나."""
+def pick_name(clips, names, word, avoid=("to", "haste", "fast", "homeguard", "var", "turn", "spell", "attack", "_in_", "out", "additive")):
+    """클립 이름 우선순위로 찾고, 없으면 word 로 시작하는 단순한 이름 중 하나 → 그 클립 이름(.anm 이 있는 것)."""
     for n in names:
         for k in clips:
-            if k.lower() == n.lower():
-                path = clip_path(clips, k)
-                if path:
-                    return path
+            if k.lower() == n.lower() and clip_path(clips, k):
+                return k
     cands = sorted(k for k in clips if k.lower().lstrip("raw_").startswith(word)
                    and not any(a in k.lower() for a in avoid))
-    for k in cands:
-        path = clip_path(clips, k)
-        if path:
+    return next((k for k in cands if clip_path(clips, k)), None)
+
+
+def pick_clip(clips, names, word, **kw):
+    k = pick_name(clips, names, word, **kw)
+    return clip_path(clips, k) if k else None
+
+
+def clip_chain(clips, name, depth=0):
+    """clip_path 가 따라가는 클립 이름들(위에서 아래로). 섞기 표(mBlendDataTable) 는 이 중 어느 이름으로든 적혀 있다"""
+    if depth > 6 or not name:
+        return []
+    v = clips.get(name)
+    if v is None and name.startswith("{"):
+        h = int(name[1:-1], 16)
+        name, v = next(((k, c) for k, c in clips.items() if fnv1a(k) == h or k == name), (name, None))
+    if not v:
+        return []
+    if v.get("__type") == "AtomicClipData":
+        return [name]
+    want = clip_path(clips, name)
+    names = v.get("mClipNameList") or [x.get("mClipName") for x in v.get("mSelectorPairDataList") or []]
+    names += [v.get("mFalseConditionClipName"), v.get("mTrueConditionClipName")]
+    names += [x.get("mClipName") for x in (v.get("mConditionFloatPairDataList") or []) + (v.get("mParametricPairDataList") or [])]
+    for n in names:
+        if n and clip_path(clips, n) == want:
+            return [name] + clip_chain(clips, n, depth + 1)
+    return [name]
+
+
+def clip_hash(name):
+    return int(name[1:-1], 16) if name.startswith("{") else fnv1a(name)
+
+
+TRANS_MAX = 1.0
+# 멈춤·걷기 전환이 아닌 것: 귀환 뒤 빠른 달리기(homeguard)·칼집(요네)·스킬 자세(우디르 W·볼리베어 Q)·돌기·옛·전투 자세(모데카이저)
+NOT_LOCO = re.compile(r"homeguard|sheath|spell|turn|old_|battle")
+
+
+def transition(graph, clips, src, dst):
+    """src 클립에서 dst 클립으로 넘어갈 때 롤이 끼워 넣는 전환 클립(TransitionClipBlendData) 의 .anm 경로. 없으면 None.
+    섞기 표의 키는 (앞 클립 해시 << 32) | 뒤 클립 해시"""
+    table = graph.get("mBlendDataTable") or {}
+    keys = {}
+    for k, v in table.items():
+        k = str(k)
+        k = int(k[1:-1], 16) if k.startswith("{") else int(k, 0)
+        keys[k] = v
+    for a in clip_chain(clips, src):
+        for b in clip_chain(clips, dst):
+            v = keys.get((clip_hash(a) << 32) | clip_hash(b))
+            if v and v.get("__type") == "TransitionClipBlendData" and v.get("mClipName"):
+                path = clip_path(clips, v["mClipName"])
+                if path and not NOT_LOCO.search(path.lower()):
+                    return path
+    # 표에 없으면 파일 이름으로(요네 idle01_torun01 은 이동 쪽 고르기 안에서 쓰인다)
+    a, b = ("run|walk", "idle") if "idle" in dst.lower() else ("idle", "run|walk")
+    pat = re.compile(r"(^|_)(%s)\d*_?to_?(%s)\d*(_var01)?\.anm$" % (a, b))
+    for c in clips.values():
+        path = (c.get("mAnimationResourceData") or {}).get("mAnimationFilePath") if c.get("__type") == "AtomicClipData" else None
+        if path and pat.search(path.lower().split("/")[-1]) and not NOT_LOCO.search(path.lower()):
             return path
     return None
 
@@ -729,9 +797,15 @@ def bake_anims(w, key, sk, skl, spells):
     anims = {}
     graph = sk.get("skinAnimationProperties", {}).get("animationGraphData")
     agraph = bin_json(w, graph.lower().replace("characters/", "data/characters/", 1) + ".bin") if graph else {}
-    clips = next((v["mClipDataMap"] for v in agraph.values() if isinstance(v, dict) and "mClipDataMap" in v), {})
-    want = {"idle": pick_clip(clips, ["Idle_Base", "Idle1", "Idle", "Idle_In", "Idle01", "Idle1_Base", "RAW_Idle1"], "idle"),
-            "run": pick_clip(clips, ["Run_Normal", "Run", "Run_Base", "Run_In", "Run1", "RAW_Run1", "RAW_Run"], "run")}
+    g = next((v for v in agraph.values() if isinstance(v, dict) and "mClipDataMap" in v), {})
+    clips = g.get("mClipDataMap", {})
+    idle = pick_name(clips, ["Idle_Base", "Idle1", "Idle", "Idle_In", "Idle01", "Idle1_Base", "RAW_Idle1"], "idle")
+    run = pick_name(clips, ["Run_Normal", "Run", "Run_Base", "Run_In", "Run1", "RAW_Run1", "RAW_Run"], "run")
+    want = {"idle": clip_path(clips, idle) if idle else None, "run": clip_path(clips, run) if run else None}
+    # 멈출 때·걷기 시작할 때 롤이 끼워 넣는 전환 동작(아리 Idle_In, 요네 walk01_toidle·idle01_torun01). 없으면 섞기만
+    if idle and run:
+        want["toidle"] = transition(g, clips, run, idle)
+        want["torun"] = transition(g, clips, idle, run)
     for n in spells:
         want["spell%d" % n] = pick_clip(clips, SPELL_CLIPS.get((key, n), []) + ["Spell%d" % n, "Spell%d_0" % n, "Spell%d_Base" % n], "spell%d" % n,
                                         avoid=("to", "run", "idle", "exit", "out"))
@@ -743,6 +817,9 @@ def bake_anims(w, key, sk, skl, spells):
         if h in w.entries:
             a, dur = read_anm(w.read_hash(h))
             fps = anim_fps(name)
+            # 멈춤·걷기 전환은 앞 TRANS_MAX 초만(아리 Idle_In 은 2.3초. 그 뒤는 서 있기로 섞여 넘어가고 파일이 커지지 않게)
+            if name in ("toidle", "torun"):
+                dur = min(dur, TRANS_MAX)
             anims[name] = bake(skl, a, max(dur, 1 / fps), fps)
     return anims
 

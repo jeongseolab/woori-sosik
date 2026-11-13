@@ -492,7 +492,7 @@ def test_app_status_and_args():
         assert json.load(open(path, encoding="utf-8"))["champion"] == "징크스"
         old = A.STATUS
         A.STATUS = path
-        api = A.Api(A.Overlay([]))
+        api = A.Api(A.Overlay([]), None)                   # 업데이트는 이 시험에서 안 씀
         got = api.status()
         assert got["mode"] == "game" and got["overlay"] is False      # 이 시험에서는 작은 창 프로세스를 안 켰다
         A.STATUS = os.path.join(os.path.dirname(path), "none.json")
