@@ -381,9 +381,11 @@ class Pack:
         try:
             if os.path.exists(cached):
                 raw = open(cached, "rb").read()
+            elif key in _MISS:
+                raise urllib.error.URLError("앞에서 못 받음")
             else:
                 req = urllib.request.Request(url, headers={"User-Agent": "tiergg-tools/1.0"})
-                with urllib.request.urlopen(req, timeout=60) as r:
+                with urllib.request.urlopen(req, timeout=20) as r:
                     raw = r.read()
                 os.makedirs(os.path.dirname(cached), exist_ok=True)
                 open(cached, "wb").write(raw)
@@ -391,6 +393,7 @@ class Pack:
         except (urllib.error.HTTPError, urllib.error.URLError, OSError) as e:
             # CommunityDragon 이 안 되면(522 등) 로컬 WAD 의 .tex 를 직접 푼다
             img = None
+            _MISS.add(key)
             try:
                 b = cm.local_file(key)
                 if b:
@@ -570,9 +573,22 @@ def read_scb(data):
     return {"pos": pos, "uv": uv}
 
 
+# 이번에 CommunityDragon 에서 못 받은 텍스처(522·404·시간 초과). 같은 실행 안에서는 다시 묻지 않고 바로 로컬 WAD 로 간다
+_MISS = set()
+
+
 def prefetch(paths):
     """텍스처 PNG 를 여럿 한꺼번에 받아 tools/.cache/tex 에 둔다(하나씩 받으면 수백 장에 30분 넘게 걸린다)"""
     from concurrent.futures import ThreadPoolExecutor
+    # 이미 구워 둔 그림(t/index.json 에 있고 t/<번호>.webp 가 있는 것) 은 Pack.tex 가 다시 받지 않으니 미리 받지도 않는다.
+    # CommunityDragon 이 느릴 때(한 장 20초 넘게) 이것 때문에 다시 굽기가 몇 시간 걸렸다
+    try:
+        done = json.load(open(os.path.join(OUT, "t", "index.json"), encoding="utf-8"))
+    except (OSError, ValueError):
+        done = {}
+    baked = {src.lower() for i, src in done.items() if os.path.exists(os.path.join(OUT, "t", "%s.webp" % i))}
+    paths = [p for p in paths if p.lower() not in baked and p.lower() not in _MISS]
+    print("  텍스처 미리 받기:", len(paths), "장", file=sys.stderr, flush=True)
 
     def one(path):
         key = path.lower()
@@ -582,14 +598,26 @@ def prefetch(paths):
         try:
             req = urllib.request.Request(CDRAGON + key.replace(".tex", ".png").replace(".dds", ".png"),
                                          headers={"User-Agent": "tiergg-tools/1.0"})
-            with urllib.request.urlopen(req, timeout=60) as r:
+            with urllib.request.urlopen(req, timeout=20) as r:
                 raw = r.read()
             os.makedirs(os.path.dirname(cached), exist_ok=True)
             open(cached, "wb").write(raw)
         except (urllib.error.HTTPError, urllib.error.URLError, OSError):
-            pass
+            _MISS.add(key)
     with ThreadPoolExecutor(16) as ex:
         list(ex.map(one, sorted(paths)))
+
+
+def tex_refs(systems):
+    """시스템들이 쓰는 텍스처 번호(기본·색·곱하기·침식·팔레트)"""
+    out = set()
+    for s in systems.values():
+        for e in s.get("emitters") or []:
+            for i in (e.get("texture"), e.get("particleColorTexture"), (e.get("textureMult") or {}).get("textureMult"),
+                      (e.get("alphaErosionDefinition") or {}).get("erosionMapName"), (e.get("paletteDefinition") or {}).get("paletteTexture")):
+                if isinstance(i, int):
+                    out.add(i)
+    return out
 
 
 def collect(o, out):
@@ -650,6 +678,7 @@ def main():
     meshes = sorted((m for m in pack.meshes.values() if m["i"] is not None), key=lambda m: m["i"])
     # 내 챔피언: 챔피언마다 파일 하나(dodge/vfx/mine/<챔피언>.json). 시스템·메시는 그 파일 안에, 텍스처 번호는 함께 쓴다
     os.makedirs(os.path.join(OUT, "mine"), exist_ok=True)
+    kept_tex = set()          # 예전 그대로 둔 내 챔피언 파일이 쓰는 텍스처 번호
     for champ, slots in sorted(mine_skills().items()):
         try:
             d, w = load(champ)
@@ -686,7 +715,22 @@ def main():
         subsys = {k: v for k, v in sub.systems.items() if v}
         pack.next = sub.next          # 이 챔피언이 새로 받은 텍스처 다음 번호부터
         subm = sorted((m for m in sub.meshes.values() if m["i"] is not None), key=lambda m: m["i"])
-        with open(os.path.join(OUT, "mine", champ + ".json"), "w", encoding="utf-8") as f:
+        # 롤 패치로 이펙트가 없어져 예전에 있던 칸이 비게 되면(멜 W 보호막 Mel_Base_W_shield, 2026-11 패치) 예전 파일을 그대로 둔다.
+        # 그 파일이 쓰는 텍스처도 아래 정리에서 지우지 않는다
+        mp = os.path.join(OUT, "mine", champ + ".json")
+        try:
+            old = json.load(open(mp, encoding="utf-8"))
+        except (OSError, ValueError):
+            old = None
+        lost = old and set(old.get("slots") or {}) - set(parts)
+        if lost:
+            print("  예전 칸이 없어져 예전 파일을 둠:", champ, sorted(lost), file=sys.stderr)
+            kept_tex |= tex_refs(old["systems"])
+            del d, w, rmap, sub
+            _FLIPS.clear()
+            gc.collect()
+            continue
+        with open(mp, "w", encoding="utf-8") as f:
             json.dump({"slots": parts, "systems": subsys, "meshes": [{k: v for k, v in m.items() if k != "i"} for m in subm]},
                       f, ensure_ascii=False, separators=(",", ":"))
         print("내 챔피언", champ, {k: list(v) for k, v in parts.items()}, flush=True)
@@ -699,12 +743,47 @@ def main():
           "meshes": [{k: v for k, v in m.items() if k != "i"} for m in meshes]}
     os.makedirs(OUT, exist_ok=True)
     # 이제 안 쓰는 옛 그림은 지운다(번호는 비워 둔다. 화면은 번호로 t/<번호>.webp 만 받는다)
-    used = {t["i"] for t in textures}
+    # 공용 이펙트(기절·둔화, lol_add_mine.py --global 로 넣은 것) 는 이 도구가 만들지 않으니 예전 것을 이어받는다.
+    # 공용 텍스처(ASSETS/Shared) 는 로컬 WAD 대체 경로로 못 읽어서, 지우면 CommunityDragon 이 안 될 때 되살릴 수 없다
+    try:
+        old_fx = json.load(open(os.path.join(OUT, "fx.json"), encoding="utf-8"))
+    except (OSError, ValueError):
+        old_fx = {}
+    glob = old_fx.get("global") or {}
+    if glob:
+        gsys = {}
+        def keep_sys(n):
+            if n in gsys or n not in old_fx["systems"]:
+                return
+            gsys[n] = old_fx["systems"][n]
+            for e in gsys[n]["emitters"]:
+                for k in (e.get("childParticleSetDefinition") or {}).get("kids") or []:
+                    keep_sys(k)
+        for names in glob.values():
+            for n in names:
+                keep_sys(n)
+        moved = {}          # 예전 메시 번호 → 새 번호(기절 별 LOC_Stun 이 메시를 쓴다)
+        for n, v in gsys.items():
+            v = json.loads(json.dumps(v))
+            for e in v["emitters"]:
+                pr = e.get("primitive") or {}
+                if isinstance(pr.get("mesh"), int):
+                    if pr["mesh"] not in moved:
+                        moved[pr["mesh"]] = len(fx["meshes"])
+                        fx["meshes"].append(old_fx["meshes"][pr["mesh"]])
+                    pr["mesh"] = moved[pr["mesh"]]
+            fx["systems"].setdefault(n, v)
+        fx["global"] = glob
+        kept_tex |= tex_refs(gsys)
+    used = {t["i"] for t in textures} | kept_tex
+    keep_src = {} if not kept_tex else json.load(open(os.path.join(OUT, "t", "index.json"), encoding="utf-8"))
     for f in os.listdir(os.path.join(OUT, "t")):
         if f.endswith(".webp") and int(f[:-5]) not in used:
             os.remove(os.path.join(OUT, "t", f))
     with open(os.path.join(OUT, "t", "index.json"), "w", encoding="utf-8") as f:
-        json.dump({str(t["i"]): t["src"] for t in textures}, f, ensure_ascii=False, indent=0)
+        ix = {str(t["i"]): t["src"] for t in textures}
+        ix.update({str(i): keep_src[str(i)] for i in kept_tex if str(i) in keep_src and str(i) not in ix})
+        json.dump(dict(sorted(ix.items(), key=lambda kv: int(kv[0]))), f, ensure_ascii=False, indent=0)
     with open(os.path.join(OUT, "fx.json"), "w", encoding="utf-8") as f:
         json.dump(fx, f, ensure_ascii=False, separators=(",", ":"))
     print("시스템", len(systems), "발생기", sum(len(s["emitters"]) for s in systems.values()),
