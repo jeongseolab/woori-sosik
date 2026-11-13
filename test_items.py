@@ -646,3 +646,33 @@ def test_shop_watch_speed_buffs_are_not_shop():
     full = [dict(r, hp=2000) for r in lane]
     home = [dict(r, t=140 + k * .5, ms=708, hp=2000) for k, r in enumerate(lane[:10])]
     assert run(full + home)[-1]
+
+
+def test_starter_is_doran_for_laners():
+    """첫 템은 도란(2026-11-13 플레이 시험: 천 갑옷을 추천했다). 정글 펫, 서폿 세계 지도집. 템이 있거나 3분 뒤면 안 함."""
+    DOR = set(I.DORANS)
+    for name in ("징크스", "아리", "말파이트", "가렌", "제드"):
+        lane = LANE_OF[name]
+        for tree in (TREES[name], None, {"starter": [1082, 2003]}):     # 템트리 시작템·없음·도란이 아닌 시작템(암흑의 인장)
+            got = I.starter_buy(NAME[name], lane, tree, [3340], 500, 0.1)
+            assert got and got[0]["id"] in DOR, (name, tree, got)
+            assert sum(x["cost"] for x in got) <= 500 and all(x["id"] in DOR or x["id"] == 2003 for x in got)
+    assert I.starter_buy(NAME["리 신"], "jungle", {"starter": [1101, 2003]}, [], 500, 0)[0]["id"] == 1101
+    assert I.starter_buy(NAME["레오나"], "support", TREES["레오나"], [], 500, 0)[0]["id"] == 3865
+    assert I.starter_buy(NAME["징크스"], "adc", None, [1055], 500, 0.5) is None
+    assert I.starter_buy(NAME["징크스"], "adc", None, [], 500, 3.5) is None
+    # 오버레이도: 게임 시작 데모(가방 비고 0분) 면 도란 + 물약
+    import copy, sys, os
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools"))
+    import item_overlay as O
+    O.TREE_OVERRIDE = {(NAME["징크스"], "adc"): TREES["징크스"]}
+    try:
+        g = copy.deepcopy(O.DEMO)
+        g["gameData"] = {"gameTime": 5, "mapNumber": 11}
+        g["activePlayer"]["currentGold"] = 500
+        for p in g["allPlayers"]:
+            p["items"] = []
+        a = O.advise(g)
+        assert a["buy"][0]["id"] in DOR and a["reasons"][0].startswith("게임 시작")
+    finally:
+        O.TREE_OVERRIDE = None

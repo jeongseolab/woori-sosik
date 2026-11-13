@@ -965,6 +965,56 @@ def _buy_dp(groups, budget, free):
     return out[::-1], best
 
 
+DORANS = (1055, 1056, 1054, 1086, 1120)     # 도란의 검·반지·방패·활·투구
+JUNGLE_PETS = (1101, 1102, 1103)
+SUPPORT_START = 3865                         # 세계 지도집
+POTION = 2003
+
+
+def starter_buy(champion_id, lane, tree, inventory, gold, t=None):
+    """게임 시작(장신구 말고 가방이 비었고 3분 전) 이면 시작템 [{id, name, cost, toward, why}], 아니면 None.
+
+    탑·미드·원딜은 무조건 도란 템(2026-11-13 플레이 시험: 첫 템으로 천 갑옷을 추천했다). OP.GG 시작템에 도란이 있으면 그것,
+    없으면 챔피언으로: 원거리 물리 → 도란의 활, 근접 물리 → 도란의 검, 마법 → 도란의 반지, 탱커 → 도란의 방패.
+    정글은 펫(OP.GG 것, 없으면 새끼 바람돌이), 서폿은 세계 지도집. 남은 골드는 체력 물약.
+    """
+    d = data()
+    items = d["items"]
+    bag = [i for i in inventory if i not in TRINKETS]
+    if bag or (t is not None and t >= 3):
+        return None
+    champ = d["champions"][int(champion_id)]
+    starter = [i for i in (tree or {}).get("starter") or () if i in items]
+    if lane == "jungle":
+        main = next((i for i in starter if i in JUNGLE_PETS), 1102)
+        why = "게임 시작: 정글 펫"
+    elif lane == "support":
+        main = SUPPORT_START
+        why = "게임 시작: 서폿 템"
+    else:
+        main = next((i for i in starter if i in DORANS), None)
+        if main is None:
+            style = champ.get("style") or {}
+            if "tank" in (champ.get("roles") or ())[:1] or (style.get("durability") or 0) >= 3:
+                main = 1054
+            elif champ.get("damage") == "magic":
+                main = 1056
+            elif champ.get("ranged"):
+                main = 1086 if 1086 in items else 1055
+            else:
+                main = 1055
+        why = "게임 시작: 도란 템"
+    out, left = [], int(gold)
+    if main in items and items[main]["price"] <= left:
+        out.append({"id": main, "name": items[main]["name"], "cost": items[main]["price"], "toward": None, "why": why})
+        left -= items[main]["price"]
+    pot = d["consumables"].get(POTION)
+    while pot and left >= pot["price"] and len(out) < 4:
+        out.append({"id": POTION, "name": pot["name"], "cost": pot["price"], "toward": None, "why": "체력 물약"})
+        left -= pot["price"]
+    return out or None
+
+
 def plan_buy(champion_id, lane, build, inventory, gold, ctx=None):
     """이번 귀환에 살 것. build: plan_build 의 items(순서대로). inventory: 가방 번호(재료·시작템·물약·장신구 포함).
 

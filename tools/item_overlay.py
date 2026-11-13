@@ -198,6 +198,9 @@ def advise(game, my_lane=None):
     tree = tree_of(cid, lane)
     plan = I.plan_build(cid, lane, tree, ctx, inventory)
     buy = I.plan_buy(cid, lane, plan["items"], inventory, gold, ctx)
+    start = I.starter_buy(cid, lane, tree, inventory, gold, live["t"])
+    if start:                       # 게임 시작: 하위템 대신 시작템(탑·미드·원딜은 도란 템)
+        buy = {**buy, "buy": start, "sell": [], "reasons": [start[0]["why"]]}
     have = set(inventory)
     return {"champion": I.data()["champions"][cid]["name"], "champion_id": cid, "lane": lane, "gold": gold,
             "lane_picked": LANE_PICK.get("champ") == cid and bool(LANE_PICK.get("lane")),

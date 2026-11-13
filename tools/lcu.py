@@ -147,7 +147,9 @@ def make_item_set(champion_id, lane, plan, tree=None, parts=(), title=None):
     known = set(d["items"]) | set(d["consumables"])
     champ = d["champions"][int(champion_id)]
     blocks = []
-    starter = [i for i in (tree or {}).get("starter") or () if i in known]
+    # 시작템: 오버레이와 같은 규칙(탑·미드·원딜은 무조건 도란 템, 정글 펫, 서폿 세계 지도집 + 체력 물약)
+    start = I.starter_buy(champion_id, lane, tree, [], 500, 0)
+    starter = [x["id"] for x in start or ()] or [i for i in (tree or {}).get("starter") or () if i in known]
     if starter:
         blocks.append(_block("시작 아이템", starter))
     reasons = {p["id"]: p["note"] for p in plan.get("picks") or ()}
