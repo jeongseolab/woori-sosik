@@ -29,6 +29,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, ".."))
 import item_context as X  # noqa: E402
 import item_tree as T  # noqa: E402
+import shop_watch  # noqa: E402
 import items as I  # noqa: E402
 import lcu as L  # noqa: E402
 
@@ -162,6 +163,19 @@ def fetch_live():
 # 작은 창에서 사용자가 고른 내 라인 {"champ": 챔피언 번호, "lane": 라인}. 라인 퀘스트는 어떤 API 에도 안 나와서(롤 Live API·
 # 클라이언트 세션 모두 확인, 2026-11-13) 자동으로 고른 라인이 틀리면 사용자가 한 번 눌러 바꾼다. 게임이 끝나면 지운다
 LANE_PICK = {}
+
+
+def shop_sample(game):
+    """allgamedata → shop_watch.ShopWatch.update 에 넣을 값. 나를 못 찾으면 None."""
+    try:
+        ap = game["activePlayer"]
+        st = ap["championStats"]
+        me = next(p for p in game.get("allPlayers") or [] if p.get("riotId") == ap.get("riotId"))
+        return {"t": float(game["gameData"]["gameTime"]), "gold": float(ap.get("currentGold") or 0),
+                "hp": float(st["currentHealth"]), "maxhp": float(st["maxHealth"]), "ms": float(st["moveSpeed"]),
+                "dead": bool(me.get("isDead")), "items": sorted(int(i["itemID"]) for i in me.get("items") or [])}
+    except (KeyError, TypeError, ValueError, StopIteration):
+        return None
 
 
 def advise(game, my_lane=None):
@@ -400,7 +414,8 @@ def _keep_top(root):
         pass
 
 
-def run_window(step):
+def run_window(step, sample=None):
+    """sample: 롤 게임 자료를 돌려주는 함수(0.5초마다 불러 상점을 쓸 수 있는지 본다). None 이면(--demo) 상점 따라 띄우기를 안 한다."""
     import tkinter as tk
 
     root = tk.Tk()
@@ -450,7 +465,9 @@ def run_window(step):
     root.bind("<B1-Motion>", lambda e: root.geometry("+%d+%d" % (e.x_root - drag["x"], e.y_root - drag["y"])))
     root.bind("<Button-3>", lambda e: root.destroy())
 
-    state = {"advice": None, "shown": None, "hidden_mode": None}
+    # shop: 지금 상점을 쓸 수 있나(True/False), 게임이 아니거나 모르면 None. shop_was: 앞에서 본 값(바뀌는 순간만 띄우고 내린다)
+    state = {"advice": None, "shown": None, "hidden_mode": None, "shop": None, "shop_was": None}
+    watch = shop_watch.ShopWatch()
 
     def mode_of(a):
         return a.get("mode") if isinstance(a, dict) else "wait"
@@ -491,6 +508,17 @@ def run_window(step):
     show_requested()                    # 지난번에 남은 요청은 버린다
     _no_activate(root)
 
+    # 상점: 귀환·부활로 우물에 오거나 죽으면 띄우고, 우물을 나가면 내린다(tools/shop_watch.py). 2초 추천과 따로 0.5초마다
+    def shop_loop():
+        while sample is not None:
+            try:
+                g = sample()
+                one = shop_sample(g) if g else None
+                state["shop"] = watch.update(one) if one else None
+            except Exception:
+                state["shop"] = None
+            time.sleep(0.5)
+
     def poll():
         while True:
             try:
@@ -501,10 +529,26 @@ def run_window(step):
             time.sleep(POLL)
 
     def draw():
+        global HIDDEN
         # 그리다 오류가 나도(아이콘 파일이 깨졌다든가) 다음 그리기는 꼭 잡는다. 안 그러면 창이 그 자리에 멈춘다
         if parent_gone():               # 앱 창을 닫았다
             root.destroy()
             return
+        shop, was = state["shop"], state["shop_was"]
+        state["shop_was"] = shop
+        if shop is not None and shop != was and was is not None:
+            if shop:                    # 상점에 왔다: "−" 로 숨겼어도 다시 띄운다
+                show()
+            elif not HIDDEN:            # 상점을 나갔다: 내린다(앱 창을 앞으로 가져오면 다시 보인다)
+                HIDDEN = True
+                state["hidden_mode"] = "game"
+                root.withdraw()
+                write_status(state["advice"])
+        elif shop is not None and was is None and not shop and not HIDDEN and mode_of(state["advice"]) != "select":
+            # 게임에 들어와 처음 본 값이 '상점 밖' 이면(앱을 게임 도중에 켬) 내린 채로 시작
+            HIDDEN = True
+            state["hidden_mode"] = "game"
+            root.withdraw()
         if HIDDEN:
             now = mode_of(state["advice"])
             # 앱 창을 맨 앞으로 가져왔거나, 숨길 때와 달리 챔프 선택·게임이 시작됐으면 다시 보인다
@@ -580,6 +624,7 @@ def run_window(step):
                 why.config(wraplength=max(240, build_box.winfo_reqwidth() - 20))
 
     threading.Thread(target=poll, daemon=True).start()
+    threading.Thread(target=shop_loop, daemon=True).start()
     draw()
     root.mainloop()
 
@@ -611,7 +656,7 @@ def main():
     if args.text:
         run_text(step, args.once)
     else:
-        run_window(step)
+        run_window(step, None if (args.demo or args.demo_select) else fetch_live)
 
 
 if __name__ == "__main__":

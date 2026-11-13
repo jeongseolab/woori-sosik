@@ -1,5 +1,6 @@
 """아이템 추천기 확인. python test_items.py (pytest 로 돌려도 된다)."""
 import itertools
+import json
 import random
 
 import item_context as X
@@ -590,3 +591,58 @@ def test_spell_hints_and_lane_pick():
     finally:
         O.LANE_PICK.clear()
         O.TREE_OVERRIDE = None
+
+
+# ── 상점에 오면 작은 창 띄우기(tools/shop_watch.py) ──
+def _shop_rows():
+    import gzip, os
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tests_data", "shop_game_2026-11-13.jsonl.gz")
+    with gzip.open(path, "rt", encoding="utf-8") as f:
+        return [json.loads(l) for l in f]
+
+
+def _shop_changes(rows):
+    import sys, os
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools"))
+    import shop_watch as SW
+    w, out, prev = SW.ShopWatch(), [], None
+    for r in rows:
+        on = w.update(r)
+        if prev is not None and on != prev:
+            out.append((r["t"], on))
+        prev = on
+    return out
+
+
+def test_shop_watch_real_game():
+    """실제 게임(2026-11-13, 30분): 귀환 11번·죽음 2번에 띄우고, 우물을 나가면 2초 안에 내리고, 라인 이속 버프에는 안 띄운다."""
+    ch = _shop_changes(_shop_rows())
+    shown = [t for t, on in ch if on]
+    want = [174.3, 322.8, 437.6, 514.5, 716.7, 773.5, 878.7, 1006.7, 1125.7, 1287.3, 1432.6, 1560.0, 1595.0]
+    assert len(shown) == len(want) and all(abs(a - b) < 1.0 for a, b in zip(shown, want)), shown
+    hidden = [t for t, on in ch if not on]
+    # 우물 이속에서 떨어지기 시작한 때(기록) 와 내린 때
+    left = {174.3: 182.1, 1125.7: 1141.8}
+    for s, l in left.items():
+        h = next(t for t in hidden if t > s)
+        assert l <= h <= l + 2.0, (s, h)
+
+
+def test_shop_watch_speed_buffs_are_not_shop():
+    import sys, os
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools"))
+    import shop_watch as SW
+    def run(seq):
+        w = SW.ShopWatch()
+        return [w.update(r) for r in seq]
+    lane = [{"t": 100 + k * .5, "gold": 500, "hp": 1500, "maxhp": 2000, "ms": 400, "dead": False, "items": [1055]} for k in range(80)]
+    # 마스터 이 R: 1.45배 7초, 싸우며 체력이 줆 → 상점 아님
+    yi = [dict(r, t=140 + k * .5, ms=580, hp=1500 - k * 20) for k, r in enumerate(lane[:14])]
+    assert not any(run(lane + yi))
+    # 헤카림 E: 이속이 계속 오름(고정 아님) + 스킬로 체력 회복 조금 → 상점 아님
+    he = [dict(r, t=140 + k * .5, ms=400 + k * 40, hp=1500 + k * 10) for k, r in enumerate(lane[:8])]
+    assert not any(run(lane + he))
+    # 체력이 꽉 찬 채 귀환: 우물 이속 1.77배가 3초 고정이면 우물
+    full = [dict(r, hp=2000) for r in lane]
+    home = [dict(r, t=140 + k * .5, ms=708, hp=2000) for k, r in enumerate(lane[:10])]
+    assert run(full + home)[-1]
