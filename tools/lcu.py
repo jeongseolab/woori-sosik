@@ -128,6 +128,15 @@ def _block(title, ids, counts=None):
     return {"type": title, "items": [{"id": str(i), "count": (counts or {}).get(i, n)} for i, n in seen.items()]}
 
 
+def parts_path(item_id, items):
+    """완성템 → 사는 순서의 하위템(하위템의 하위템부터). 몰락한 왕의 검 → 롱소드, 흡혈의 낫, 단검, 곡선 활, 곡괭이"""
+    out = []
+    for c in (items.get(item_id) or {}).get("from") or ():
+        out += parts_path(c, items)
+        out.append(c)
+    return out
+
+
 def make_item_set(champion_id, lane, plan, tree=None, parts=(), title=None):
     """빌드 → 아이템 세트. plan: items.plan_build 결과, tree: OP.GG 템트리(시작템·다른 후보), parts: [(번호, 이유)].
 
@@ -144,6 +153,12 @@ def make_item_set(champion_id, lane, plan, tree=None, parts=(), title=None):
     reasons = {p["id"]: p["note"] for p in plan.get("picks") or ()}
     build = [i for i in plan["items"] if i in known]
     blocks.append(_block("빌드 순서 (Tier.gg%s)" % (" · OP.GG 코어" if plan.get("source") == "opgg" else ""), build))
+    # 앞 완성템 셋(신발 빼고) 의 하위템을 사는 순서로. 상점 추천 탭은 완성템만 보여서 귀환 때 단검·롱소드부터 무엇을 살지 몰랐다
+    core = [i for i in build if (d["items"][i].get("from") and "Boots" not in (d["items"][i].get("tags") or ()))][:3]
+    for k, i in enumerate(core):
+        path = [c for c in parts_path(i, d["items"]) if c in known]
+        if path:
+            blocks.append(_block("%d번째 %s 하위템 (이 순서로)" % (k + 1, d["items"][i]["name"]), path))
     if parts:
         blocks.append(_block("상황: 먼저 올릴 하위템 (%s)" % ", ".join(sorted({r for _, r in parts})),
                              [p for p, _ in parts if p in known]))

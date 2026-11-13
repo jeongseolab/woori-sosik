@@ -8,6 +8,7 @@
 ctx 칸의 뜻과 그걸로 값을 어떻게 바꾸는지는 items.apply_context.
 판단은 누구나 볼 수 있는 정보만 쓴다(Tab 점수판에 나오는 아이템·KDA·CS). 적의 골드·쿨타임 같은 숨은 정보는 쓰지 않는다.
 """
+import itertools
 import math
 
 import items as I
@@ -157,17 +158,71 @@ def _cid(raw):
     return None
 
 
+def _has_smite(p):
+    sp = p.get("summonerSpells") or {}
+    return any("smite" in " ".join(str(v) for v in (s or {}).values()).lower() for s in sp.values())
+
+
 def _player(p):
     sc = p.get("scores") or {}
     inv = [int(x["itemID"]) for x in p.get("items") or [] if x.get("itemID")]
     return {"id": _cid(p.get("rawChampionName")), "items": inv, "kills": sc.get("kills", 0),
             "deaths": sc.get("deaths", 0), "cs": sc.get("creepScore", 0), "level": p.get("level", 1),
-            "item_gold": _item_gold(inv), "team": p.get("team"), "lane": LIVE_LANE.get(p.get("position") or ""),
-            "name": p.get("championName")}
+            "item_gold": _item_gold(inv), "team": p.get("team"), "api_lane": LIVE_LANE.get(p.get("position") or ""),
+            "smite": _has_smite(p), "name": p.get("championName")}
 
 
-def from_live(game):
-    """allgamedata → {champion, lane, gold, inventory, ctx, opponent}. 나를 못 찾으면 이유(str)."""
+# 라인 비율(OP.GG) 이 없을 때 챔피언 역할로 어림한다
+_ROLE_LANES = {"marksman": {"adc": .8, "top": .1, "mid": .1}, "support": {"support": .8, "mid": .1, "top": .1},
+               "mage": {"mid": .6, "support": .25, "top": .15}, "assassin": {"mid": .5, "jungle": .4, "top": .1},
+               "fighter": {"top": .55, "jungle": .35, "mid": .1}, "tank": {"top": .45, "support": .3, "jungle": .25}}
+LANES = ("top", "jungle", "mid", "adc", "support")
+
+
+def _share(cid, shares):
+    got = shares.get(str(cid)) if shares else None
+    if got:
+        return got
+    roles = (I.data()["champions"].get(cid) or {}).get("roles") or ()
+    out = {}
+    for k, r in enumerate(roles[:2]):
+        for lane, v in _ROLE_LANES.get(r, {}).items():
+            out[lane] = out.get(lane, 0) + v * (1.0 if k == 0 else 0.4)
+    return out
+
+
+def assign_lanes(team, shares=None, fixed=None):
+    """한 팀(최대 5명) → 사람마다 라인. 롤 Live API 의 position 은 일부 큐(일반·빠른 대전 등) 에서 비거나 틀려서
+    (베인을 미드로) 그것만 믿지 않고 다섯 자리 배치 중 가장 그럴듯한 것을 고른다.
+
+    점수: 그 챔피언이 그 라인을 가는 비율(OP.GG, log) + API 가 준 라인이면 +2 + 강타면 정글 +6(아니면 -6)
+    + fixed(사람 번호 → 라인, 챔프 선택에서 받은 내 라인) 이면 +8.
+    """
+    fixed = fixed or {}
+    n = len(team)
+    if not n:
+        return []
+    def score(k, lane):
+        p = team[k]
+        sh = _share(p["id"], shares).get(lane, 0.0)
+        v = math.log(sh + 0.02)
+        if p.get("api_lane") == lane:
+            v += 2.0
+        if p.get("smite"):
+            v += 6.0 if lane == "jungle" else -6.0
+        if fixed.get(k) == lane:
+            v += 8.0
+        return v
+    table = [[score(k, l) for l in LANES] for k in range(n)]
+    best = max(itertools.permutations(range(len(LANES)), n), key=lambda pm: sum(table[k][pm[k]] for k in range(n)))
+    return [LANES[j] for j in best]
+
+
+def from_live(game, my_lane=None, shares=None):
+    """allgamedata → {champion, lane, gold, inventory, ctx, opponent}. 나를 못 찾으면 이유(str).
+
+    my_lane: 챔프 선택에서 받은 내 라인(있으면 가장 믿는다). shares: item_tree.lane_shares() (없으면 역할로 어림)
+    """
     me_raw = game.get("activePlayer") or {}
     who = me_raw.get("riotId") or me_raw.get("summonerName")
     players = game.get("allPlayers") or []
@@ -180,6 +235,19 @@ def from_live(game):
     others = [_player(p) for p in players if p is not mine]
     allies = [p for p in others if p["team"] == me["team"]]
     enemies = [p for p in others if p["team"] != me["team"]]
+    # 라인: 협곡 5:5 이면 팀마다 배치를 고른다. 사람이 모자란 판(사용자 설정 1:1 등) 은 API 가 준 라인만
+    full = len(allies) + 1 == 5 and len(enemies) == 5 and all(p["id"] for p in [me] + others)
+    if full:
+        mine_team = [me] + allies
+        for p, lane in zip(mine_team, assign_lanes(mine_team, shares, {0: my_lane} if my_lane in LANES else None)):
+            p["lane"] = lane
+        for p, lane in zip(enemies, assign_lanes(enemies, shares)):
+            p["lane"] = lane
+    else:
+        for p in [me] + others:
+            p["lane"] = p["api_lane"]
+        if my_lane in LANES:
+            me["lane"] = my_lane
     # 맞라이너: 같은 라인의 적. 라인 정보가 없는 판(사용자 설정 게임) 이면 라인전 상태는 모른다
     opp = next((p for p in enemies if me["lane"] and p["lane"] == me["lane"]), None)
     foes = [p for p in enemies if p["lane"] and p["lane"] in LANE_FOES.get(me["lane"], ())]

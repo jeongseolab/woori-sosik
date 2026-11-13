@@ -518,3 +518,52 @@ if __name__ == "__main__":
         if name.startswith("test_"):
             fn()
             print("ok", name)
+
+
+# ── 게임 중 라인 가리기(플레이 시험 2026-11-13: 베인을 미드로, 맞라인을 트위스티드 페이트로 잘못 봄) ──
+def _p(name, pos="", smite=False):
+    cid = NAME[name]
+    sp = {"summonerSpellOne": {"displayName": "강타", "rawDisplayName": "GeneratedTip_SummonerSpell_SummonerSmite_DisplayName"}} if smite \
+        else {"summonerSpellOne": {"displayName": "점멸", "rawDisplayName": "GeneratedTip_SummonerSpell_SummonerFlash_DisplayName"}}
+    return {"id": cid, "api_lane": X.LIVE_LANE.get(pos), "smite": smite, "summonerSpells": sp}
+
+
+SHARES = {str(NAME[n]): v for n, v in {
+    "베인": {"adc": .7, "top": .3}, "아리": {"mid": 1.0}, "리 신": {"jungle": 1.0}, "가렌": {"top": .9, "mid": .1},
+    "레오나": {"support": 1.0}, "트위스티드 페이트": {"mid": 1.0}, "징크스": {"adc": 1.0}, "말파이트": {"top": .8, "mid": .1, "jungle": .1},
+    "쓰레쉬": {"support": 1.0}, "제드": {"mid": .9, "jungle": .1}}.items()}
+
+
+def test_assign_lanes_fixes_wrong_api_positions():
+    team = [_p("베인", "MIDDLE"), _p("아리", "BOTTOM"), _p("리 신", "", smite=True), _p("가렌", "TOP"), _p("레오나", "UTILITY")]
+    assert X.assign_lanes(team, SHARES) == ["adc", "mid", "jungle", "top", "support"]
+    # 역할로만 어림해도(라인 비율 없음) 강타는 정글, 원딜은 바텀
+    assert X.assign_lanes(team, None)[:3] == ["adc", "mid", "jungle"]
+    # 챔프 선택에서 받은 내 라인이 가장 세다(베인 탑)
+    assert X.assign_lanes(team, SHARES, {0: "top"})[0] == "top"
+
+
+def test_from_live_lane_opponent_by_assignment():
+    import copy, sys, os
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools"))
+    import item_overlay as O
+    g = copy.deepcopy(O.DEMO)
+    # 데모(징크스 바텀) 의 내 칸과 적 칸 position 을 비우고 섞어도 맞라이너는 드레이븐
+    for p in g["allPlayers"]:
+        p["position"] = ""
+    live = X.from_live(g)
+    assert live["lane"] == "adc" and live["opponent"] == "드레이븐"
+    # 챔프 선택에서 미드로 받았으면 미드(맞라이너는 적 미드)
+    live = X.from_live(g, "mid")
+    assert live["lane"] == "mid" and live["opponent"] != "드레이븐"
+
+
+def test_item_set_has_component_paths():
+    import sys, os
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools"))
+    import lcu as L
+    plan = {"items": [3153, 3006, 3124, 3031], "source": "opgg", "picks": []}
+    s = L.make_item_set(NAME["베인"], "adc", plan)
+    first = next(b for b in s["blocks"] if b["type"].startswith("1번째"))
+    assert [int(x["id"]) for x in first["items"]] == [1036, 1053, 1042, 1043, 1037]     # 롱소드 → 흡혈의 낫 → 단검 → 곡궁 → 곡괭이
+    assert not any("광전사" in b["type"] for b in s["blocks"])                        # 신발은 빼고

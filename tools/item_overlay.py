@@ -159,7 +159,7 @@ def fetch_live():
         return None
 
 
-def advise(game):
+def advise(game, my_lane=None):
     """게임 자료 → 보여 줄 것(dict). 협곡이 아니거나 나를 못 찾으면 이유(str).
 
     시간·라인전 상태(맞라이너와 CS·레벨·킬·아이템 비교)·아군과 적 조합은 item_context.from_live 가 읽는다.
@@ -168,7 +168,9 @@ def advise(game):
         return "게임을 기다리는 중이에요"
     if (game.get("gameData") or {}).get("mapNumber") not in (11, None):
         return "소환사의 협곡에서만 추천해요"
-    live = X.from_live(game)
+    # 라인 비율은 OP.GG(12시간 들고 있음). 시험·--demo(TREE_OVERRIDE) 에서는 인터넷 없이 역할로 어림
+    shares = None if TREE_OVERRIDE is not None else T.lane_shares()
+    live = X.from_live(game, my_lane, shares)
     if isinstance(live, str):
         return live
     inventory, gold, cid, lane, ctx = live["inventory"], live["gold"], live["champion"], live["lane"], live["ctx"]
@@ -208,11 +210,18 @@ class Watcher:
     def __init__(self, get_game, get_client, push=True):
         self.get_game, self.get_client, self.push = get_game, get_client, push
         self.last_key, self.last_try, self.status = None, 0.0, None
+        self.picked = None          # 챔프 선택에서 본 (내 챔피언 번호, 라인). 게임에 들어가면 내 라인을 이것으로
 
     def __call__(self):
         game = self.get_game()
         if game:
-            return advise(game)
+            # 챔프 선택 때 본 챔피언으로 들어온 판이면 그때 받은 라인(이전 판의 것이면 안 쓴다)
+            lane = None
+            if self.picked:
+                me = X.from_live(game)
+                if isinstance(me, dict) and me["champion"] == self.picked[0]:
+                    lane = self.picked[1]
+            return advise(game, lane)
         client = self.get_client()
         if client is None:
             return "게임을 기다리는 중이에요"
@@ -230,6 +239,7 @@ class Watcher:
 
     def select(self, client, sel):
         cid, lane = sel["champion"], sel["lane"]
+        self.picked = (cid, lane) if lane else None
         if cid not in I.data()["champions"]:
             return "모르는 챔피언이에요. tools/lol_items.py 로 자료를 다시 구워 주세요"
         ctx = X.make_context(None, None, sel["allies"], sel["enemies"], sel["foes"])
@@ -360,6 +370,21 @@ def _no_activate(root):
         pass
 
 
+def _keep_top(root):
+    """Windows: 맨 위로 다시 올린다(포커스는 안 가져감). 롤 창이 앞으로 오며 맨 위 자리를 가져가면
+    -topmost 를 한 번 켠 것만으로는 작은 창이 롤 뒤로 숨었다(창 모드에서 안 보이던 것)."""
+    if not sys.platform.startswith("win"):
+        return
+    try:
+        import ctypes
+        u = ctypes.windll.user32
+        hwnd = u.GetParent(root.winfo_id()) or root.winfo_id()
+        HWND_TOPMOST, SWP_NOSIZE, SWP_NOMOVE, SWP_NOACTIVATE = -1, 0x0001, 0x0002, 0x0010
+        u.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE)
+    except Exception:
+        pass
+
+
 def run_window(step):
     import tkinter as tk
 
@@ -458,6 +483,7 @@ def run_window(step):
                 return
         else:
             show_requested()            # 보이는 중에 온 요청은 버린다
+        _keep_top(root)
         try:
             paint()
         except Exception as e:

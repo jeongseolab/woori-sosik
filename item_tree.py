@@ -145,3 +145,45 @@ def fetch(champion_id, lane, fresh=False):
         except OSError:
             pass
         return tree
+
+
+def _norm(name):
+    return "".join(ch for ch in str(name).lower() if ch.isalnum())
+
+
+def lane_shares():
+    """챔피언 번호(str) → {라인: 그 챔피언 판 중 그 라인 비율}. OP.GG 라인별 티어표(한 번에 다 옴) 에서.
+
+    게임 중 맞라이너를 가릴 때 쓴다(롤 Live API 의 position 은 일부 큐에서 비거나 틀린다). 못 받으면 {}.
+    """
+    with _lock:
+        mem = _load()
+        hit = mem.get("lanes")
+        if hit and time.time() - hit["at"] < TTL:
+            return hit["v"]
+        if time.time() - _failed.get("lanes", 0) < FAIL_TTL:
+            return hit["v"] if hit else {}
+        try:
+            got = _call("lol_list_lane_meta_champions", {
+                "position": "all", "lang": "en_US",
+                "desired_output_fields": ["data.positions.%s[].{champion,play}" % l for l in LANES]})
+            by_name = {_norm(v): k for k, v in _keys().items()}
+            play = {}
+            for lane in LANES:
+                for row in opgg._dig(got, "data", "positions", lane) or []:
+                    cid = by_name.get(_norm(row.get("champion")))
+                    if cid and row.get("play"):
+                        play.setdefault(cid, {})[lane] = float(row["play"])
+            if not play:
+                raise opgg.OpggError("라인별 티어표가 비어 있음")
+            shares = {cid: {l: n / sum(v.values()) for l, n in v.items()} for cid, v in play.items()}
+        except Exception as e:
+            log.warning("OP.GG 라인 비율을 못 받음: %r", e)
+            _failed["lanes"] = time.time()
+            return hit["v"] if hit else {}
+        mem["lanes"] = {"at": time.time(), "v": shares}
+        try:
+            _save()
+        except OSError:
+            pass
+        return shares
