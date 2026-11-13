@@ -29,6 +29,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, ".."))
 import item_context as X  # noqa: E402
 import item_tree as T  # noqa: E402
+import recall_watch  # noqa: E402
 import shop_watch  # noqa: E402
 import items as I  # noqa: E402
 import lcu as L  # noqa: E402
@@ -417,8 +418,9 @@ def _keep_top(root):
         pass
 
 
-def run_window(step, sample=None):
-    """sample: 롤 게임 자료를 돌려주는 함수(0.5초마다 불러 상점을 쓸 수 있는지 본다). None 이면(--demo) 상점 따라 띄우기를 안 한다."""
+def run_window(step, sample=None, game_dir=None):
+    """sample: 롤 게임 자료를 돌려주는 함수(0.5초마다 불러 상점을 쓸 수 있는지 본다). None 이면(--demo) 상점 따라 띄우기를 안 한다.
+    game_dir: 롤 설치 폴더(귀환키 설정 Config/input.ini 를 읽는다)."""
     import tkinter as tk
 
     root = tk.Tk()
@@ -471,6 +473,7 @@ def run_window(step, sample=None):
     # shop: 지금 상점을 쓸 수 있나(True/False), 게임이 아니거나 모르면 None. shop_was: 앞에서 본 값(바뀌는 순간만 띄우고 내린다)
     state = {"advice": None, "shown": None, "hidden_mode": None, "shop": None, "shop_was": None}
     watch = shop_watch.ShopWatch()
+    recall = recall_watch.RecallWatch(recall_watch.load_keys(game_dir))
 
     def mode_of(a):
         return a.get("mode") if isinstance(a, dict) else "wait"
@@ -517,7 +520,17 @@ def run_window(step, sample=None):
             try:
                 g = sample()
                 one = shop_sample(g) if g else None
-                state["shop"] = watch.update(one) if one else None
+                if not one:
+                    recall.clear()
+                    state["shop"] = None
+                else:
+                    in_shop = watch.update(one)
+                    if in_shop or one["dead"]:
+                        recall.clear()          # 우물에 왔다(귀환 성공) 또는 죽음: 이제 shop_watch 가 정한다
+                    else:
+                        recall.health(one["hp"], time.monotonic())
+                    # 귀환키를 누른 뒤 귀환이 끊기기 전까지도 띄운다(우물에 오기 전에 미리)
+                    state["shop"] = in_shop or recall.active(time.monotonic())
             except Exception:
                 state["shop"] = None
             time.sleep(0.5)
@@ -628,6 +641,8 @@ def run_window(step, sample=None):
 
     threading.Thread(target=poll, daemon=True).start()
     threading.Thread(target=shop_loop, daemon=True).start()
+    if sample is not None:
+        threading.Thread(target=recall_watch.key_loop, args=(recall,), daemon=True).start()
     draw()
     root.mainloop()
 
@@ -659,7 +674,7 @@ def main():
     if args.text:
         run_text(step, args.once)
     else:
-        run_window(step, None if (args.demo or args.demo_select) else fetch_live)
+        run_window(step, None if (args.demo or args.demo_select) else fetch_live, args.game)
 
 
 if __name__ == "__main__":

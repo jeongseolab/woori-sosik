@@ -65,7 +65,7 @@ def main():
             "--name", APP_FILE, "--windowed",
             "--paths", ROOT, "--paths", os.path.join(ROOT, "tools"),
             "--add-data", os.path.join(ROOT, "static", "items") + sep + "static/items",
-            "--hidden-import", "item_overlay", "--hidden-import", "shop_watch", "--hidden-import", "lcu", "--hidden-import", "item_tree", "--hidden-import", "updater",
+            "--hidden-import", "item_overlay", "--hidden-import", "shop_watch", "--hidden-import", "recall_watch", "--hidden-import", "lcu", "--hidden-import", "item_tree", "--hidden-import", "updater",
             # 앱 창(웹) 은 pywebview. Windows 는 Edge WebView2(pythonnet), macOS 는 WKWebView(pyobjc)
             "--collect-all", "webview",
             # 서버(웹) 쪽만 쓰는 것은 빼서 크기를 줄인다

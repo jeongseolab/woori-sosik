@@ -676,3 +676,57 @@ def test_starter_is_doran_for_laners():
         assert a["buy"][0]["id"] in DOR and a["reasons"][0].startswith("게임 시작")
     finally:
         O.TREE_OVERRIDE = None
+
+
+# ── 귀환키로 미리 띄우기(tools/recall_watch.py) ──
+def test_recall_keys_from_lol_config():
+    import sys, os, tempfile
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools"))
+    import recall_watch as R
+    d = tempfile.mkdtemp()
+    os.makedirs(os.path.join(d, "Config"))
+    with open(os.path.join(d, "Config", "input.ini"), "w", encoding="utf-8") as f:
+        f.write("[GameEvents]\nevtUseItem7=[Shift][h],[b]\nevtPlayerMoveClick=[Button 2]\nevtCastSpell1=[q]\n"
+                "evtCastAvatarSpell2=[f]\nevtUseItem1=[1]\n")
+    k = R.load_keys(d)
+    assert k["recall"] == [ord("H"), ord("B")] and {0x02, ord("Q"), ord("F"), ord("1")} <= set(k["cancel"])
+    assert R.load_keys(os.path.join(d, "없음"))["recall"] == [ord("B")]      # 설정이 없으면 기본 b
+
+
+def test_recall_watch_shows_and_cancels():
+    import sys, os
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools"))
+    import recall_watch as R
+    w = R.RecallWatch(R.DEFAULT)
+    B, Q, RMB = ord("B"), ord("Q"), 0x02
+    w.press(B, 0); w.health(1000, 0.5); w.health(1010, 1.0)
+    assert w.active(5.0)                                   # 귀환 중(체력이 차는 건 괜찮다)
+    w.press(RMB, 5.5)
+    assert not w.active(5.6) and "키" in w.reason          # 움직여서 끊김
+    w.press(B, 10); w.health(1000, 10.5); w.health(950, 11)
+    assert not w.active(11.1) and "맞음" in w.reason        # 맞아서 끊김
+    w.press(B, 20)
+    assert w.active(28) and not w.active(29.6)             # 8초 + 여유가 지나도 우물에 안 오면 끊긴 것
+    w.press(Q, 30)
+    assert not w.active(30.1)                              # 귀환 중이 아니면 다른 키는 아무 일 없음
+
+
+def test_recall_key_loop_only_when_lol_in_front():
+    import sys, os, threading, time
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools"))
+    import recall_watch as R
+    w = R.RecallWatch(R.DEFAULT)
+    held, front, done = set(), [False], [False]
+    th = threading.Thread(target=R.key_loop, args=(w, lambda: done[0], 0.01, lambda k: k in held, lambda: front[0]))
+    th.start()
+    try:
+        held.add(ord("B")); time.sleep(0.08)
+        assert not w.active(time.monotonic())             # 롤이 맨 앞이 아니면(채팅 앱에서 b) 무시
+        held.clear(); front[0] = True; time.sleep(0.05)
+        held.add(ord("B")); time.sleep(0.08)
+        assert w.active(time.monotonic())                 # 롤에서 귀환키
+        held.add(0x02); time.sleep(0.08)
+        assert not w.active(time.monotonic())             # 오른쪽 클릭(이동) → 끊김
+    finally:
+        done[0] = True
+        th.join()
