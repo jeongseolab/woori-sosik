@@ -627,7 +627,7 @@ def run_window(step, sample=None, game_dir=None):
 
     def paint():
         a = state["advice"]
-        key = as_text(a) if a is not None else None
+        key = (as_text(a) if a is not None else None, recall.blocked)
         if key != state["shown"]:
             state["shown"] = key
             for box in (buy_box, build_box):
@@ -660,7 +660,9 @@ def run_window(step, sample=None, game_dir=None):
             else:
                 head.config(text="%s · %s골드" % (a["champion"], format(a["gold"], ",")), fg=GOLD)
                 sub.config(text=_situation(a))
-                why.config(text="\n".join("· " + r for r in (a.get("reasons") or [])[:3]))
+                # 귀환키를 못 읽는 이유(롤이 관리자 권한) 가 있으면 맨 위에
+                why.config(text="\n".join(["⚠ " + recall.blocked] * bool(recall.blocked)
+                                          + ["· " + r for r in (a.get("reasons") or [])[:3]]))
                 if not a["buy"]:
                     tk.Label(buy_box, text="지금 골드로는 다음 재료를 못 사요", bg=BG, fg=MUTED, font=font).pack(anchor="w")
                 for b in a["buy"]:
@@ -684,7 +686,8 @@ def run_window(step, sample=None, game_dir=None):
     threading.Thread(target=poll, daemon=True).start()
     threading.Thread(target=shop_loop, daemon=True).start()
     if sample is not None:
-        threading.Thread(target=recall_watch.key_loop, args=(recall,), daemon=True).start()
+        threading.Thread(target=recall_watch.key_loop, args=(recall,), kwargs={"log": lambda m: event(m, state["t"])},
+                         daemon=True).start()
     draw()
     root.mainloop()
 

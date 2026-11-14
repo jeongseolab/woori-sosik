@@ -68,6 +68,7 @@ class RecallWatch:
         self.since = None           # 귀환을 시작한 때
         self.hp = None
         self.reason = ""
+        self.blocked = ""           # 키를 못 읽는 이유(롤이 관리자 권한). 작은 창에 보여 준다
 
     def press(self, vk, now):
         if vk in self.keys["recall"]:
@@ -92,10 +93,10 @@ class RecallWatch:
         self.since, self.hp = None, None
 
 
-def lol_foreground():
-    """롤 게임 창(RiotWindowClass) 이 맨 앞인가."""
+def foreground_class():
+    """맨 앞 창의 클래스 이름(Windows). 없으면 ""."""
     if not sys.platform.startswith("win"):
-        return False
+        return ""
     import ctypes
     from ctypes import wintypes as W
     u = ctypes.WinDLL("user32")
@@ -103,7 +104,64 @@ def lol_foreground():
     u.GetClassNameW.argtypes = [W.HWND, W.LPWSTR, ctypes.c_int]
     buf = ctypes.create_unicode_buffer(64)
     h = u.GetForegroundWindow()
-    return bool(h) and u.GetClassNameW(h, buf, 64) > 0 and buf.value == "RiotWindowClass"
+    return buf.value if h and u.GetClassNameW(h, buf, 64) > 0 else ""
+
+
+def lol_foreground():
+    """롤 게임 창(RiotWindowClass) 이 맨 앞인가."""
+    return foreground_class() == "RiotWindowClass"
+
+
+def _integrity(pid=None):
+    """프로세스 무결성 수준(0x2000 보통, 0x3000 높음=관리자). pid 없으면 이 프로세스. 모르면 None."""
+    import ctypes
+    from ctypes import wintypes as W
+    k, a = ctypes.WinDLL("kernel32"), ctypes.WinDLL("advapi32")
+    k.OpenProcess.restype = W.HANDLE
+    k.GetCurrentProcess.restype = W.HANDLE
+    a.OpenProcessToken.argtypes = [W.HANDLE, W.DWORD, ctypes.POINTER(W.HANDLE)]
+    a.GetTokenInformation.argtypes = [W.HANDLE, ctypes.c_int, ctypes.c_void_p, W.DWORD, ctypes.POINTER(W.DWORD)]
+    a.GetSidSubAuthorityCount.argtypes, a.GetSidSubAuthorityCount.restype = [ctypes.c_void_p], ctypes.POINTER(ctypes.c_ubyte)
+    a.GetSidSubAuthority.argtypes, a.GetSidSubAuthority.restype = [ctypes.c_void_p, W.DWORD], ctypes.POINTER(W.DWORD)
+    h = k.GetCurrentProcess() if pid is None else k.OpenProcess(0x1000, False, int(pid))
+    if not h:
+        return None
+    t = W.HANDLE()
+    try:
+        if not a.OpenProcessToken(h, 0x0008, ctypes.byref(t)):
+            return None
+        n = W.DWORD()
+        a.GetTokenInformation(t, 25, None, 0, ctypes.byref(n))          # TokenIntegrityLevel
+        buf = ctypes.create_string_buffer(n.value)
+        if not a.GetTokenInformation(t, 25, buf, n, ctypes.byref(n)):
+            return None
+        sid = ctypes.cast(buf, ctypes.POINTER(ctypes.c_void_p))[0]
+        return a.GetSidSubAuthority(sid, a.GetSidSubAuthorityCount(sid)[0] - 1)[0]
+    finally:
+        if t:
+            k.CloseHandle(t)
+        if pid is not None:
+            k.CloseHandle(h)
+
+
+BLOCKED = ("롤이 관리자 권한으로 켜져 있어 귀환키를 못 읽어요. "
+           "Riot Client 를 그냥(관리자 권한 없이) 다시 켜거나, Tier.gg 를 관리자 권한으로 켜 주세요")
+
+
+def blocked_by_admin():
+    """맨 앞 롤 창이 이 프로세스보다 높은 권한(관리자) 인가. 그러면 Windows(UIPI) 가 키 읽기를 막는다
+    (2026-11-14: Riot Client 를 관리자 권한으로 켠 판에서 귀환키가 하나도 안 잡혔다)."""
+    if not sys.platform.startswith("win"):
+        return False
+    import ctypes
+    from ctypes import wintypes as W
+    u = ctypes.WinDLL("user32")
+    u.GetForegroundWindow.restype = W.HWND
+    u.GetWindowThreadProcessId.argtypes = [W.HWND, ctypes.POINTER(W.DWORD)]
+    pid = W.DWORD()
+    u.GetWindowThreadProcessId(u.GetForegroundWindow(), ctypes.byref(pid))
+    theirs, mine = _integrity(pid.value), _integrity()
+    return bool(theirs and mine and theirs > mine)
 
 
 def _async_key():
@@ -113,9 +171,13 @@ def _async_key():
     return lambda k: bool(u.GetAsyncKeyState(k) & 0x8000)
 
 
-def key_loop(watch, stop=lambda: False, period=0.025, is_down=None, foreground=None):
+def key_loop(watch, stop=lambda: False, period=0.025, is_down=None, foreground=None, log=None, check_admin=None):
     """롤 창이 맨 앞일 때 귀환키·끊는 키가 새로 눌렸는지 period 초마다 본다(Windows).
-    is_down·foreground: 시험에서 바꿔 끼운다(진짜 키를 보내면 사용자 창에 입력되니)."""
+    is_down·foreground: 시험에서 바꿔 끼운다(진짜 키를 보내면 사용자 창에 입력되니).
+    log(글): 시작·오류·롤이 앞이 아니라 귀환키를 무시한 것을 적는다(작은 창은 콘솔이 없어 오류가 안 보인다)."""
+    log = log or (lambda msg: None)
+    if check_admin is None:
+        check_admin = is_down is None                    # 시험(가짜 키) 에서는 권한을 보지 않는다
     if is_down is None:
         if not sys.platform.startswith("win"):
             return
@@ -123,12 +185,32 @@ def key_loop(watch, stop=lambda: False, period=0.025, is_down=None, foreground=N
     foreground = foreground or lol_foreground
     vks = list(dict.fromkeys(watch.keys["recall"] + watch.keys["cancel"]))
     down = {k: False for k in vks}
+    raw = {k: False for k in watch.keys["recall"]}      # 롤이 앞이 아니어도 눌림(무시한 것을 적으려고)
+    log("귀환키 감지 시작: 귀환 %s, 끊는 키 %d개" % ([hex(k) for k in watch.keys["recall"]], len(watch.keys["cancel"])))
+    was_fg, checked = False, 0.0
     while not stop():
-        fg = foreground()
-        now = time.monotonic()
-        for k in vks:
-            d = fg and is_down(k)
-            if d and not down[k]:
-                watch.press(k, now)
-            down[k] = d
+        try:
+            fg = foreground()
+            # 롤 창이 앞으로 올 때(그리고 30초마다) 롤이 관리자 권한인지 본다
+            if fg and check_admin and (not was_fg or time.monotonic() - checked > 30):
+                checked = time.monotonic()
+                b = blocked_by_admin()
+                if b != bool(watch.blocked):
+                    watch.blocked = BLOCKED if b else ""
+                    log(BLOCKED if b else "롤 권한 문제 없음: 귀환키를 읽을 수 있어요")
+            was_fg = fg
+            now = time.monotonic()
+            for k in vks:
+                d = fg and is_down(k)
+                if d and not down[k]:
+                    watch.press(k, now)
+                down[k] = d
+            for k in raw:
+                d = is_down(k)
+                if d and not raw[k] and not fg:
+                    log("귀환키를 눌렀지만 롤이 맨 앞이 아니라 무시(맨 앞: %s)" % (foreground_class() or "없음"))
+                raw[k] = d
+        except Exception as e:                           # 스레드가 죽으면 귀환키가 영영 안 잡힌다. 적고 계속
+            log("귀환키 감지 오류: %r" % e)
+            time.sleep(1)
         time.sleep(period)
