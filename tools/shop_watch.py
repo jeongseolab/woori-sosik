@@ -15,7 +15,7 @@ HIGH = 1.42         # 평소 이속의 이만큼 넘으면 '우물 이속'. 기�
 HEAL = 0.04         # 1초에 최대 체력의 이만큼 넘게 차면 '우물 회복'
 HOLD = 3.0          # 체력이 꽉 차 회복이 안 보여도, 이속이 HOLD_HIGH 배 넘게 이만큼(초) 고정이고 체력이 안 줄면 우물
 HOLD_HIGH = 1.5     # 마스터 이 R(최대 1.45배, 7초) 같은 고정 이속 버프와 가르려고. 귀환한 우물은 1.52배 이상
-LEAVE = 1.0         # 우물 이속에서 떨어진 상태가 이만큼(초) 이어지면 나간 것(나가면 2초 동안 줄다가 1.4배쯤에 머문다)
+LEAVE = 0.6         # 우물 이속에서 떨어진 상태가 이만큼(초) 이어지면 나간 것(나가면 2초 동안 줄다가 민병대 1.4배쯤에 머문다)
 START = 20.0        # 게임 시작 뒤 이만큼(초) 은 우물에서 시작
 
 
@@ -59,8 +59,11 @@ class ShopWatch:
         dt = (t - p["t"]) if p else 0
         healing = bool(p and 0 < dt <= 1.5 and s["maxhp"] and not p.get("dead") and s["maxhp"] == p["maxhp"]
                        and (s["hp"] - p["hp"]) / dt >= HEAL * s["maxhp"])
+        # 사고팖: 산 것(가방이 바뀌고 골드가 줄었다) 또는 판 것(템이 빠지고 골드가 늘었다).
+        # 가방에 템이 저절로 생기고 그 사이 CS·킬로 골드가 는 것(라인 퀘스트 보상 등, 2026-11-14 기록 125초) 은 아니다
+        gone = bool(p) and any(s["items"].count(i) < p["items"].count(i) for i in set(p["items"]))
         traded = bool(p and s["items"] != p["items"] and not p.get("dead")
-                      and (s["gold"] < p["gold"] - 1 or s["gold"] > p["gold"] + 50))
+                      and (s["gold"] < p["gold"] - 1 or (gone and s["gold"] > p["gold"] + 50)))
         respawned = bool(p and p.get("dead"))
         if t < START:
             self.fountain = ms
@@ -69,13 +72,15 @@ class ShopWatch:
             why = ("부활" if respawned else "사고팖" if traded else "우물 회복" if high and healing
                    else "우물 이속" if base and ms >= base * HOLD_HIGH and held >= HOLD else None)
             if why:
-                self.fountain = ms
+                # 우물 이속은 평소보다 확실히 빠를 때만 잡는다. 평소 이속을 잡으면 그 밑으로 안 떨어져 상점 안으로 계속 남았다
+                # (2026-11-14 기록: 평소 이속 330 을 잡아 2분 동안 안 내려감)
+                self.fountain = ms if (high or respawned or base is None) else None
                 return self._set(True, why)
             self.lane_ms.append(ms)
             return False
         # 상점 안: 우물 이속(들어올 때 값, 신발을 사면 바뀐 값) 에 머물면 그대로
-        if traded or (high and held >= 1.0):
-            self.fountain = ms                       # 이속 템을 샀거나 우물 안에서 값이 바뀜
+        if respawned or (high and (traded or held >= 1.0)):
+            self.fountain = ms                       # 우물에서 부활, 이속 템을 샀거나 우물 안에서 값이 바뀜
         if traded or healing or (self.fountain and ms >= self.fountain * 0.97):
             self.away = None
             return True

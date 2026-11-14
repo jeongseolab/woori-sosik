@@ -688,6 +688,26 @@ def test_starter_is_doran_for_laners():
 
 
 # ── 귀환키로 미리 띄우기(tools/recall_watch.py) ──
+def test_shop_watch_granted_item_is_not_shop():
+    """가방에 템이 저절로 생기고 골드가 CS 로 는 것(라인 퀘스트 보상, 2026-11-14 기록 125초) 은 상점이 아니다.
+    전에는 '사고팖' 으로 켜고 평소 이속을 우물 이속으로 잡아 2분 동안 안 내렸다."""
+    import sys, os
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools"))
+    import shop_watch as SW
+    w = SW.ShopWatch()
+    lane = [{"t": 100 + k * .5, "gold": 300 + k, "hp": 690, "maxhp": 810, "ms": 330, "dead": False, "items": [1056, 2003, 3340]}
+            for k in range(40)]
+    got = dict(lane[-1], t=120.5, gold=lane[-1]["gold"] + 57, maxhp=885, hp=775, items=[1056, 2003, 2151, 3340])
+    assert not any(w.update(r) for r in lane + [got])
+    # 진짜로 산 것(골드가 줄고 가방이 바뀜) 은 상점, 우물을 나가면(이속이 우물 값에서 떨어짐) 곧 내린다
+    w = SW.ShopWatch()
+    home = [dict(lane[-1], t=121 + k * .5, ms=527, hp=810) for k in range(4)]
+    buy = dict(home[-1], t=123.5, gold=50, items=[1052, 1056, 2003, 3340])
+    out = [dict(buy, t=124 + k * .5, ms=330) for k in range(4)]
+    res = [w.update(r) for r in lane + home + [buy] + out]
+    assert res[len(lane) + len(home)] and not res[-1]
+
+
 def test_recall_keys_from_lol_config():
     import sys, os, tempfile
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools"))

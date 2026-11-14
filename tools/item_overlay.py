@@ -47,6 +47,23 @@ PARENT_PID = None
 # 작은 창의 "−" 로 숨겼는가. 숨겨도 챔프 선택 → 상점 추천 탭 넣기는 그대로 한다(창만 안 보인다).
 # 다시 보이기: 앱 창을 맨 앞으로 가져오면 앱이 STATUS_FILE + ".show" 를 만든다(show_requested), 또는 챔프 선택·게임이 시작될 때
 HIDDEN = False
+SHOP_POLL = 0.25    # 상점 확인(롤 API) 간격(초). 우물을 나가는 것을 빨리 잡으려고
+DRAW_MS = 100       # 작은 창 확인 간격(ms). 귀환키를 누르면 이 안에 뜬다
+
+
+def event(msg, t=None):
+    """작은 창이 판단을 바꾼 것을 STATUS_FILE 옆 overlay_events.log 에 한 줄씩 적는다(게임 시간과 함께).
+    파일이 1MB 를 넘으면 처음부터 다시 쓴다."""
+    if not STATUS_FILE:
+        return
+    path = os.path.join(os.path.dirname(STATUS_FILE), "overlay_events.log")
+    try:
+        mode = "w" if os.path.exists(path) and os.path.getsize(path) > 1 << 20 else "a"
+        with open(path, mode, encoding="utf-8") as f:
+            f.write("%s %s %s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"),
+                                   "%d:%02d" % (t // 60, t % 60) if t is not None else "-", msg))
+    except OSError:
+        pass
 
 
 def show_file():
@@ -514,7 +531,10 @@ def run_window(step, sample=None, game_dir=None):
     show_requested()                    # 지난번에 남은 요청은 버린다
     _no_activate(root)
 
-    # 상점: 귀환·부활로 우물에 오거나 죽으면 띄우고, 우물을 나가면 내린다(tools/shop_watch.py). 2초 추천과 따로 0.5초마다
+    # 상점: 귀환·부활로 우물에 오거나 죽으면 띄우고, 우물을 나가면 내린다(tools/shop_watch.py). 2초 추천과 따로 SHOP_POLL 마다.
+    # in_shop: shop_watch 판단(게임이 아니면 None). 귀환키는 draw 가 0.1초마다 recall.active 로 따로 본다(롤 API 를 기다리지 않게)
+    state["in_shop"] = None
+    state["t"] = None
     def shop_loop():
         while sample is not None:
             try:
@@ -522,18 +542,37 @@ def run_window(step, sample=None, game_dir=None):
                 one = shop_sample(g) if g else None
                 if not one:
                     recall.clear()
-                    state["shop"] = None
+                    state["in_shop"] = None
                 else:
+                    state["t"] = one["t"]
                     in_shop = watch.update(one)
                     if in_shop or one["dead"]:
                         recall.clear()          # 우물에 왔다(귀환 성공) 또는 죽음: 이제 shop_watch 가 정한다
                     else:
                         recall.health(one["hp"], time.monotonic())
-                    # 귀환키를 누른 뒤 귀환이 끊기기 전까지도 띄운다(우물에 오기 전에 미리)
-                    state["shop"] = in_shop or recall.active(time.monotonic())
-            except Exception:
-                state["shop"] = None
-            time.sleep(0.5)
+                    state["in_shop"] = in_shop
+            except Exception as e:
+                event("상점 확인 오류: %s" % e)
+                state["in_shop"] = None
+            time.sleep(SHOP_POLL)
+
+    def current_shop():
+        """지금 띄울까: 상점(우물·죽음) 이거나, 귀환키를 누른 뒤 귀환이 끊기기 전. 게임이 아니면 None."""
+        if state["in_shop"] is None:
+            return None
+        return bool(state["in_shop"] or recall.active(time.monotonic()))
+
+    # 판단이 바뀔 때마다 이유를 적는다(나중에 "왜 안 떴나" 를 기록으로 본다)
+    seen = {"why": None, "recall": None}
+    def note_changes(shop):
+        if watch.reason != seen["why"]:
+            seen["why"] = watch.reason
+            if watch.reason:
+                event("상점 %s: %s" % ("안" if watch.in_shop else "밖", watch.reason), state["t"])
+        if recall.reason != seen["recall"]:
+            seen["recall"] = recall.reason
+            if recall.reason:
+                event(recall.reason, state["t"])
 
     def poll():
         while True:
@@ -550,16 +589,19 @@ def run_window(step, sample=None, game_dir=None):
         if parent_gone():               # 앱 창을 닫았다
             root.destroy()
             return
-        shop, was = state["shop"], state["shop_was"]
+        shop, was = current_shop(), state["shop_was"]
         state["shop_was"] = shop
+        note_changes(shop)
         if shop is not None and shop != was and was is not None:
-            if shop:                    # 상점에 왔다: "−" 로 숨겼어도 다시 띄운다
+            if shop:                    # 상점에 왔다·귀환키: "−" 로 숨겼어도 다시 띄운다
                 show()
+                event("창 띄움", state["t"])
             elif not HIDDEN:            # 상점을 나갔다: 내린다(앱 창을 앞으로 가져오면 다시 보인다)
                 HIDDEN = True
                 state["hidden_mode"] = "game"
                 root.withdraw()
                 write_status(state["advice"])
+                event("창 내림", state["t"])
         elif shop is not None and was is None and not shop and not HIDDEN and mode_of(state["advice"]) != "select":
             # 게임에 들어와 처음 본 값이 '상점 밖' 이면(앱을 게임 도중에 켬) 내린 채로 시작
             HIDDEN = True
@@ -571,7 +613,7 @@ def run_window(step, sample=None, game_dir=None):
             if show_requested() or (now in ("select", "game") and now != state["hidden_mode"]):
                 show()
             else:
-                root.after(500, draw)
+                root.after(DRAW_MS, draw)
                 return
         else:
             show_requested()            # 보이는 중에 온 요청은 버린다
@@ -581,7 +623,7 @@ def run_window(step, sample=None, game_dir=None):
         except Exception as e:
             head.config(text="그리지 못했어요: %s" % e, fg=MUTED)
         finally:
-            root.after(500, draw)
+            root.after(DRAW_MS, draw)
 
     def paint():
         a = state["advice"]
