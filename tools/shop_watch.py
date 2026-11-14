@@ -17,6 +17,7 @@ HOLD = 3.0          # 체력이 꽉 차 회복이 안 보여도, 이속이 HOLD_
 HOLD_HIGH = 1.5     # 마스터 이 R(최대 1.45배, 7초) 같은 고정 이속 버프와 가르려고. 귀환한 우물은 1.52배 이상
 LEAVE = 0.6         # 우물 이속에서 떨어진 상태가 이만큼(초) 이어지면 나간 것(나가면 2초 동안 줄다가 민병대 1.4배쯤에 머문다)
 START = 20.0        # 게임 시작 뒤 이만큼(초) 은 우물에서 시작
+HOMEGUARD = 25.0    # 우물을 나간 뒤 이만큼(초) 은 민병대 이속이 남을 수 있다
 
 
 class ShopWatch:
@@ -30,6 +31,7 @@ class ShopWatch:
         self.plateau = None        # (이속, 시작 시각): 같은 이속이 이어진 구간
         self.fountain = None       # 우물 안의 이속(이 값에서 떨어지면 나간 것)
         self.away = None           # 우물 이속에서 떨어진 시각
+        self.left = None           # (우물을 나간 시각, 그때 우물 이속): 민병대 이속을 우물로 다시 잡지 않게
         self.reason = ""
 
     def _base(self):
@@ -69,8 +71,13 @@ class ShopWatch:
             self.fountain = ms
             return self._set(True, "게임 시작")
         if not self.in_shop:
+            # 우물을 나간 직후의 민병대 이속(평소의 1.5배 안팎으로 몇 초 고정) 을 '우물 이속' 으로 다시 잡지 않는다:
+            # 그동안은 방금 나간 우물 이속만큼 빨라야 우물(2026-11-14 기록 856초: 민병대 502 를 3초 고정으로 다시 띄움)
+            hold_min = base * HOLD_HIGH if base else None
+            if hold_min and self.left and t - self.left[0] <= HOMEGUARD and self.left[1]:
+                hold_min = max(hold_min, self.left[1] * 0.97)
             why = ("부활" if respawned else "사고팖" if traded else "우물 회복" if high and healing
-                   else "우물 이속" if base and ms >= base * HOLD_HIGH and held >= HOLD else None)
+                   else "우물 이속" if hold_min and ms >= hold_min and held >= HOLD else None)
             if why:
                 # 우물 이속은 평소보다 확실히 빠를 때만 잡는다. 평소 이속을 잡으면 그 밑으로 안 떨어져 상점 안으로 계속 남았다
                 # (2026-11-14 기록: 평소 이속 330 을 잡아 2분 동안 안 내려감)
@@ -87,6 +94,7 @@ class ShopWatch:
         if self.away is None:
             self.away = t
         if t - self.away >= LEAVE:
+            self.left = (t, self.fountain)
             return self._set(False, "우물을 나감")
         return True
 

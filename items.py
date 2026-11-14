@@ -710,6 +710,24 @@ def _best_part(target, pool, gold):
 TREE_PRIOR = .35          # OP.GG 후보는 값 × (1 + 0.35 + 0.5 × 픽률). 후보 밖 템은 이 몫을 넘어야 들어온다
 TREE_SLOTS = ("fourth", "fifth", "sixth")
 
+# 신발: 값에 비해 효율이 아주 좋고 끝까지 드는 템. 보통은 1코어 전에 장화(300) 만 사고, 완성은 1코어 뒤.
+# 1코어 전에 완성하는 때: 신발 값이 큰 챔피언(야스오·요네), 또는 피할 스킬이 많은 상대(item_context.SKILLSHOTS)
+BOOTS1 = 1001                                  # 장화
+BOOTS1_BONUS = 200                             # 1코어 전, 신발이 없을 때 장화에 얹는 값(웬만하면 산다)
+BOOTS_RUSH = {"Yasuo", "Yone"}
+DODGE_RUSH = 2.0                               # 피할 스킬 점수(맞라인 적 1, 다른 적 0.4) 가 이만큼이면
+BOOTS_RUSH_SHARE = .5                          # 그때 신발 쪽에 쓴 골드에 얹는 몫
+
+
+def boots_first(champ, ctx=None):
+    """신발을 1코어 전에 완성할까 → 이유(str) 또는 None."""
+    if champ["key"] in BOOTS_RUSH:
+        return "%s: 신발 값이 커서 1코어 전에 신발 완성" % champ["name"]
+    ctx = ctx or {}
+    if ctx.get("e_dodge", 0) >= DODGE_RUSH:
+        return "피할 스킬이 많아(%s) 1코어 전에 신발 완성" % ", ".join(ctx.get("dodge_names", [])[:3])
+    return None
+
 
 def _tree_score(i, values, pick=None):
     v = values.get(i, 0)
@@ -751,22 +769,31 @@ def plan_build(champion_id, lane, tree, ctx=None, owned=()):
         if items[i].get("group"):
             groups.add(items[i]["group"])
 
+    def pick_boots(rush=None):
+        # OP.GG 신발 + 상황이 확실히 다른 신발을 원할 때만 바꾼다
+        base = next((b for b in tree.get("boots") or () if b in values), None)
+        opts = [(_tree_score(b, values, 1.0 if b == base else None), b) for b in values if items[b]["kind"] == "boots"]
+        if opts:
+            best = max(opts)[1]
+            note = None
+            if base and best != base:
+                note = "OP.GG %s 대신(상황)" % items[base]["name"]
+            take(best, "boots", note)
+            if rush:
+                why.append(rush)
+
+    # 신발은 보통 첫 코어 다음(OP.GG 도 대부분 이 순서). 야스오·요네, 피할 스킬이 많은 상대면 첫 코어 앞
+    rush = None if has_boots else boots_first(champ, ctx)
+    if rush:
+        pick_boots(rush)
     for n, i in enumerate(tree["core"][:3]):
         if i in kept:
             chosen.append(i)
             picks.append({"id": i, "slot": "core%d" % (n + 1), "note": None})
         elif free(i) and items[i]["kind"] == "legendary":
             take(i, "core%d" % (n + 1))
-        if n == 0 and not has_boots:
-            # 신발은 첫 코어 다음(OP.GG 도 대부분 이 순서). OP.GG 신발 + 상황이 확실히 다른 신발을 원할 때만 바꾼다
-            base = next((b for b in tree.get("boots") or () if b in values), None)
-            opts = [(_tree_score(b, values, 1.0 if b == base else None), b) for b in values if items[b]["kind"] == "boots"]
-            if opts:
-                best = max(opts)[1]
-                note = None
-                if base and best != base:
-                    note = "OP.GG %s 대신(상황)" % items[base]["name"]
-                take(best, "boots", note)
+        if n == 0 and not has_boots and not rush:
+            pick_boots()
 
     # 4·5·6번째: 그 칸의 OP.GG 후보(픽률 몫을 얹어) 와 상황 템(조합 몫이 있는 것) 중 가장 좋은 것.
     # 순서는 칸 그대로라 피바라기가 5번째 후보면 라인전이어도 5번째에 둔다(앞당기지 않는다)
@@ -1065,15 +1092,25 @@ def plan_buy(champion_id, lane, build, inventory, gold, ctx=None):
     groups = []
     for j, t in enumerate(targets[:len(LINK)]):
         wt, link = wt_for(j, t), LINK[j]
+        # 신발이 빌드에서 아직 못 만든 전설(1코어) 뒤에 있으면: 1코어 전에는 장화까지만, 장화가 없으면 웬만하면 산다
+        pre_core = items[t]["kind"] == "boots" and any(items[x]["kind"] == "legendary" for x in targets[:j])
         opts = []
         for bought, cost, used in _ways(t, mine[t]):
             if cost > gold or (j >= 2 and early.intersection(bought)):
+                continue
+            if pre_core and set(bought) != {BOOTS1}:
                 continue
             v = sum(_unit_value(b, wt, gold_v, bonus, shares, w_base) for b in bought)
             v -= sum(_unit_value(u, wt, gold_v, bonus, shares, w_base) for u in used)
             v += rho * cost * link - delay * cost * (1 - link)
             if t in bought:
                 v += SPIKE * items[t]["price"] * link
+            if pre_core:
+                v += BOOTS1_BONUS
+            elif items[t]["kind"] == "boots" and j == 0 and boots_first(champ, ctx):
+                v += BOOTS_RUSH_SHARE * cost             # 1코어 전에 완성하기로 한 신발: 그 재료를 먼저
+                if BOOTS1 in bought:
+                    v += BOOTS1_BONUS                    # 장화부터(단검만 잔뜩 사지 않게)
             v -= SLOT_COST * (len(bought) - len(used))
             opts.append((_units(cost), len(bought) - len(used), v, (t, bought, cost, used, False)))
         if opts:

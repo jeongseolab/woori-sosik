@@ -20,6 +20,15 @@ HEALERS = {
     "Olaf", "Fiora", "Illaoi", "Trundle", "Gwen", "Viego", "Belveth", "Briar", "Nidalee", "Senna",
     "Kayn", "Milio", "FiddleSticks", "Kindred", "Nasus", "Samira", "Seraphine", "Ivern", "Volibear", "Taric",
 }
+# 주로 피할 수 있는 논타겟 스킬로 딜·CC 를 넣는 챔피언(신발을 1코어 전에 완성할지 본다. items.boots_first)
+SKILLSHOTS = {
+    "Ahri", "Amumu", "Anivia", "Ashe", "Aurora", "Bard", "Blitzcrank", "Brand", "Caitlyn", "Cassiopeia",
+    "Chogath", "Diana", "Draven", "Elise", "Ezreal", "Heimerdinger", "Hwei", "Jayce", "Jhin", "Kalista",
+    "Karma", "Karthus", "LeeSin", "Lissandra", "Lux", "Mel", "Morgana", "Nautilus", "Neeko", "Nidalee",
+    "Pyke", "Qiyana", "Senna", "Seraphine", "Sivir", "Smolder", "Swain", "Syndra", "Taliyah", "Thresh",
+    "Varus", "Velkoz", "Viktor", "Xerath", "Zed", "Ziggs", "Zoe", "Zyra",
+}
+DODGE_LANE, DODGE_OTHER = 1.0, .4     # 피할 스킬 점수: 맞라인 적 하나 1, 다른 적 하나 0.4
 LIVE_LANE = {"TOP": "top", "JUNGLE": "jungle", "MIDDLE": "mid", "BOTTOM": "adc", "UTILITY": "support"}
 
 
@@ -134,6 +143,12 @@ def make_context(t=None, lane=None, allies=(), enemies=(), lane_opps=()):
         ctx["e_ad_lane"] = sum(k * {"physical": 1.0, "magic": 0.0}.get(c["damage"], .5)
                                for k, c in zip(wt, foes)) / sum(wt)
         ctx["lane_names"] = [c["name"] for c in foes]
+    # 피할 스킬: 맞라인 적은 라인전 내내 스킬을 던지니 크게, 다른 적은 작게
+    lane_keys = {c["key"] for c in foes}
+    dodge = [c for c in (_champ(e.get("id")) for e in enemies or ()) if c and c["key"] in SKILLSHOTS]
+    if dodge:
+        ctx["e_dodge"] = sum(DODGE_LANE if c["key"] in lane_keys else DODGE_OTHER for c in dodge)
+        ctx["dodge_names"] = [c["name"] for c in sorted(dodge, key=lambda c: c["key"] not in lane_keys)]
     heal_lane = [c["name"] for c in foes if c["key"] in HEALERS]
     if heal_lane:
         ctx["e_heal_lane"] = _clamp(len(heal_lane) / 1.0)

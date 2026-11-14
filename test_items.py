@@ -281,18 +281,19 @@ def test_plan_buy_no_detour_without_reason():
 
 
 def test_plan_buy_lane_defense_from_lane_opponent():
-    # 팀 전체는 AD 가 많아도 맞라인이 AP(티모) 면 라인전 동안 마법무효화의 망토
-    _, p = plan("가렌", 8, 1000, [1054, 3340], ["티모", "다리우스", "리 신", "케이틀린", "파이크"], ["티모"])
+    # 팀 전체는 AD 가 많아도 맞라인이 AP(티모) 면 라인전 동안 마법무효화의 망토.
+    # 900 골드: 1코어 전 장화 규칙(2026-11-14) 뒤로 1000~1300 은 장화·코어 재료와 망토가 엇갈리는 구간이라 갈리는 값에서 본다
+    _, p = plan("가렌", 8, 900, [1054, 3340], ["티모", "다리우스", "리 신", "케이틀린", "파이크"], ["티모"])
     assert 1033 in bought(p), p["buy"]
     # 맞라인이 AD 면 망토는 사지 않는다
-    _, p = plan("가렌", 8, 1000, [1054, 3340], ["다리우스", "아리", "리 신", "케이틀린", "레오나"], ["다리우스"])
+    _, p = plan("가렌", 8, 900, [1054, 3340], ["다리우스", "아리", "리 신", "케이틀린", "레오나"], ["다리우스"])
     assert 1033 not in bought(p), p["buy"]
 
 
 def test_plan_buy_component_choice_and_role_stats():
     items = I.data()["items"]
-    # 암살자: 롱소드 셋이 아니라 톱날 단검 하나(칸 몫)
-    _, p = plan("제드", 9, 1100, [1055, 3340], ["아리", "레오나", "리 신", "케이틀린", "가렌"], ["아리"])
+    # 암살자: 롱소드 셋이 아니라 톱날 단검 하나(칸 몫). 장화는 이미 있다(없으면 1코어 전 장화를 먼저 본다)
+    _, p = plan("제드", 9, 1100, [1055, 1001, 3340], ["아리", "레오나", "리 신", "케이틀린", "가렌"], ["아리"])
     assert 3134 in bought(p), p["buy"]
     # 마법사는 AD 하위템을, 원딜은 AP 하위템을 사지 않는다(시간·골드를 바꿔 가며)
     for t, g in ((4, 500), (9, 1300), (15, 2400), (24, 3100)):
@@ -706,6 +707,93 @@ def test_shop_watch_granted_item_is_not_shop():
     out = [dict(buy, t=124 + k * .5, ms=330) for k in range(4)]
     res = [w.update(r) for r in lane + home + [buy] + out]
     assert res[len(lane) + len(home)] and not res[-1]
+
+
+def test_shop_watch_real_game_homeguard():
+    """실제 게임(2026-11-14, 16분, 신드라 미드): 귀환 5번·죽음 2번에만 띄운다. 라인 퀘스트 보상(125초) 과
+    우물을 나간 뒤 민병대 이속 502(평소 1.52배) 가 3초 고정된 것(856초) 은 상점이 아니다."""
+    import gzip, os
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tests_data", "shop_game_2026-11-14.jsonl.gz")
+    with gzip.open(path, "rt", encoding="utf-8") as f:
+        rows = [json.loads(l) for l in f]
+    ch = _shop_changes(rows)
+    shown = [t for t, on in ch if on]
+    want = [231.0, 357.4, 450.1, 557.7, 675.7, 843.5, 884.0]
+    assert len(shown) == len(want) and all(abs(a - b) < 1.0 for a, b in zip(shown, want)), shown
+    # 우물을 나가면(이속이 우물 값에서 떨어지기 시작) 2초 안에 내린다
+    hidden = [t for t, on in ch if not on]
+    for s, l in {231.0: 243.8, 843.5: 849.8}.items():
+        h = next(t for t in hidden if t > s)
+        assert l <= h <= l + 2.0, (s, h)
+
+
+def _boots_case(name, lane, inv, gold, t, enemies=(), foes=()):
+    cid = NAME[name]
+    tree = {"core": TREE_CORE[name], "boots": [TREE_BOOTS[name]]}
+    ctx = X.make_context(t, None, (), [{"id": NAME[e]} for e in enemies], [{"id": NAME[e]} for e in foes])
+    plan = I.plan_build(cid, lane, tree, ctx, inv)
+    buy = I.plan_buy(cid, lane, plan["items"], inv, gold, ctx)
+    return plan, [b["id"] for b in buy["buy"]]
+
+
+# OP.GG 템트리 대신(인터넷 없이): 코어 셋과 신발
+TREE_CORE = {"신드라": [6655, 4645, 3089], "징크스": [6672, 3094, 3031], "요네": [3153, 3124, 3031], "가렌": [6631, 3814, 3053]}
+TREE_BOOTS = {"신드라": 3020, "징크스": 3006, "요네": 3006, "가렌": 3047}
+
+
+def _backs_until_core(name, gold_per_back=1100, backs=6):
+    """귀환마다 골드를 벌어 추천대로 산다고 치고 1코어를 완성할 때까지 → (가방, 귀환마다 산 것)."""
+    items = I.data()["items"]
+    inv, gold, steps = [{"징크스": 1055, "제드": 1055, "아리": 1056, "가렌": 1054}[name], 3340], 0, []
+    for k in range(backs):
+        gold += gold_per_back
+        b, p = plan(name, 4 + 3 * k, gold, inv)
+        for x in p["buy"]:
+            if x["id"] == 2055:
+                continue
+            gold -= x["cost"]
+            for c in items[x["id"]].get("from") or ():
+                if c in inv:
+                    inv.remove(c)
+            inv.append(x["id"])
+        steps.append([x["id"] for x in p["buy"]])
+        if b["items"][0] in inv:
+            break
+    return inv, steps
+
+
+def test_boots_tier1_before_first_core():
+    """보통은 1코어 전 어느 귀환에선가 장화(300) 를 사고, 완성 신발은 1코어 뒤. 첫 귀환 1100 은 큰 재료(제드 톱날 단검) 그대로."""
+    items = I.data()["items"]
+    for name in ("징크스", "제드", "아리", "가렌"):
+        b, _ = plan(name, 5, 1100, [3340])
+        assert items[b["items"][0]]["kind"] == "legendary" and items[b["items"][1]]["kind"] == "boots", name
+        inv, steps = _backs_until_core(name)
+        before = [i for st in steps for i in st]
+        assert 1001 in before, (name, steps)                                  # 1코어 전에 장화
+        assert not any(items.get(i, {}).get("kind") == "boots" for i in before), (name, steps)   # 완성 신발은 아직
+    _, p = plan("제드", 4, 1100, [1055, 3340])
+    assert 3134 in bought(p), p["buy"]
+    # 장화가 있으면 1코어 전에 신발을 완성하지 않는다(골드가 넉넉해도)
+    _, buy = _boots_case("징크스", "adc", [1055, 1001], 1500, 8)
+    assert not any(items[b]["kind"] == "boots" for b in buy), buy
+
+
+def test_boots_rush_yasuo_yone_and_skillshots():
+    """야스오·요네, 피할 스킬이 많은 상대면 1코어 전에 신발을 완성한다(장화부터)."""
+    plan, buy = _boots_case("요네", "top", [1055], 1000, 5)
+    assert I.data()["items"][plan["items"][0]]["kind"] == "boots"
+    assert any("1코어 전에 신발" in r for r in plan["reasons"])
+    assert 1001 in buy
+    _, buy = _boots_case("요네", "top", [1055, 1001], 1300, 8)
+    assert 3006 in buy                                                                # 광전사의 군화 완성
+    many = (["이즈리얼", "쓰레쉬", "럭스", "제라스", "아리"], ["이즈리얼", "쓰레쉬"])
+    plan, buy = _boots_case("징크스", "adc", [1055], 1000, 5, *many)
+    assert I.data()["items"][plan["items"][0]]["kind"] == "boots" and 1001 in buy, buy
+    # 오늘 판 상대(애니·모데카이저·뽀삐·루시안·라칸) 는 아니다
+    few = (["애니", "모데카이저", "뽀삐", "루시안", "라칸"], ["애니"])
+    plan, _ = _boots_case("신드라", "mid", [1056], 1100, 5, *few)
+    assert I.data()["items"][plan["items"][0]]["kind"] == "legendary"
 
 
 def test_recall_keys_from_lol_config():
