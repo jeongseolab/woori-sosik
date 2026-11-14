@@ -1042,8 +1042,9 @@ def starter_buy(champion_id, lane, tree, inventory, gold, t=None):
     return out or None
 
 
-def plan_buy(champion_id, lane, build, inventory, gold, ctx=None):
+def plan_buy(champion_id, lane, build, inventory, gold, ctx=None, boot_slot=None):
     """이번 귀환에 살 것. build: plan_build 의 items(순서대로). inventory: 가방 번호(재료·시작템·물약·장신구 포함).
+    boot_slot: 원딜 퀘스트로 신발 칸에 옮겨진 신발(가방 칸은 안 차지하지만 신발은 있는 것으로 본다).
 
     → {buy: [{id, name, cost, toward, why}], sell: [번호], value, dp: {...}, exact: {...}, reasons: [...]}
     """
@@ -1063,6 +1064,8 @@ def plan_buy(champion_id, lane, build, inventory, gold, ctx=None):
     bag = [i for i in inventory if i not in TRINKETS]
     known = [i for i in bag if i in items]
     finished = set(i for i in known if items[i]["kind"] in ("legendary", "boots", "boots3"))
+    if boot_slot in items:
+        finished.add(boot_slot)
     has_boots = any(items[i]["kind"].startswith("boots") for i in finished)
     targets = [t for t in build if t in items and t not in finished
                and not (has_boots and items[t]["kind"] == "boots")]

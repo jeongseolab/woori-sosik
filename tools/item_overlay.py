@@ -181,6 +181,22 @@ def fetch_live():
 # 작은 창에서 사용자가 고른 내 라인 {"champ": 챔피언 번호, "lane": 라인}. 라인 퀘스트는 어떤 API 에도 안 나와서(롤 Live API·
 # 클라이언트 세션 모두 확인, 2026-11-13) 자동으로 고른 라인이 틀리면 사용자가 한 번 눌러 바꾼다. 게임이 끝나면 지운다
 LANE_PICK = {}
+# 원딜 라인 퀘스트를 깨면 신발이 따로 있는 신발 칸으로 옮겨져 Live API 아이템 목록에서 빠진다(2026-11-14 플레이 시험:
+# 신발이 없어졌다고 신발을 다시 사라고 했다). 그래서 이번 판에 본 마지막 신발을 기억해 두고, 원딜인데 가방에서
+# 신발이 사라지면 신발 칸에 있는 것으로 본다. {"champ": 챔피언 번호, "boots": 아이템 번호}. 게임이 끝나면 지운다
+BOOTS_SEEN = {}
+
+
+def quest_boots(cid, lane, inventory):
+    """원딜 퀘스트로 신발 칸에 옮겨진 신발 번호(없으면 None). 가방에 신발이 보이면 그것을 기억한다."""
+    items = I.data()["items"]
+    seen = [i for i in inventory if i in items and items[i]["kind"].startswith("boots")]
+    if BOOTS_SEEN.get("champ") != cid:
+        BOOTS_SEEN.clear()
+    if seen:
+        BOOTS_SEEN.update(champ=cid, boots=seen[0])
+        return None
+    return BOOTS_SEEN.get("boots") if lane == "adc" else None
 
 
 def shop_sample(game):
@@ -214,12 +230,13 @@ def advise(game, my_lane=None):
         live = X.from_live(game, LANE_PICK["lane"], shares, force=True)
     inventory, gold, cid, lane, ctx = live["inventory"], live["gold"], live["champion"], live["lane"], live["ctx"]
     tree = tree_of(cid, lane)
-    plan = I.plan_build(cid, lane, tree, ctx, inventory)
-    buy = I.plan_buy(cid, lane, plan["items"], inventory, gold, ctx)
+    qb = quest_boots(cid, lane, inventory)
+    plan = I.plan_build(cid, lane, tree, ctx, inventory + [qb] if qb else inventory)
+    buy = I.plan_buy(cid, lane, plan["items"], inventory, gold, ctx, boot_slot=qb)
     start = I.starter_buy(cid, lane, tree, inventory, gold, live["t"])
     if start:                       # 게임 시작: 하위템 대신 시작템(탑·미드·원딜은 도란 템)
         buy = {**buy, "buy": start, "sell": [], "reasons": [start[0]["why"]]}
-    have = set(inventory)
+    have = set(inventory) | ({qb} if qb else set())
     return {"champion": I.data()["champions"][cid]["name"], "champion_id": cid, "lane": lane, "gold": gold,
             "lane_picked": LANE_PICK.get("champ") == cid and bool(LANE_PICK.get("lane")),
             "buy": buy["buy"], "sell": buy["sell"], "build": plan["items"],
@@ -259,6 +276,7 @@ class Watcher:
         game = self.get_game()
         if not game:
             LANE_PICK.clear()           # 게임이 끝나면 고른 라인도 지운다
+            BOOTS_SEEN.clear()
         if game:
             # 챔프 선택 때 본 챔피언으로 들어온 판이면 그때 받은 라인(이전 판의 것이면 안 쓴다)
             lane = None

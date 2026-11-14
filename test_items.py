@@ -688,6 +688,35 @@ def test_starter_is_doran_for_laners():
         O.TREE_OVERRIDE = None
 
 
+def test_adc_quest_boots_not_rebought():
+    """원딜 퀘스트를 깨면 신발이 신발 칸으로 옮겨져 아이템 목록에서 빠진다(2026-11-14 플레이 시험: 신발을 다시 사라고 했다).
+    이번 판에 본 신발을 기억해 두고, 원딜이면 신발이 있는 것으로 본다. 원딜이 아니면 그대로(신발을 판 것)."""
+    import sys, os, copy
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools"))
+    import item_overlay as O
+    items = I.data()["items"]
+    boots = lambda a: [b["id"] for b in a["buy"] if items[b["id"]]["kind"].startswith("boots") or b["id"] == 1001]
+    O.TREE_OVERRIDE = {(NAME["징크스"], "adc"): TREES["징크스"]}
+    O.BOOTS_SEEN.clear()
+    try:
+        g = copy.deepcopy(O.DEMO)
+        g["gameData"]["gameTime"] = 900.0
+        g["activePlayer"]["currentGold"] = 1300
+        me = g["allPlayers"][0]
+        me["items"] = [{"itemID": i} for i in (3006, 6672, 1055, 3340)]
+        O.advise(g)                                       # 신발이 가방에 있을 때 본다
+        me["items"] = [{"itemID": i} for i in (6672, 1055, 3340)]
+        g["activePlayer"]["currentGold"] = 1100           # 신발 값이 딱 남아도
+        a = O.advise(g)
+        assert not boots(a), a["buy"]
+        assert 3006 not in a["build"] or 3006 in a["owned"]
+        O.BOOTS_SEEN.clear()                              # 새 판(신발을 본 적 없음)이면 신발을 산다
+        assert boots(O.advise(g))
+    finally:
+        O.TREE_OVERRIDE = None
+        O.BOOTS_SEEN.clear()
+
+
 # ── 귀환키로 미리 띄우기(tools/recall_watch.py) ──
 def test_shop_watch_granted_item_is_not_shop():
     """가방에 템이 저절로 생기고 골드가 CS 로 는 것(라인 퀘스트 보상, 2026-11-14 기록 125초) 은 상점이 아니다.
