@@ -514,13 +514,6 @@ def test_app_status_and_args():
     O.PARENT_PID = None
 
 
-if __name__ == "__main__":
-    for name, fn in list(globals().items()):
-        if name.startswith("test_"):
-            fn()
-            print("ok", name)
-
-
 # ── 게임 중 라인 가리기(플레이 시험 2026-11-13: 베인을 미드로, 맞라인을 트위스티드 페이트로 잘못 봄) ──
 def _p(name, pos="", smite=False):
     cid = NAME[name]
@@ -730,3 +723,11 @@ def test_recall_key_loop_only_when_lol_in_front():
     finally:
         done[0] = True
         th.join()
+
+
+# 맨 끝에 둔다: 이 아래에 정의한 시험은 돌지 않는다(예전에 중간에 있어 뒤쪽 시험 10개가 빠졌다)
+if __name__ == "__main__":
+    for name, fn in list(globals().items()):
+        if name.startswith("test_"):
+            fn()
+            print("ok", name)
