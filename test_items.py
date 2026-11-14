@@ -552,6 +552,22 @@ def test_from_live_lane_opponent_by_assignment():
     assert live["lane"] == "mid" and live["opponent"] != "드레이븐"
 
 
+def test_from_live_trusts_api_lane_quest():
+    """라인 퀘스트(API position) 가 팀 다섯에 겹치지 않게 다 있으면 그대로 쓴다(2026-11-14: 신드라 미드인데
+    원딜로 덮어써 맞라이너가 루시안으로 나왔다). 작은 창에서 직접 고른 라인만 그보다 세다."""
+    import copy, sys, os
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools"))
+    import item_overlay as O
+    g = copy.deepcopy(O.DEMO)
+    live = X.from_live(g, "mid")                        # 챔프 선택 값이 미드여도 퀘스트(바텀) 대로
+    assert live["lane"] == "adc" and live["opponent"] == "드레이븐"
+    live = X.from_live(g, "mid", force=True)            # 작은 창에서 미드로 골랐으면 미드
+    assert live["lane"] == "mid" and live["opponent"] == "제드"
+    # 퀘스트가 겹치면(미드 둘) 예전처럼 추측
+    g["allPlayers"][0]["position"] = "MIDDLE"
+    assert X.from_live(g)["lane"] == "adc"
+
+
 def test_item_set_has_component_paths():
     import sys, os
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools"))

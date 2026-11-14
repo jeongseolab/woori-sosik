@@ -194,7 +194,7 @@ def advise(game, my_lane=None):
     if isinstance(live, str):
         return live
     if LANE_PICK.get("champ") == live["champion"] and LANE_PICK.get("lane"):
-        live = X.from_live(game, LANE_PICK["lane"], shares)
+        live = X.from_live(game, LANE_PICK["lane"], shares, force=True)
     inventory, gold, cid, lane, ctx = live["inventory"], live["gold"], live["champion"], live["lane"], live["ctx"]
     tree = tree_of(cid, lane)
     plan = I.plan_build(cid, lane, tree, ctx, inventory)

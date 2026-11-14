@@ -229,10 +229,18 @@ def assign_lanes(team, shares=None, fixed=None):
     return [LANES[j] for j in best]
 
 
-def from_live(game, my_lane=None, shares=None):
+def _api_full(team):
+    """팀 다섯이 API 라인(라인 퀘스트) 을 겹치지 않게 다 받았나. 그러면 그대로 믿는다(추측하지 않는다)."""
+    return len(team) == 5 and sorted(p.get("api_lane") or "" for p in team) == sorted(LANES)
+
+
+def from_live(game, my_lane=None, shares=None, force=False):
     """allgamedata → {champion, lane, gold, inventory, ctx, opponent}. 나를 못 찾으면 이유(str).
 
-    my_lane: 챔프 선택에서 받은 내 라인(있으면 가장 믿는다). shares: item_tree.lane_shares() (없으면 역할로 어림)
+    라인을 정하는 순서: 작은 창에서 사용자가 고른 라인(force=True 인 my_lane) > 롤 API 라인(라인 퀘스트, 팀 다섯이
+    겹치지 않게 다 있을 때) > 챔프 선택에서 받은 내 라인(my_lane) > 추측(assign_lanes).
+    (2026-11-14: 신드라 미드 퀘스트·API 미드인데 다른 값이 원딜로 덮어써 맞라이너가 루시안으로 나왔다)
+    shares: item_tree.lane_shares() (없으면 역할로 어림)
     """
     me_raw = game.get("activePlayer") or {}
     who = me_raw.get("riotId") or me_raw.get("summonerName")
@@ -250,10 +258,20 @@ def from_live(game, my_lane=None, shares=None):
     full = len(allies) + 1 == 5 and len(enemies) == 5 and all(p["id"] for p in [me] + others)
     if full:
         mine_team = [me] + allies
-        for p, lane in zip(mine_team, assign_lanes(mine_team, shares, {0: my_lane} if my_lane in LANES else None)):
-            p["lane"] = lane
-        for p, lane in zip(enemies, assign_lanes(enemies, shares)):
-            p["lane"] = lane
+        if _api_full(mine_team):
+            for p in mine_team:
+                p["lane"] = p["api_lane"]
+            if force and my_lane in LANES:
+                me["lane"] = my_lane
+        else:
+            for p, lane in zip(mine_team, assign_lanes(mine_team, shares, {0: my_lane} if my_lane in LANES else None)):
+                p["lane"] = lane
+        if _api_full(enemies):
+            for p in enemies:
+                p["lane"] = p["api_lane"]
+        else:
+            for p, lane in zip(enemies, assign_lanes(enemies, shares)):
+                p["lane"] = lane
     else:
         for p in [me] + others:
             p["lane"] = p["api_lane"]
