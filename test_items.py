@@ -878,6 +878,86 @@ def test_recall_key_loop_only_when_lol_in_front():
         th.join()
 
 
+# ── 장인 빌드(craft_builds): OP.GG 빌드에서 많이 벗어나면 장인 템트리로 ─────────────
+# 바루스 온힛 빌드(OP.GG 모양). 구인수의 격노검에 증폭의 고서가 들어가서 고서는 어느 쪽에도 안 센다
+VARUS_TREE = {"starter": [1055, 2003], "core": [3124, 3153, 3302], "boots": [3006],
+              "fourth": [[3091, .4], [6672, .2]], "fifth": [[3026, .3], [3091, .2]], "sixth": [[3026, .3], [3156, .2]]}
+
+
+def test_craft_detect_only_when_far_from_tree():
+    import craft_builds as C
+    v = NAME["바루스"]
+    assert C.detect(v, "adc", VARUS_TREE, []) is None
+    assert C.detect(v, "adc", VARUS_TREE, [1055, 1052]) is None              # 고서는 구인수에도 들어간다
+    assert C.detect(v, "adc", VARUS_TREE, [1043, 1042, 1037]) is None        # OP.GG 쪽 재료
+    hit = C.detect(v, "adc", VARUS_TREE, [1055, 1058])                       # 쓸데없이 큰 지팡이
+    assert hit and hit["key"] == "ap_varus" and hit["spent"] == 1200
+    assert C.detect(v, "adc", VARUS_TREE, [3153, 1058]) is None              # 몰락한 왕의 검(3200) 이 더 크다
+    assert C.detect(v, "adc", VARUS_TREE, [3153, 6655, 4645])["key"] == "ap_varus"   # 루덴 + 그림자불꽃 > 1.5 × 몰왕
+    assert C.detect(v, "adc", VARUS_TREE, [3142])["key"] == "lethal_varus"   # 요우무
+    assert C.detect(NAME["징크스"], "adc", TREES["징크스"], [1058, 1026]) is None   # 장인 빌드가 없는 챔피언
+
+
+def test_craft_build_and_buy_use_craft_stats():
+    import craft_builds as C
+    v = NAME["바루스"]
+    inv = [1055, 1058]
+    tree = C.as_tree(C.detect(v, "adc", VARUS_TREE, inv), VARUS_TREE)
+    ctx = X.make_context(12, None, (), team("아리"), team("아리"))
+    b = I.plan_build(v, "adc", tree, ctx, inv)
+    assert b["items"][:2] == [6655, 3020] and b["craft"] == "AP 바루스" and b["source"] == "craft"
+    assert "장인 빌드" in b["reasons"][0]
+    buy = I.plan_buy(v, "adc", b["items"], inv, 1300, ctx, style=b["style"])
+    ap_parts = I._tree(6655) | I._tree(4645) | {6655, 4645, 1001, 2055}
+    assert buy["buy"] and all(x["id"] in ap_parts for x in buy["buy"]), buy["buy"]
+    assert I.plan_build(v, "adc", VARUS_TREE, ctx, [1055])["items"][0] == 3124   # 안 벗어나면 OP.GG 그대로
+
+
+def test_overlay_craft_sticks_for_the_game():
+    O, _ = _overlay()
+    v = NAME["바루스"]
+    O.CRAFT_SEEN.clear()
+    assert O.craft_tree(v, "adc", VARUS_TREE, [1055]) is VARUS_TREE
+    assert O.craft_tree(v, "adc", VARUS_TREE, [1055, 1058])["craft"] == "AP 바루스"
+    assert O.craft_tree(v, "adc", VARUS_TREE, [1055])["craft"] == "AP 바루스"        # 팔아도 그 판은 계속
+    assert O.craft_tree(NAME["징크스"], "adc", TREES["징크스"], []) is TREES["징크스"]   # 다른 판
+    O.CRAFT_SEEN.clear()
+
+
+def test_auto_craft_detects_unlisted_builds():
+    import craft_builds as C
+    yi = C.auto_detect(NAME["마스터 이"], "jungle", None, [1102, 1058, 1026])     # 지팡이 + 마법봉
+    assert yi and yi["arch"] == "ap" and yi["style"]["damage"] == "magic"
+    assert yi["tree"]["core"][0] == 4645                    # 지팡이·교류 발전기 길: 만드는 중인 그림자불꽃이 먼저
+    mal = C.auto_detect(NAME["말파이트"], "top", TREES["말파이트"], [1054, 3044, 1037])
+    assert mal and mal["arch"] == "fighter"
+    assert C.auto_detect(NAME["아리"], "mid", TREES["아리"], [1056, 1058]) is None              # 원래 AP
+    assert C.auto_detect(NAME["징크스"], "adc", TREES["징크스"], [1055, 1029, 1033, 3123]) is None   # 상황 템
+    assert C.auto_detect(NAME["징크스"], "adc", TREES["징크스"], [1055, 3067, 1028, 1029]) is None   # 딜러 방어 재료
+    assert C.auto_detect(NAME["가렌"], "top", TREES["가렌"], [1054, 3067, 1028, 1011])["arch"] == "tank"
+    assert C.auto_detect(NAME["마스터 이"], "jungle", None, [1102, 1052]) is None             # 고서 하나로는
+
+
+def test_overlay_prefers_listed_craft_then_auto():
+    O, _ = _overlay()
+    O.CRAFT_SEEN.clear()
+    try:
+        assert O.craft_tree(NAME["바루스"], "adc", VARUS_TREE, [1055, 1058])["craft"] == "AP 바루스"   # 목록이 먼저
+        O.CRAFT_SEEN.clear()
+        yi = NAME["마스터 이"]
+        t = O.craft_tree(yi, "jungle", None, [1102, 1058, 1026])
+        assert t["craft"] == "AP 마스터 이(자동)" and O.CRAFT_SEEN["key"] == "auto:ap"
+        t2 = O.craft_tree(yi, "jungle", None, [1102, 3089])           # 다음 귀환: 라바돈 완성 → 코어 맨 앞
+        assert t2["craft"] == t["craft"] and t2["core"][0] == 3089
+        ctx = X.make_context(15, None, (), team("아리"), ())
+        b = I.plan_build(yi, "jungle", t2, ctx, [1102, 3089])
+        assert b["items"][0] == 3089 and "AP 위주" in b["reasons"][0]
+        buy = I.plan_buy(yi, "jungle", b["items"], [1102, 3089], 1300, ctx, style=b["style"])
+        assert buy["buy"] and not any(I.data()["items"].get(x["id"], {}).get("stats", {}).get("ad") for x in buy["buy"]), buy["buy"]
+    finally:
+        O.CRAFT_SEEN.clear()
+
+
 # 맨 끝에 둔다: 이 아래에 정의한 시험은 돌지 않는다(예전에 중간에 있어 뒤쪽 시험 10개가 빠졌다)
 if __name__ == "__main__":
     for name, fn in list(globals().items()):

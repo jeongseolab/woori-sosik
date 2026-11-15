@@ -27,6 +27,7 @@ import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, ".."))
+import craft_builds as C  # noqa: E402
 import item_context as X  # noqa: E402
 import item_tree as T  # noqa: E402
 import recall_watch  # noqa: E402
@@ -110,7 +111,8 @@ def status_of(a):
         return {"mode": "wait", "text": a or "불러오는 중이에요"}
     items = I.data()["items"]
     base = {"champion": a["champion"], "lane": a.get("lane"), "build": list(a.get("build") or []),
-            "reasons": list(a.get("reasons") or [])[:4], "source": a.get("source")}
+            "reasons": list(a.get("reasons") or [])[:4], "source": a.get("source"),
+            "craft": a.get("craft")}
     if a.get("mode") == "select":
         return {**base, "mode": "select", "locked": a.get("locked"), "status": a.get("status"),
                 "parts": [[p, r] for p, r in a.get("parts") or []],
@@ -199,6 +201,25 @@ def quest_boots(cid, lane, inventory):
     return BOOTS_SEEN.get("boots") if lane == "adc" else None
 
 
+# 장인 빌드로 바꾼 판: {"champ": 챔피언 번호, "key": craft_builds 의 key}. 한 번 바꾸면 그 판은 계속(게임이 끝나면 지운다)
+CRAFT_SEEN = {}
+
+
+def craft_tree(cid, lane, tree, inventory):
+    """가방이 OP.GG 빌드에서 많이 벗어나 장인 빌드 쪽이면 장인 템트리, 아니면 OP.GG 템트리 그대로."""
+    if CRAFT_SEEN.get("champ") != cid:
+        CRAFT_SEEN.clear()
+    craft = C.find(CRAFT_SEEN["key"], cid, lane, inventory) if CRAFT_SEEN.get("key") else None
+    if craft is None:
+        # 손으로 넣은 장인 빌드가 먼저(순서까지 검증된 것), 없으면 산 템의 성향으로 자동
+        craft = C.detect(cid, lane, tree, inventory) or C.auto_detect(cid, lane, tree, inventory)
+        if craft is None:
+            return tree
+        CRAFT_SEEN.update(champ=cid, key=craft["key"])
+        event("장인 빌드로 바꿈: %s (장인 쪽 %d골드, OP.GG 쪽 %d골드)" % (craft["name"], craft["spent"], craft["meta_spent"]))
+    return C.as_tree(craft, tree)
+
+
 def shop_sample(game):
     """allgamedata → shop_watch.ShopWatch.update 에 넣을 값. 나를 못 찾으면 None."""
     try:
@@ -231,8 +252,9 @@ def advise(game, my_lane=None):
     inventory, gold, cid, lane, ctx = live["inventory"], live["gold"], live["champion"], live["lane"], live["ctx"]
     tree = tree_of(cid, lane)
     qb = quest_boots(cid, lane, inventory)
+    tree = craft_tree(cid, lane, tree, inventory)
     plan = I.plan_build(cid, lane, tree, ctx, inventory + [qb] if qb else inventory)
-    buy = I.plan_buy(cid, lane, plan["items"], inventory, gold, ctx, boot_slot=qb)
+    buy = I.plan_buy(cid, lane, plan["items"], inventory, gold, ctx, boot_slot=qb, style=plan.get("style"))
     start = I.starter_buy(cid, lane, tree, inventory, gold, live["t"])
     if start:                       # 게임 시작: 하위템 대신 시작템(탑·미드·원딜은 도란 템)
         buy = {**buy, "buy": start, "sell": [], "reasons": [start[0]["why"]]}
@@ -241,9 +263,11 @@ def advise(game, my_lane=None):
             "lane_picked": LANE_PICK.get("champ") == cid and bool(LANE_PICK.get("lane")),
             "buy": buy["buy"], "sell": buy["sell"], "build": plan["items"],
             "owned": {i for i in plan["items"] if i in have}, "time": live["t"], "source": plan["source"],
+            "craft": plan.get("craft"),
             "lane_state": ctx.get("lane"), "opponent": live["opponent"],
             # 이번에 사는 것의 이유(돌아가기 등) 를 먼저, 그다음 빌드·상황 이유
-            "reasons": buy["reasons"] + plan["reasons"]}
+            "reasons": plan["reasons"][:1] * bool(plan.get("craft")) + buy["reasons"]
+            + plan["reasons"][bool(plan.get("craft")):]}
 
 
 def tree_of(cid, lane):
@@ -277,6 +301,7 @@ class Watcher:
         if not game:
             LANE_PICK.clear()           # 게임이 끝나면 고른 라인도 지운다
             BOOTS_SEEN.clear()
+            CRAFT_SEEN.clear()
         if game:
             # 챔프 선택 때 본 챔피언으로 들어온 판이면 그때 받은 라인(이전 판의 것이면 안 쓴다)
             lane = None
@@ -375,6 +400,12 @@ def _situation(a):
     return " · ".join(parts)
 
 
+def _source_label(a):
+    if a.get("craft"):
+        return "(장인: %s)" % a["craft"]
+    return "" if a.get("source") == "opgg" else "(OP.GG 없이)"
+
+
 def as_text(a):
     if isinstance(a, str):
         return a
@@ -398,7 +429,7 @@ def as_text(a):
         lines.append("  지금 골드로는 다음 재료를 못 사요")
     if a.get("sell"):
         lines.append("  칸이 모자라 팔 것: " + ", ".join(s["name"] for s in a["sell"]))
-    lines.append("  빌드%s: " % ("" if a.get("source") == "opgg" else "(OP.GG 없이)") + " / ".join(("✓" if i in a["owned"] else "") + items[i]["name"] for i in a["build"]))
+    lines.append("  빌드%s: " % _source_label(a) + " / ".join(("✓" if i in a["owned"] else "") + items[i]["name"] for i in a["build"]))
     lines += ["  · " + r for r in a.get("reasons") or []]
     return "\n".join(lines)
 
@@ -676,7 +707,8 @@ def run_window(step, sample=None, game_dir=None):
                 root.update_idletasks()
                 why.config(wraplength=max(240, build_box.winfo_reqwidth() - 20))
             else:
-                head.config(text="%s · %s골드" % (a["champion"], format(a["gold"], ",")), fg=GOLD)
+                head.config(text="%s%s · %s골드" % (a["champion"], " · 장인 " + a["craft"] if a.get("craft") else "",
+                                                 format(a["gold"], ",")), fg=GOLD)
                 sub.config(text=_situation(a))
                 # 귀환키를 못 읽는 이유(롤이 관리자 권한) 가 있으면 맨 위에
                 why.config(text="\n".join(["⚠ " + recall.blocked] * bool(recall.blocked)

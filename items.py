@@ -149,6 +149,12 @@ def weights(champion, lane=None):
     return {s: round(min(v, 1), 3) for s, v in w.items() if v > .01}
 
 
+def champ_info(champion_id, style=None):
+    """data.json 의 챔피언. style(장인 빌드의 roles·damage) 이 있으면 그것으로 바꾼 것(weights 가 그 빌드 스탯을 아끼게)."""
+    champ = data()["champions"][int(champion_id)]
+    return {**champ, **style} if style else champ
+
+
 # 금지된 우상 계열 말고 서포터가 아군을 위해 사는 것. 롤 태그(Aura) 로 고르면 태양불꽃 방패·얼어붙은 심장까지 들어와서 번호로 정한다
 SUPPORT_ITEMS = {
     2065,   # 슈렐리아의 군가
@@ -742,7 +748,8 @@ def plan_build(champion_id, lane, tree, ctx=None, owned=()):
     """
     d = data()
     items, gold = d["items"], d["gold"]
-    champ = d["champions"][int(champion_id)]
+    style = (tree or {}).get("style")
+    champ = champ_info(champion_id, style)
     w, _, bonus, _, why = apply_context(weights(champ, lane), champ, ctx)
     kept = [i for i in owned if i in items and items[i]["kind"] in ("legendary", "boots", "boots3")]
     if not tree or not tree.get("core"):
@@ -829,7 +836,10 @@ def plan_build(champion_id, lane, tree, ctx=None, owned=()):
     for p in picks:
         if p["note"]:
             why.append("%s: %s" % (items[p["id"]]["name"], p["note"]))
-    return {"items": order_ids, "picks": picks, "reasons": why, "source": tree.get("source", "opgg")}
+    if tree.get("craft"):
+        why.insert(0, "장인 빌드: %s 템트리로 추천(%s)" % (tree["craft"], tree.get("craft_why") or "산 템이 OP.GG 빌드에서 많이 벗어남"))
+    return {"items": order_ids, "picks": picks, "reasons": why, "source": tree.get("source", "opgg"),
+            "craft": tree.get("craft"), "style": style}
 
 
 # ── 지금 살 것: 이번 귀환에 무엇을 살까(하위템 단위) ───────
@@ -1042,15 +1052,16 @@ def starter_buy(champion_id, lane, tree, inventory, gold, t=None):
     return out or None
 
 
-def plan_buy(champion_id, lane, build, inventory, gold, ctx=None, boot_slot=None):
+def plan_buy(champion_id, lane, build, inventory, gold, ctx=None, boot_slot=None, style=None):
     """이번 귀환에 살 것. build: plan_build 의 items(순서대로). inventory: 가방 번호(재료·시작템·물약·장신구 포함).
     boot_slot: 원딜 퀘스트로 신발 칸에 옮겨진 신발(가방 칸은 안 차지하지만 신발은 있는 것으로 본다).
+    style: 장인 빌드면 plan_build 의 style(역할·피해 유형). 그 빌드의 스탯 잣대로 재료를 고른다.
 
     → {buy: [{id, name, cost, toward, why}], sell: [번호], value, dp: {...}, exact: {...}, reasons: [...]}
     """
     d = data()
     items, gold_v = d["items"], d["gold"]
-    champ = d["champions"][int(champion_id)]
+    champ = champ_info(champion_id, style)
     w_base = weights(champ, lane)           # "이 챔피언이 쓰는 템인가"(고유 효과 몫의 적합도) 는 상황 없이 본다
     w, w_now, bonus, _, _ = apply_context(w_base, champ, ctx)
     ctx = ctx or {}
