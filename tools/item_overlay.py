@@ -50,6 +50,7 @@ PARENT_PID = None
 HIDDEN = False
 SHOP_POLL = 0.25    # 상점 확인(롤 API) 간격(초). 우물을 나가는 것을 빨리 잡으려고
 DRAW_MS = 100       # 작은 창 확인 간격(ms). 귀환키를 누르면 이 안에 뜬다
+TOP_EVERY = 1.0     # 챔프 선택·게임 중 맨 위로 다시 올리는 간격(초)
 
 
 def event(msg, t=None):
@@ -542,7 +543,8 @@ def run_window(step, sample=None, game_dir=None):
     recall = recall_watch.RecallWatch(recall_watch.load_keys(game_dir))
 
     def mode_of(a):
-        return a.get("mode") if isinstance(a, dict) else "wait"
+        # 챔프 선택 dict 는 mode "select", 게임 중 advise 의 dict 는 mode 가 없다(→ "game"). 글이면 기다리는 중
+        return a.get("mode", "game") if isinstance(a, dict) else "wait"
 
     def hide(_e=None):
         global HIDDEN
@@ -656,17 +658,32 @@ def run_window(step, sample=None, game_dir=None):
             HIDDEN = True
             state["hidden_mode"] = "game"
             root.withdraw()
+        if not HIDDEN and isinstance(state["advice"], str):
+            # 게임 밖(롤이 꺼졌거나 로비): 보여 줄 것이 없어서 내린다. 떠 있으면 밑의 앱 창(연습장 WebGL) 이 끊겼다(2026-11-15).
+            # 챔프 선택·게임이 시작되면 아래에서 다시 띄운다
+            HIDDEN = True
+            state["hidden_mode"] = "wait"
+            root.withdraw()
+            write_status(state["advice"])
+            event("게임 밖이라 창 내림", state["t"])
         if HIDDEN:
             now = mode_of(state["advice"])
-            # 앱 창을 맨 앞으로 가져왔거나, 숨길 때와 달리 챔프 선택·게임이 시작됐으면 다시 보인다
-            if show_requested() or (now in ("select", "game") and now != state["hidden_mode"]):
+            # 앱 창을 맨 앞으로 가져왔거나(게임 밖이면 안 띄운다), 숨길 때와 달리 챔프 선택·게임이 시작됐으면 다시 보인다
+            asked = show_requested()
+            if (asked and now != "wait") or (now in ("select", "game") and now != state["hidden_mode"]):
                 show()
             else:
                 root.after(DRAW_MS, draw)
                 return
         else:
             show_requested()            # 보이는 중에 온 요청은 버린다
-        _keep_top(root)
+        # 맨 위로 다시 올리기는 롤이 그 자리를 가져갈 때(챔프 선택·게임 중) 만, 1초에 한 번.
+        # 0.1초마다 하면 밑에 깔린 창(앱의 연습장 WebGL) 의 화면 합성이 끊겼다(2026-11-15: 50ms 넘는 끊김 11 → 2~3)
+        now_t = time.monotonic()
+        # 추천 dict 가 있으면 챔프 선택(mode "select") 이나 게임 중(advise 의 dict, mode 없음). 글(str) 이면 기다리는 중
+        if isinstance(state["advice"], dict) and now_t - state.get("top_at", 0) >= TOP_EVERY:
+            state["top_at"] = now_t
+            _keep_top(root)
         try:
             paint()
         except Exception as e:

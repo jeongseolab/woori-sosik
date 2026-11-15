@@ -723,6 +723,23 @@
     let lost = false;
     cv.addEventListener("webglcontextlost", e => { e.preventDefault(); lost = true; });
 
+    // 받은 텍스처를 화면 밖 1×1 칸에 한 번 그린다. 드라이버는 texImage2D 를 처음 그릴 때까지 미뤄서,
+    // 안 하면 게임 중 그 이펙트·모델이 처음 나오는 프레임이 업로드를 기다리며 100ms 넘게 멈췄다(2026-11-15 측정)
+    let warmRT = null;
+    function warm(t) {
+      if (lost || !t) return;
+      try {
+        if (!warmRT) warmRT = target(1, 1, false);
+        bindFull(P.bright);
+        to(warmRT);
+        bindTex(0, t, P.bright.u.uTex);
+        gl.uniform2f(P.bright.u.uTexel, 0, 0);
+        gl.uniform1f(P.bright.u.uTh, 0);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+        to(null);
+      } catch {}
+    }
+
     function bindFull(prog) {
       gl.useProgram(prog.p);
       gl.bindBuffer(gl.ARRAY_BUFFER, tri);
@@ -791,7 +808,9 @@
         const posBuf = gl.createBuffer();
         gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
         gl.bufferData(gl.ARRAY_BUFFER, m.V * 12, gl.DYNAMIC_DRAW);
-        const md = { m, tex: texture(img), uvBuf: mk(gl.ARRAY_BUFFER, m.uv), idxBuf: mk(gl.ELEMENT_ARRAY_BUFFER, m.idx), posBuf,
+        const tex = texture(img);
+        warm(tex);
+        const md = { m, tex, uvBuf: mk(gl.ARRAY_BUFFER, m.uv), idxBuf: mk(gl.ELEMENT_ARRAY_BUFFER, m.idx), posBuf,
                      out: new Float32Array(m.V * 3), mats: new Float32Array(m.B * 12) };
         models.set(key, md);
         return md;
@@ -917,10 +936,18 @@
       gl.disable(gl.DEPTH_TEST);
     }
 
+    // 2D 캔버스(바닥·앞) 를 매 프레임 올린다. 크기가 같으면 texSubImage2D 로 덮어쓴다(texImage2D 는 매번 GPU 텍스처를 새로 잡는다)
+    const sized = new Map();
     function upload(t, canvas) {
       gl.bindTexture(gl.TEXTURE_2D, t);
       gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, canvas);
+      const was = sized.get(t);
+      if (was && was[0] === canvas.width && was[1] === canvas.height) {
+        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, canvas);
+      } else {
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, canvas);
+        sized.set(t, [canvas.width, canvas.height]);
+      }
     }
 
     function blur(src, tmp, k) {
@@ -980,6 +1007,7 @@
             gl.generateMipmap(gl.TEXTURE_2D);
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
           }
+          warm(rec.t);
         } catch { rec.t = null; rec.failed = true; }
         if (img.close) img.close();
         settle();
@@ -1177,7 +1205,7 @@
         const d = gl.getExtension("WEBGL_debug_renderer_info");
         return String(d ? gl.getParameter(d.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER));
       },
-      setAtlas(img) { gl.deleteTexture(tAtlas); tAtlas = texture(img); },
+      setAtlas(img) { gl.deleteTexture(tAtlas); tAtlas = texture(img); warm(tAtlas); },
       loadModel,
       model: key => models.get(key) || null,
       // 이펙트 텍스처들을 미리 받는다. 하나 끝날 때마다(받았든 실패했든) each() 를 부른다
